@@ -65,11 +65,12 @@ All design docs are in `docs/`. This is the entry point:
 
 ## Current status
 
-- **Backend: COMPLETE** (all phases implemented, 92 tests passing, E2E audio pipeline verified)
+- **Backend: COMPLETE** (8 modules, 92 tests, E2E verified with ElevenLabs Ziggy voice)
+- **Flutter app: COMPLETE** (5 features, 47 files, clean architecture + BLoC + GoRouter)
 - **ESP32 firmware: SCAFFOLDED** (all modules written, blocked on hardware)
 - **All 13 design docs updated** to reflect current state
-- **API keys configured** (GEMINI_API_KEY + GOOGLE_APPLICATION_CREDENTIALS)
-- **Handoff:** `docs/handoffs/handoff-2026-04-09-2245.md`
+- **API keys configured** (GEMINI_API_KEY, GOOGLE_APPLICATION_CREDENTIALS, ELEVENLABS_API_KEY)
+- **Handoff:** `docs/handoffs/handoff-2026-04-10-0030.md`
 
 ### What's done — Backend
 - NestJS backend with `core/` + `modules/` structure (8 modules)
