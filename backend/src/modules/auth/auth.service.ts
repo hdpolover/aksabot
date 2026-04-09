@@ -9,8 +9,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
-import { User } from '../database/entities';
-import { Device } from '../database/entities';
+import { User } from '../../core/database/entities';
+import { Device } from '../../core/database/entities';
 import { RegisterDto, LoginDto } from './dto';
 
 export interface TokenPair {
