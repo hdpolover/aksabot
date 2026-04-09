@@ -65,10 +65,11 @@ All design docs are in `docs/`. This is the entry point:
 
 ## Current status
 
-- **Backend: COMPLETE** (all phases implemented, 92 tests passing)
-- **Phase 1 firmware: SCAFFOLDED** (Steps 8-11, all modules written, blocked on hardware)
-- **All 13 design docs are complete**
+- **Backend: COMPLETE** (all phases implemented, 92 tests passing, E2E audio pipeline verified)
+- **ESP32 firmware: SCAFFOLDED** (all modules written, blocked on hardware)
+- **All 13 design docs updated** to reflect current state
 - **API keys configured** (GEMINI_API_KEY + GOOGLE_APPLICATION_CREDENTIALS)
+- **Handoff:** `docs/handoffs/handoff-2026-04-09-2245.md`
 
 ### What's done — Backend
 - NestJS backend with `core/` + `modules/` structure (8 modules)

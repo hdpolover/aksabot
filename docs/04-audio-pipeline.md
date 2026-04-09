@@ -255,7 +255,7 @@ Raw PCM at 16kHz 16-bit mono = **32 KB/s** continuous. Opus encoding reduces thi
 
 - **Decoder:** Decode incoming Opus frames to PCM before sending to STT
 - **Encoder:** Encode TTS output PCM to Opus before sending to ESP32
-- **Library:** `@discordjs/opus` or `opusscript` for Node.js
+- **Library:** `opusscript` (pure JS — `@discordjs/opus` native bindings segfault on macOS)
 
 ---
 

@@ -17,13 +17,13 @@ NestJS backend serving two interfaces:
 | Framework | NestJS |
 | Database | PostgreSQL |
 | ORM | TypeORM |
-| WebSocket | @nestjs/websockets (Socket.IO or ws) |
+| WebSocket | @nestjs/websockets + @nestjs/platform-ws (raw `ws`, not Socket.IO) |
 | Auth | @nestjs/jwt, bcrypt, passport |
 | Validation | class-validator, class-transformer |
 | AI / LLM | @google/generative-ai (Gemini SDK — direct, no LangChain) |
 | STT | @google-cloud/speech |
 | TTS | @google-cloud/text-to-speech |
-| Audio codec | @discordjs/opus or opusscript (Opus encode/decode) |
+| Audio codec | opusscript (Opus encode/decode, pure JS) |
 
 ### Why no LangChain
 
@@ -717,7 +717,7 @@ src/
       google-stt.provider.ts     -- ISttProvider <- Google Cloud Speech (batch + streaming)
       gemini-llm.provider.ts     -- ILlmProvider <- Gemini SDK (batch + streaming)
       google-tts.provider.ts     -- ITtsProvider <- Google Cloud TTS
-      opus-audio.codec.ts        -- IAudioCodec  <- Opus via @discordjs/opus
+      opus-audio.codec.ts        -- IAudioCodec  <- Opus via opusscript
     ai.module.ts                 -- binds ports to adapters
     ai.service.ts                -- streaming pipeline orchestrator (depends on ports only)
     prompt.service.ts            -- system prompt builder (internal logic)
@@ -1004,13 +1004,13 @@ New fields in existing events:
 | Database | PostgreSQL |
 | Cache | Redis 7+ (TTS cache, sessions, rate limits) + @nestjs/cache-manager (in-memory) |
 | ORM | TypeORM |
-| WebSocket | @nestjs/websockets (Socket.IO or ws) |
+| WebSocket | @nestjs/websockets + @nestjs/platform-ws (raw `ws`, not Socket.IO) |
 | Auth | @nestjs/jwt, bcrypt, passport |
 | Validation | class-validator, class-transformer |
 | AI / LLM | @google/generative-ai (Gemini SDK — direct, no LangChain) |
 | STT | @google-cloud/speech |
 | TTS | @google-cloud/text-to-speech |
-| Audio codec | @discordjs/opus or opusscript (Opus encode/decode) |
+| Audio codec | opusscript (Opus encode/decode, pure JS) |
 | Redis client | ioredis |
 
 ---
@@ -1032,7 +1032,7 @@ src/
       gemini-llm.provider.ts     -- ILlmProvider <- Gemini SDK (batch + streaming)
       google-tts.provider.ts     -- ITtsProvider <- Google Cloud TTS
       redis-tts-cache.ts         -- ITtsCache <- Redis
-      opus-audio.codec.ts        -- IAudioCodec  <- Opus via @discordjs/opus
+      opus-audio.codec.ts        -- IAudioCodec  <- Opus via opusscript
     ai.module.ts                 -- binds ports to adapters
     ai.service.ts                -- streaming pipeline orchestrator (depends on ports only)
     prompt.service.ts            -- system prompt builder (internal logic)
