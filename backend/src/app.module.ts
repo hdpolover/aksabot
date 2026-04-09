@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppConfigModule } from './core/config/config.module';
+import { CacheModule } from './core/cache/cache.module';
 import { DatabaseModule } from './core/database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DevicesModule } from './modules/devices/devices.module';
@@ -13,6 +14,7 @@ import { MemoriesModule } from './modules/memories/memories.module';
   imports: [
     AppConfigModule,
     ScheduleModule.forRoot(),
+    CacheModule,
     DatabaseModule,
     AuthModule,
     DevicesModule,

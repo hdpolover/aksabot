@@ -40,7 +40,7 @@ export class ConversationPersistence {
 
   async getRecentHistory(
     conversationId: string,
-    limit = 20,
+    limit = 10,
   ): Promise<{ role: string; content: string }[]> {
     const messages = await this.messagesRepo.find({
       where: { conversationId },

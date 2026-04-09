@@ -298,6 +298,7 @@ export class AudioGateway
 
     let started = false;
     let fullResponseText = '';
+    let cacheKeys: { hash: string; sentence: string }[] = [];
 
     for await (const event of pipeline) {
       if (this.sessions.isInterrupted(deviceId)) break;
@@ -317,11 +318,13 @@ export class AudioGateway
         this.sendBinaryToDevice(deviceId, event.data);
       } else if (event.type === 'done') {
         fullResponseText = event.fullText;
+        cacheKeys = event.cacheKeys;
       }
     }
 
     this.sendToDevice(deviceId, 'response:end', {
       fullText: fullResponseText,
+      cacheKeys,
     });
 
     // Save assistant response

@@ -17,6 +17,7 @@ import type { RequestUser } from '../../core/common/decorators/current-user.deco
 import { DevicesService } from './devices.service';
 import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
+import { UpdatePersonalityDto } from './dto/update-personality.dto';
 
 @Controller('devices')
 @UseGuards(JwtAuthGuard)
@@ -48,6 +49,23 @@ export class DevicesController {
     @Body() dto: UpdateSettingsDto,
   ) {
     return this.devicesService.updateSettings(id, user.userId, dto);
+  }
+
+  @Get(':id/personality')
+  getPersonality(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.devicesService.getPersonality(id, user.userId);
+  }
+
+  @Patch(':id/personality')
+  updatePersonality(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+    @Body() dto: UpdatePersonalityDto,
+  ) {
+    return this.devicesService.updatePersonality(id, user.userId, dto);
   }
 
   @Delete(':id')

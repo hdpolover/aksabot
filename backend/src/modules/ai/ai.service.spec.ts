@@ -35,6 +35,7 @@ describe('AiService', () => {
       mockLlm,
       mockTts,
       mockCodec,
+      null, // no TTS cache in tests
       promptService,
     );
   });
@@ -167,7 +168,7 @@ describe('AiService', () => {
         service.processTranscript('Hi', {}, [], []),
       );
 
-      expect(events).toEqual([{ type: 'done', fullText: '' }]);
+      expect(events).toEqual([{ type: 'done', fullText: '', cacheKeys: [] }]);
       expect(mockTts.synthesize).not.toHaveBeenCalled();
     });
   });
