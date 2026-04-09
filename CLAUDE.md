@@ -65,41 +65,53 @@ All design docs are in `docs/`. This is the entry point:
 
 ## Current status
 
-- **Phase 1 backend: COMPLETE** (Steps 1-7, 59 tests passing)
+- **Backend: COMPLETE** (all phases implemented, 92 tests passing)
 - **Phase 1 firmware: SCAFFOLDED** (Steps 8-11, all modules written, blocked on hardware)
 - **All 13 design docs are complete**
 - **API keys configured** (GEMINI_API_KEY + GOOGLE_APPLICATION_CREDENTIALS)
-- **Handoff:** `docs/handoffs/handoff-2026-04-09-2130.md`
 
-### What's done
-- NestJS backend with `core/` + `modules/` structure
+### What's done — Backend
+- NestJS backend with `core/` + `modules/` structure (8 modules)
 - Docker-compose (PostgreSQL 16 on port 5489, Redis 7 on port 6312, NestJS on port 4280)
 - All 6 TypeORM entities + migration applied
-- Auth (JWT + device token), Devices CRUD
-- AI pipeline: ports & adapters (4 interfaces, 4 adapters), streaming orchestrator
-- WebSocket gateway: full audio lifecycle, STT streaming, interruption, session management
-- Conversations REST, Memories stub, Response interceptor, Exception filter
-- Unit tests: SentenceBuffer, PromptService, SessionManager, AuthService, DevicesService, AiService
+- Auth (JWT + device token), Devices CRUD + personality management
+- AI pipeline: ports & adapters (5 interfaces, 5 adapters incl. Redis TTS cache), streaming orchestrator with cache hints
+- WebSocket gateway: full audio lifecycle, STT streaming, interruption, session management, proactive events
+- Memory system: extraction via Gemini, confidence decay (daily cron), boost on access, CRUD
+- Scheduler: per-device timers, response pool (LRU + batch generation), reminders, pomodoro state machine
+- Proactive features: morning briefing, end-of-day wind-down, idle nudge, focus mode
+- Rate limiting: Redis-backed (auth 5/min, API 60/min)
+- Redis TTS cache with SHA-256 keying
+- 92 unit tests across 10 test files
 - WebSocket test script (`npm run ws:sim`) to simulate ESP32
+
+### What's done — Firmware
 - ESP32 firmware scaffolded: Wi-Fi, WebSocket client, I2S audio, Opus codec, MicroSD, main loop
+- Serial-based touch simulation for testing without hardware
 
 ### What's next
-1. Test full end-to-end pipeline (backend + audio)
-2. Flash and test firmware on ESP32 when hardware arrives
-3. Phase 2-5 implementation
+1. Flash and test firmware on ESP32 when hardware arrives
+2. Phase 2: Display + face animations (firmware, hardware-dependent)
+3. Phase 4: Flutter companion app
+4. Phase 5: Polish (VAD, OTA, power management)
 
 ## Backend structure
 
 ```
 backend/src/
-  core/           — config, database (6 entities), common (decorators, interceptors, filters)
+  core/
+    config/       — env validation with class-validator
+    database/     — 6 entities, migrations, data source
+    cache/        — Redis client provider (global)
+    common/       — ResponseInterceptor, GlobalExceptionFilter, CurrentUser decorator, RateLimitGuard
   modules/
     auth/         — JWT register/login/refresh + device token validation
-    devices/      — CRUD + token generation, scoped to user
-    ai/           — interfaces/ (4 ports), adapters/ (4 implementations), orchestrator, sentence buffer
+    devices/      — CRUD + token gen + personality + settings, scoped to user
+    ai/           — interfaces/ (5 ports), adapters/ (5 impls incl. TTS cache), orchestrator, sentence buffer
     gateway/      — WebSocket gateway, session manager, conversation persistence
     conversations/ — REST endpoints for history (paginated)
-    memories/     — Stub (Phase 3: extraction, decay, confidence boost)
+    memories/     — Extraction via Gemini, decay cron, confidence boost, CRUD
+    scheduler/    — Response pool, reminders, pomodoro, proactive features, focus mode
 ```
 
 ## Conventions
