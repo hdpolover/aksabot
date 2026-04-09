@@ -24,3 +24,12 @@ Thumbs.db
 
 # Build artifacts
 build/
+
+# Credentials
+credentials/
+
+# Test audio fixtures
+test/fixtures/audio/
+
+# Test simulator state
+.ws-simulator-state.json

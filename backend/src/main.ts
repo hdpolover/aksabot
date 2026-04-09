@@ -21,7 +21,7 @@ async function bootstrap() {
   app.useWebSocketAdapter(new WsAdapter(app));
   app.enableCors();
 
-  const port = process.env.PORT ?? 3000;
+  const port = process.env.PORT ?? 4280;
   await app.listen(port);
   console.log(`Aksabot backend running on port ${port}`);
 }

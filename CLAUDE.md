@@ -65,13 +65,47 @@ All design docs are in `docs/`. This is the entry point:
 
 ## Current status
 
-- **Phase:** Documentation and design (no code yet)
-- **All 13 docs are complete** covering architecture, APIs, protocols, entities, and features
-- **Ready to start implementation** at Phase 1 (audio pipeline + auth)
+- **Phase 1 backend: COMPLETE** (Steps 1-7, 59 tests passing)
+- **Phase 1 firmware: SCAFFOLDED** (Steps 8-11, all modules written, blocked on hardware)
+- **All 13 design docs are complete**
+- **API keys configured** (GEMINI_API_KEY + GOOGLE_APPLICATION_CREDENTIALS)
+- **Handoff:** `docs/handoffs/handoff-2026-04-09-2130.md`
+
+### What's done
+- NestJS backend with `core/` + `modules/` structure
+- Docker-compose (PostgreSQL 16 on port 5489, Redis 7 on port 6312, NestJS on port 4280)
+- All 6 TypeORM entities + migration applied
+- Auth (JWT + device token), Devices CRUD
+- AI pipeline: ports & adapters (4 interfaces, 4 adapters), streaming orchestrator
+- WebSocket gateway: full audio lifecycle, STT streaming, interruption, session management
+- Conversations REST, Memories stub, Response interceptor, Exception filter
+- Unit tests: SentenceBuffer, PromptService, SessionManager, AuthService, DevicesService, AiService
+- WebSocket test script (`npm run ws:sim`) to simulate ESP32
+- ESP32 firmware scaffolded: Wi-Fi, WebSocket client, I2S audio, Opus codec, MicroSD, main loop
+
+### What's next
+1. Test full end-to-end pipeline (backend + audio)
+2. Flash and test firmware on ESP32 when hardware arrives
+3. Phase 2-5 implementation
+
+## Backend structure
+
+```
+backend/src/
+  core/           — config, database (6 entities), common (decorators, interceptors, filters)
+  modules/
+    auth/         — JWT register/login/refresh + device token validation
+    devices/      — CRUD + token generation, scoped to user
+    ai/           — interfaces/ (4 ports), adapters/ (4 implementations), orchestrator, sentence buffer
+    gateway/      — WebSocket gateway, session manager, conversation persistence
+    conversations/ — REST endpoints for history (paginated)
+    memories/     — Stub (Phase 3: extraction, decay, confidence boost)
+```
 
 ## Conventions
 
 - All docs use relative links to cross-reference each other
-- Code examples in docs are TypeScript (backend) and C-like pseudocode (firmware)
+- Backend uses `core/` + `modules/` directory structure
 - WebSocket events use `namespace:action` naming (e.g., `audio:chunk`, `proactive:reminder`, `presence:arrived`)
 - Database uses UUID primary keys, TIMESTAMPTZ for dates, JSONB for flexible config
+- Raw `ws` adapter (not Socket.IO) — ESP32 speaks standard WebSocket

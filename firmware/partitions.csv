@@ -1,0 +1,8 @@
+# Aksabot Partition Table
+# 16MB flash: app (4MB), OTA (4MB), NVS (64KB), coredump (64KB), remaining for SPIFFS if needed
+# Name,    Type, SubType, Offset,   Size,     Flags
+nvs,       data, nvs,     0x9000,   0x10000,
+otadata,   data, ota,     0x19000,  0x2000,
+app0,      app,  ota_0,   0x20000,  0x400000,
+app1,      app,  ota_1,   0x420000, 0x400000,
+coredump,  data, coredump,0x820000, 0x10000,
