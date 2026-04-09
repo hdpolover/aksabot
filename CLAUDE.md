@@ -45,6 +45,7 @@ All design docs are in `docs/`. This is the entry point:
 | `10-risks-and-scope.md` | Risks, mitigations, deliberately excluded features |
 | `11-future-extensions.md` | Expressive servos, desk mobility, camera, backend integrations |
 | `12-features.md` | All bot capabilities — reactive, proactive, reminders, pomodoro, presence, response pool |
+| `13-first-setup.md` | First-time setup — backend, firmware flash, app, pairing, troubleshooting |
 
 ## Database tables
 
