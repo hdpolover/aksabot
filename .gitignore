@@ -1,0 +1,26 @@
+# Node
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# PlatformIO
+.pio/
+.pioenvs/
+
+# Build artifacts
+build/
