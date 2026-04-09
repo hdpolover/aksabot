@@ -85,10 +85,10 @@ export class SchedulerService implements OnModuleInit {
     this.deviceTimers.set(deviceId, timers);
     this.logger.log(`Started reminder schedule for device ${deviceId}`);
 
-    // Trigger background pool refill (non-blocking)
-    this.responsePool.refillIfNeeded(deviceId).catch((err) =>
-      this.logger.warn(`Pool refill failed: ${err.message}`),
-    );
+    // Pool refill is NOT triggered on connect — it happens:
+    // 1. Lazily when the first reminder fires (pickLru generates on empty pool)
+    // 2. Every 6 hours via cron for connected devices
+    // This avoids 10+ Gemini API calls on every reconnect.
   }
 
   stopDeviceSchedule(deviceId: string): void {

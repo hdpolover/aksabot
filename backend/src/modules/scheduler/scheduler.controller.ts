@@ -14,6 +14,7 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SchedulerService } from './scheduler.service';
 import { PomodoroService } from './pomodoro.service';
+import { ResponsePoolService } from './response-pool.service';
 import type { ReminderConfig } from './types';
 
 @Controller('devices/:deviceId')
@@ -22,6 +23,7 @@ export class SchedulerController {
   constructor(
     private readonly scheduler: SchedulerService,
     private readonly pomodoro: PomodoroService,
+    private readonly responsePool: ResponsePoolService,
   ) {}
 
   // ── Reminders config ──────────────────────────────────
@@ -73,5 +75,17 @@ export class SchedulerController {
   @HttpCode(HttpStatus.NO_CONTENT)
   stopFocusMode(@Param('deviceId', ParseUUIDPipe) deviceId: string) {
     this.scheduler.clearFocusMode(deviceId);
+  }
+
+  // ── Response pool ─────────────────────────────────────
+
+  @Post('pool/refill')
+  refillPool(@Param('deviceId', ParseUUIDPipe) deviceId: string) {
+    return this.responsePool.refillIfNeeded(deviceId);
+  }
+
+  @Get('pool/stats')
+  getPoolStats(@Param('deviceId', ParseUUIDPipe) deviceId: string) {
+    return this.responsePool.getStats(deviceId);
   }
 }

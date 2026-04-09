@@ -43,8 +43,12 @@ export class ResponsePoolService {
       return response;
     }
 
-    // Pool empty — generate one on the fly
-    const generated = await this.generateAndStore(deviceId, category, 1);
+    // Pool empty — generate a small batch (5) so the next few reminders
+    // of this type don't each trigger a separate Gemini call
+    const generated = await this.generateAndStore(deviceId, category, 5);
+    if (generated.length === 0) {
+      throw new Error(`Failed to generate pool entries for ${category}`);
+    }
     return generated[0];
   }
 
