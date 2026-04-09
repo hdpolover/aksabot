@@ -29,6 +29,11 @@ class AuthRemoteDatasource {
     );
     return AuthResponse.fromJson(data as Map<String, dynamic>);
   }
+
+  Future<UserModel> getCurrentUser() async {
+    final data = await _apiClient.get('/auth/me');
+    return UserModel.fromJson(data as Map<String, dynamic>);
+  }
 }
 
 /// Parsed auth response after envelope unwrapping.

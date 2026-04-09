@@ -1,0 +1,8 @@
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1NjA3NTJlMC0yOTc1LTRiNzQtYTI4My1lZGFkYjA3OTY2YjUiLCJlbWFpbCI6InRlc3RAYWtzYWJvdC5sb2NhbCIsImlhdCI6MTc3NTc1ODYyMiwiZXhwIjoxNzc1NzU5NTIyfQ.lwvc66Yke1npgN_Ubvh3oiNWTQd9u_K2xPeqvSTjPA0",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1NjA3NTJlMC0yOTc1LTRiNzQtYTI4My1lZGFkYjA3OTY2YjUiLCJlbWFpbCI6InRlc3RAYWtzYWJvdC5sb2NhbCIsImlhdCI6MTc3NTc1ODYyMiwiZXhwIjoxNzc4MzUwNjIyfQ.zambzdZsz_hXJ6gI0-xvtIrO-h8dC4JgZRjbLXEgm_E",
+  "userId": "560752e0-2975-4b74-a283-edadb07966b5",
+  "deviceId": "a8aae803-1300-489c-aedc-6b59959b04d4",
+  "deviceToken": "c7a6121b-1405-40f6-8e90-4bb2813fa825",
+  "deviceName": "ESP Simulator 1:17:02 AM"
+}

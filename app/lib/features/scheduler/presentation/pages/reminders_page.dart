@@ -144,19 +144,159 @@ class _RemindersPageState extends State<RemindersPage> {
     final config = _config;
     if (config == null) return const SizedBox.shrink();
 
+    // Separate health vs daily reminders
+    const healthKeys = ['Stand Up', 'Hydration', 'Eye Break', 'Stretch', 'Posture'];
+    final healthEntries = config.entries
+        .where((e) => healthKeys.contains(e.key))
+        .toList();
+    final dailyEntries = config.entries
+        .where((e) => !healthKeys.contains(e.key))
+        .toList();
+
     return Stack(
       children: [
         ListView(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          children: config.entries.map((entry) {
-            return _ReminderTile(
-              label: entry.key,
-              item: entry.value,
-              onToggle: (enabled) => _onToggle(entry.key, enabled),
-              onIntervalChanged: (minutes) =>
-                  _onIntervalChanged(entry.key, minutes),
-            );
-          }).toList(),
+          padding: const EdgeInsets.all(16),
+          children: [
+            // Work Hours card
+            Text('Work Hours', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Start',
+                                  style: Theme.of(context).textTheme.bodySmall),
+                              const SizedBox(height: 4),
+                              FilledButton.tonal(
+                                onPressed: () async {
+                                  final time = await showTimePicker(
+                                    context: context,
+                                    initialTime:
+                                        const TimeOfDay(hour: 8, minute: 0),
+                                  );
+                                  if (time != null) {
+                                    _updateConfig({
+                                      'workHoursStart':
+                                          '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
+                                    });
+                                  }
+                                },
+                                child: const Text('08:00'),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('End',
+                                  style: Theme.of(context).textTheme.bodySmall),
+                              const SizedBox(height: 4),
+                              FilledButton.tonal(
+                                onPressed: () async {
+                                  final time = await showTimePicker(
+                                    context: context,
+                                    initialTime:
+                                        const TimeOfDay(hour: 18, minute: 0),
+                                  );
+                                  if (time != null) {
+                                    _updateConfig({
+                                      'workHoursEnd':
+                                          '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
+                                    });
+                                  }
+                                },
+                                child: const Text('18:00'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Reminders only fire during work hours.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Health section
+            Text('Health', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            ...healthEntries.map((entry) {
+              return _ReminderTile(
+                label: entry.key,
+                item: entry.value,
+                onToggle: (enabled) => _onToggle(entry.key, enabled),
+                onIntervalChanged: (minutes) =>
+                    _onIntervalChanged(entry.key, minutes),
+              );
+            }),
+            const SizedBox(height: 24),
+
+            // Daily section
+            Text('Daily', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            if (dailyEntries.isNotEmpty)
+              ...dailyEntries.map((entry) {
+                return _ReminderTile(
+                  label: entry.key,
+                  item: entry.value,
+                  onToggle: (enabled) => _onToggle(entry.key, enabled),
+                  onIntervalChanged: (minutes) =>
+                      _onIntervalChanged(entry.key, minutes),
+                );
+              })
+            else
+              Card(
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  children: [
+                    _DailyToggleTile(
+                      icon: Icons.wb_sunny_outlined,
+                      label: 'Morning briefing',
+                      enabled: true,
+                      onChanged: (_) {},
+                    ),
+                    const Divider(height: 1),
+                    _DailyToggleTile(
+                      icon: Icons.nightlight_outlined,
+                      label: 'End of day',
+                      subtitle: '18:00',
+                      enabled: true,
+                      onChanged: (_) {},
+                    ),
+                    const Divider(height: 1),
+                    _DailyToggleTile(
+                      icon: Icons.snooze,
+                      label: 'Idle nudge',
+                      subtitle: 'After 3 hours',
+                      enabled: false,
+                      onChanged: (_) {},
+                    ),
+                  ],
+                ),
+              ),
+          ],
         ),
         if (_isSaving)
           const Positioned(
@@ -166,6 +306,34 @@ class _RemindersPageState extends State<RemindersPage> {
             child: LinearProgressIndicator(),
           ),
       ],
+    );
+  }
+}
+
+class _DailyToggleTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? subtitle;
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  const _DailyToggleTile({
+    required this.icon,
+    required this.label,
+    this.subtitle,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SwitchListTile(
+      secondary: Icon(icon, color: theme.colorScheme.primary),
+      title: Text(label),
+      subtitle: subtitle != null ? Text(subtitle!) : null,
+      value: enabled,
+      onChanged: onChanged,
     );
   }
 }

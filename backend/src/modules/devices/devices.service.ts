@@ -6,7 +6,13 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
-import { Device } from '../../core/database/entities';
+import {
+  Device,
+  Conversation,
+  Message,
+  Memory,
+  ResponsePool,
+} from '../../core/database/entities';
 import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 
@@ -15,6 +21,14 @@ export class DevicesService {
   constructor(
     @InjectRepository(Device)
     private readonly devicesRepo: Repository<Device>,
+    @InjectRepository(Conversation)
+    private readonly convosRepo: Repository<Conversation>,
+    @InjectRepository(Message)
+    private readonly messagesRepo: Repository<Message>,
+    @InjectRepository(Memory)
+    private readonly memoriesRepo: Repository<Memory>,
+    @InjectRepository(ResponsePool)
+    private readonly poolRepo: Repository<ResponsePool>,
   ) {}
 
   async create(
@@ -77,11 +91,55 @@ export class DevicesService {
     return saved.personalityJson;
   }
 
+  async claimByToken(
+    userId: string,
+    deviceToken: string,
+  ): Promise<Device> {
+    const device = await this.devicesRepo.findOne({
+      where: { deviceToken, tokenRevoked: false },
+    });
+    if (!device) {
+      throw new NotFoundException(
+        'No device found with that token. Make sure the device is powered on and the token is correct.',
+      );
+    }
+    if (device.userId !== userId) {
+      throw new ForbiddenException('This device belongs to another account');
+    }
+    return device;
+  }
+
   async remove(id: string, userId: string): Promise<void> {
     const device = await this.findById(id, userId);
     device.tokenRevoked = true;
     await this.devicesRepo.save(device);
     await this.devicesRepo.remove(device);
+  }
+
+  async getStats(id: string, userId: string) {
+    await this.findById(id, userId); // ownership check
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const [conversationsToday, totalConversations, totalMemories, poolCount] =
+      await Promise.all([
+        this.convosRepo
+          .createQueryBuilder('c')
+          .where('c.deviceId = :id', { id })
+          .andWhere('c.startedAt >= :today', { today })
+          .getCount(),
+        this.convosRepo.count({ where: { deviceId: id } }),
+        this.memoriesRepo.count({ where: { deviceId: id } }),
+        this.poolRepo.count({ where: { deviceId: id } }),
+      ]);
+
+    return {
+      conversationsToday,
+      totalConversations,
+      totalMemories,
+      poolSize: poolCount,
+    };
   }
 
   async findByToken(token: string): Promise<Device | null> {

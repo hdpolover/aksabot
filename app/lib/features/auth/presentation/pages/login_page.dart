@@ -140,7 +140,24 @@ class _LoginPageState extends State<LoginPage> {
                         },
                         onFieldSubmitted: (_) => _onLogin(),
                       ),
-                      const SizedBox(height: 24),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: () {
+                            ScaffoldMessenger.of(context)
+                              ..hideCurrentSnackBar()
+                              ..showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                      'Password reset is not yet available.'),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                          },
+                          child: const Text('Forgot password?'),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       ElevatedButton(
                         onPressed: isLoading ? null : _onLogin,
                         child: isLoading

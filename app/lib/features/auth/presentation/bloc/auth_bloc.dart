@@ -108,15 +108,16 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     Emitter<AuthState> emit,
   ) async {
     final loggedIn = await _authRepository.isLoggedIn();
-    if (loggedIn) {
-      // We don't have a cached user object after restart, so we treat this as
-      // "token exists but no user data" — the caller should handle navigation.
-      // A proper solution would be a /auth/me endpoint. For now, emit
-      // Authenticated with a placeholder that the app can refresh later.
+    if (!loggedIn) {
       emit(const Unauthenticated());
-    } else {
-      emit(const Unauthenticated());
+      return;
     }
+
+    final result = await _authRepository.getCurrentUser();
+    result.fold(
+      (_) => emit(const Unauthenticated()),
+      (user) => emit(Authenticated(user)),
+    );
   }
 
   Future<void> _onLoginRequested(

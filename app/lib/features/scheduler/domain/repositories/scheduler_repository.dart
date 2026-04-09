@@ -17,4 +17,15 @@ abstract class SchedulerRepository {
   Future<Either<Failure, void>> stopPomodoro(String deviceId);
 
   Future<Either<Failure, PomodoroStatus>> getPomodoroStatus(String deviceId);
+
+  // Focus mode
+  Future<Either<Failure, Map<String, dynamic>>> startFocusMode(
+    String deviceId, {
+    int? durationMinutes,
+  });
+  Future<Either<Failure, void>> stopFocusMode(String deviceId);
+
+  // Response pool
+  Future<Either<Failure, Map<String, dynamic>>> refillPool(String deviceId);
+  Future<Either<Failure, Map<String, dynamic>>> getPoolStats(String deviceId);
 }

@@ -98,6 +98,14 @@ export class AuthService {
     }
   }
 
+  async getProfile(userId: string): Promise<{ id: string; email: string; name: string }> {
+    const user = await this.usersRepo.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+    return { id: user.id, email: user.email, name: user.name };
+  }
+
   async validateDeviceToken(
     token: string,
   ): Promise<{ device: Device; userId: string } | null> {

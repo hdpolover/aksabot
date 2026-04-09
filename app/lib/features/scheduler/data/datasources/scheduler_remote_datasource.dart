@@ -36,4 +36,33 @@ class SchedulerRemoteDatasource {
     final data = await _client.get('/devices/$deviceId/pomodoro');
     return PomodoroModel.fromJson(data as Map<String, dynamic>);
   }
+
+  // ── Focus mode ──────────────────────────────────────────
+
+  Future<Map<String, dynamic>> startFocusMode(
+    String deviceId, {
+    int? durationMinutes,
+  }) async {
+    final data = await _client.post(
+      '/devices/$deviceId/focus',
+      data: {'durationMinutes': durationMinutes ?? 60},
+    );
+    return data as Map<String, dynamic>;
+  }
+
+  Future<void> stopFocusMode(String deviceId) async {
+    await _client.delete('/devices/$deviceId/focus');
+  }
+
+  // ── Response pool ───────────────────────────────────────
+
+  Future<Map<String, dynamic>> refillPool(String deviceId) async {
+    final data = await _client.post('/devices/$deviceId/pool/refill');
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getPoolStats(String deviceId) async {
+    final data = await _client.get('/devices/$deviceId/pool/stats');
+    return data as Map<String, dynamic>;
+  }
 }

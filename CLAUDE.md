@@ -70,7 +70,7 @@ All design docs are in `docs/`. This is the entry point:
 - **ESP32 firmware: SCAFFOLDED** (all modules written, blocked on hardware)
 - **All 13 design docs updated** to reflect current state
 - **API keys configured** (GEMINI_API_KEY, GOOGLE_APPLICATION_CREDENTIALS, ELEVENLABS_API_KEY)
-- **Handoff:** `docs/handoffs/handoff-2026-04-10-0030.md`
+- **Handoff:** `docs/handoffs/handoff-2026-04-10-0230.md`
 
 ### What's done — Backend
 - NestJS backend with `core/` + `modules/` structure (8 modules)
@@ -87,15 +87,28 @@ All design docs are in `docs/`. This is the entry point:
 - 92 unit tests across 10 test files
 - WebSocket test script (`npm run ws:sim`) to simulate ESP32
 
+### What's done — Flutter App (Phase A)
+- 21 pages, zero analysis issues, FVM 3.41.6
+- 3-tab bottom nav (Home, Activity, Settings) via StatefulShellRoute
+- Device dashboard (0/1/multi-device states), quick actions, recent conversations
+- Activity tab: segmented conversations + memories (auto-resolves first device)
+- Settings tab: account card, theme, sign out
+- All core screens wired to backend: auth, devices, conversations, memories, reminders, pomodoro, focus mode, stats, response pool
+- 9 planned UI screens for future features (display, voice, OTA, diagnostics, integrations, motion, mobility)
+- UI/UX proposal: `docs/app-ui-ux-proposal.md`
+
 ### What's done — Firmware
 - ESP32 firmware scaffolded: Wi-Fi, WebSocket client, I2S audio, Opus codec, MicroSD, main loop
 - Serial-based touch simulation for testing without hardware
 
 ### What's next
-1. Flash and test firmware on ESP32 when hardware arrives
-2. Phase 2: Display + face animations (firmware, hardware-dependent)
-3. Phase 4: Flutter companion app
-4. Phase 5: Polish (VAD, OTA, power management)
+1. Test Flutter app against running backend on simulator
+2. Phase B: BLE connectivity layer (flutter_blue_plus, connectivity_plus, network status banners)
+3. Phase C: BLE provisioning wizard (5-step)
+4. Phase D: Presence detection
+5. ESP32 firmware when hardware arrives
+6. Phase 2: Display + face animations (firmware, hardware-dependent)
+7. Phase 5: Polish (VAD, OTA, power management)
 
 ## Backend structure
 
@@ -107,8 +120,8 @@ backend/src/
     cache/        — Redis client provider (global)
     common/       — ResponseInterceptor, GlobalExceptionFilter, CurrentUser decorator, RateLimitGuard
   modules/
-    auth/         — JWT register/login/refresh + device token validation
-    devices/      — CRUD + token gen + personality + settings, scoped to user
+    auth/         — JWT register/login/refresh/me + device token validation
+    devices/      — CRUD + token gen + personality + settings + stats, scoped to user
     ai/           — interfaces/ (5 ports), adapters/ (5 impls incl. TTS cache), orchestrator, sentence buffer
     gateway/      — WebSocket gateway, session manager, conversation persistence
     conversations/ — REST endpoints for history (paginated)

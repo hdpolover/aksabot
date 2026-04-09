@@ -73,6 +73,22 @@ export class DevicesController {
     return this.devicesService.updatePersonality(id, user.userId, dto);
   }
 
+  @Post('claim')
+  claim(
+    @CurrentUser() user: RequestUser,
+    @Body() body: { deviceToken: string },
+  ) {
+    return this.devicesService.claimByToken(user.userId, body.deviceToken);
+  }
+
+  @Get(':id/stats')
+  getStats(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.devicesService.getStats(id, user.userId);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(

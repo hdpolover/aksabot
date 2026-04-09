@@ -78,10 +78,30 @@ class DevicesRepositoryImpl implements DevicesRepository {
   }
 
   @override
+  Future<Either<Failure, Device>> claimByToken(String deviceToken) async {
+    try {
+      final device = await _datasource.claimByToken(deviceToken);
+      return Right(device);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
+
+  @override
   Future<Either<Failure, void>> deleteDevice(String id) async {
     try {
       await _datasource.deleteDevice(id);
       return const Right(null);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
+
+  @override
+  Future<Either<Failure, Map<String, dynamic>>> getStats(String id) async {
+    try {
+      final stats = await _datasource.getStats(id);
+      return Right(stats);
     } on ServerException catch (e) {
       return Left(ServerFailure(e.message, statusCode: e.statusCode));
     }

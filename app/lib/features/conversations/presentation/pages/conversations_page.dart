@@ -159,7 +159,7 @@ class _ConversationTile extends StatelessWidget {
     final theme = Theme.of(context);
     final duration = conversation.duration;
     final durationText = duration != null
-        ? '${duration.inMinutes}m ${duration.inSeconds % 60}s'
+        ? _formatDuration(duration)
         : 'Ongoing';
 
     return Card(
@@ -215,6 +215,18 @@ class _ConversationTile extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _formatDuration(Duration d) {
+    if (d.inHours > 0) {
+      final mins = d.inMinutes % 60;
+      return '${d.inHours}h ${mins}m';
+    }
+    if (d.inMinutes > 0) {
+      final secs = d.inSeconds % 60;
+      return '${d.inMinutes}m ${secs}s';
+    }
+    return '${d.inSeconds}s';
   }
 
   String _formatDate(DateTime date) {

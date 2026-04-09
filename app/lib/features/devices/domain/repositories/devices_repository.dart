@@ -10,5 +10,7 @@ abstract class DevicesRepository {
   Future<Either<Failure, Device>> updateSettings(String id, Map<String, dynamic> settings);
   Future<Either<Failure, Map<String, dynamic>>> getPersonality(String id);
   Future<Either<Failure, Map<String, dynamic>>> updatePersonality(String id, Map<String, dynamic> personality);
+  Future<Either<Failure, Device>> claimByToken(String deviceToken);
   Future<Either<Failure, void>> deleteDevice(String id);
+  Future<Either<Failure, Map<String, dynamic>>> getStats(String id);
 }

@@ -49,7 +49,20 @@ class DevicesRemoteDatasource {
     return data as Map<String, dynamic>;
   }
 
+  Future<DeviceModel> claimByToken(String deviceToken) async {
+    final data = await _client.post(
+      '/devices/claim',
+      data: {'deviceToken': deviceToken},
+    );
+    return DeviceModel.fromJson(data as Map<String, dynamic>);
+  }
+
   Future<void> deleteDevice(String id) async {
     await _client.delete('/devices/$id');
+  }
+
+  Future<Map<String, dynamic>> getStats(String id) async {
+    final data = await _client.get('/devices/$id/stats');
+    return data as Map<String, dynamic>;
   }
 }

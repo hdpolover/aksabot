@@ -79,6 +79,24 @@ class AuthRepositoryImpl implements AuthRepository {
     return _storage.read(key: 'access_token');
   }
 
+  @override
+  Future<Either<Failure, User>> getCurrentUser() async {
+    try {
+      final user = await _remoteDatasource.getCurrentUser();
+      return Right(user);
+    } on AuthException catch (e) {
+      return Left(AuthFailure(e.message));
+    } on ServerException catch (e) {
+      if (e.statusCode == 401) {
+        await _storage.delete(key: 'access_token');
+        await _storage.delete(key: 'refresh_token');
+      }
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    } catch (e) {
+      return Left(ServerFailure(e.toString()));
+    }
+  }
+
   Future<void> _persistTokens(String accessToken, String refreshToken) async {
     await _storage.write(key: 'access_token', value: accessToken);
     await _storage.write(key: 'refresh_token', value: refreshToken);

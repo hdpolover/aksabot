@@ -1,10 +1,13 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto, LoginDto, RefreshDto } from './dto';
 import {
   RateLimit,
   RateLimitGuard,
 } from '../../core/common/guards/rate-limit.guard';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { CurrentUser } from '../../core/common/decorators/current-user.decorator';
+import type { RequestUser } from '../../core/common/decorators/current-user.decorator';
 
 @Controller('auth')
 @UseGuards(RateLimitGuard)
@@ -25,5 +28,11 @@ export class AuthController {
   @Post('refresh')
   refresh(@Body() dto: RefreshDto) {
     return this.authService.refresh(dto.refreshToken);
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  me(@CurrentUser() user: RequestUser) {
+    return this.authService.getProfile(user.userId);
   }
 }

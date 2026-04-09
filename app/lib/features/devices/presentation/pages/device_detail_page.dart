@@ -143,12 +143,22 @@ class _SettingsTab extends StatefulWidget {
 class _SettingsTabState extends State<_SettingsTab> {
   late final TextEditingController _nameController;
   bool _dirty = false;
+  double _volume = 80;
+  double _brightness = 80;
+  bool _showTranscript = true;
+  String _idleTimeout = '30';
 
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.device.name);
     _nameController.addListener(_onChanged);
+    // Load settings from device JSON
+    final s = widget.device.settingsJson;
+    _volume = (s['volume'] as num?)?.toDouble() ?? 80;
+    _brightness = (s['brightness'] as num?)?.toDouble() ?? 80;
+    _showTranscript = s['showTranscript'] as bool? ?? true;
+    _idleTimeout = (s['idleTimeoutMinutes'] ?? 30).toString();
   }
 
   @override
@@ -175,7 +185,13 @@ class _SettingsTabState extends State<_SettingsTab> {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
     context.read<DevicesBloc>().add(
-          UpdateSettings(widget.device.id, {'name': name}),
+          UpdateSettings(widget.device.id, {
+            'name': name,
+            'volume': _volume.round(),
+            'brightness': _brightness.round(),
+            'showTranscript': _showTranscript,
+            'idleTimeoutMinutes': int.parse(_idleTimeout),
+          }),
         );
     setState(() => _dirty = false);
   }
@@ -189,65 +205,236 @@ class _SettingsTabState extends State<_SettingsTab> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // Status card
+        // General section
+        Text('General', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: online ? Colors.green : colors.outline,
-                  ),
+                // Device name
+                Text('Device name', style: theme.textTheme.bodyMedium),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _nameController,
+                  decoration:
+                      const InputDecoration(hintText: 'Enter device name'),
+                  textCapitalization: TextCapitalization.words,
                 ),
-                const SizedBox(width: 12),
-                Text(
-                  online ? 'Online' : 'Offline',
-                  style: theme.textTheme.titleSmall,
+                const SizedBox(height: 16),
+
+                // Volume
+                Row(
+                  children: [
+                    Text('Volume', style: theme.textTheme.bodyMedium),
+                    const Spacer(),
+                    Text('${_volume.round()}%',
+                        style: theme.textTheme.bodySmall),
+                  ],
                 ),
-                const Spacer(),
-                if (widget.device.lastSeenAt != null)
-                  Text(
-                    'Last seen: ${_formatDateTime(widget.device.lastSeenAt!)}',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colors.onSurfaceVariant,
+                Slider(
+                  value: _volume,
+                  min: 0,
+                  max: 100,
+                  divisions: 20,
+                  onChanged: (v) => setState(() {
+                    _volume = v;
+                    _dirty = true;
+                  }),
+                ),
+
+                // Brightness
+                Row(
+                  children: [
+                    Text('Brightness', style: theme.textTheme.bodyMedium),
+                    const Spacer(),
+                    Text('${_brightness.round()}%',
+                        style: theme.textTheme.bodySmall),
+                  ],
+                ),
+                Slider(
+                  value: _brightness,
+                  min: 0,
+                  max: 100,
+                  divisions: 20,
+                  onChanged: (v) => setState(() {
+                    _brightness = v;
+                    _dirty = true;
+                  }),
+                ),
+                const SizedBox(height: 8),
+
+                // Show transcript toggle
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Show transcript', style: theme.textTheme.bodyMedium),
+                    Switch(
+                      value: _showTranscript,
+                      onChanged: (v) => setState(() {
+                        _showTranscript = v;
+                        _dirty = true;
+                      }),
                     ),
-                  ),
+                  ],
+                ),
+
+                // Idle timeout
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Idle timeout', style: theme.textTheme.bodyMedium),
+                    DropdownButton<String>(
+                      value: _idleTimeout,
+                      underline: const SizedBox.shrink(),
+                      items: const [
+                        DropdownMenuItem(value: '1', child: Text('1 min')),
+                        DropdownMenuItem(value: '5', child: Text('5 min')),
+                        DropdownMenuItem(value: '10', child: Text('10 min')),
+                        DropdownMenuItem(value: '30', child: Text('30 min')),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) {
+                          setState(() {
+                            _idleTimeout = v;
+                            _dirty = true;
+                          });
+                        }
+                      },
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
         ),
-        const SizedBox(height: 24),
-
-        // Name field
-        Text('Device Name', style: theme.textTheme.labelLarge),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _nameController,
-          decoration: const InputDecoration(hintText: 'Enter device name'),
-          textCapitalization: TextCapitalization.words,
-        ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
 
         // Save button
         FilledButton(
           onPressed: _dirty ? _save : null,
           child: const Text('Save Settings'),
         ),
+        const SizedBox(height: 24),
+
+        // Device info
+        Text('Device Info', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              ListTile(
+                title: const Text('Status'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: online ? Colors.green : colors.outline,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      online ? 'Online' : 'Offline',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                title: const Text('Wi-Fi signal'),
+                trailing: Text(
+                  'Requires BLE',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                title: const Text('Uptime'),
+                trailing: Text(
+                  online && widget.device.lastSeenAt != null
+                      ? _formatUptime(
+                          DateTime.now().difference(widget.device.lastSeenAt!))
+                      : 'Offline',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                title: const Text('Firmware'),
+                trailing: Text(
+                  'Requires BLE',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+
+        // Remove device
+        OutlinedButton.icon(
+          onPressed: () => _confirmDelete(context),
+          icon: const Icon(Icons.delete_outline),
+          label: const Text('Remove Device'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: colors.error,
+            side: BorderSide(color: colors.error),
+            minimumSize: const Size(double.infinity, 48),
+          ),
+        ),
       ],
     );
   }
 
-  String _formatDateTime(DateTime dt) {
-    final now = DateTime.now();
-    final diff = now.difference(dt);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${dt.day}/${dt.month}/${dt.year}';
+  String _formatUptime(Duration d) {
+    if (d.inDays > 0) return '${d.inDays}d ${d.inHours % 24}h';
+    if (d.inHours > 0) return '${d.inHours}h ${d.inMinutes % 60}m';
+    return '${d.inMinutes}m';
+  }
+
+  void _confirmDelete(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remove Device'),
+        content: Text('Remove "${widget.device.name}" permanently?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () {
+              context
+                  .read<DevicesBloc>()
+                  .add(DeleteDevice(widget.device.id));
+              Navigator.of(dialogContext).pop();
+              context.pop();
+            },
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -265,33 +452,58 @@ class _PersonalityTab extends StatefulWidget {
 
 class _PersonalityTabState extends State<_PersonalityTab> {
   late final TextEditingController _nameController;
-  late final TextEditingController _toneController;
-  late final TextEditingController _languageController;
+  late final TextEditingController _customToneController;
   late final TextEditingController _systemPromptController;
   bool _dirty = false;
+  String _selectedTone = 'friendly';
+  String _selectedLanguage = 'en';
+  bool _advancedExpanded = false;
+
+  static const _tonePresets = [
+    'professional',
+    'friendly',
+    'playful',
+    'sarcastic',
+    'custom',
+  ];
+
+  static const _languages = {
+    'en': 'English',
+    'id': 'Bahasa Indonesia',
+    'es': 'Spanish',
+    'fr': 'French',
+    'de': 'German',
+    'ja': 'Japanese',
+    'ko': 'Korean',
+    'zh': 'Chinese',
+  };
 
   @override
   void initState() {
     super.initState();
     final p = widget.device.personalityJson;
     _nameController = TextEditingController(text: p['name'] as String? ?? '');
-    _toneController = TextEditingController(text: p['tone'] as String? ?? '');
-    _languageController =
-        TextEditingController(text: p['language'] as String? ?? '');
     _systemPromptController =
         TextEditingController(text: p['system_prompt'] as String? ?? '');
+    _customToneController = TextEditingController();
 
-    for (final c in _controllers) {
-      c.addListener(_onChanged);
+    // Resolve tone — check if it matches a preset
+    final savedTone = p['tone'] as String? ?? 'friendly';
+    if (_tonePresets.contains(savedTone)) {
+      _selectedTone = savedTone;
+    } else {
+      _selectedTone = 'custom';
+      _customToneController.text = savedTone;
     }
-  }
 
-  List<TextEditingController> get _controllers => [
-        _nameController,
-        _toneController,
-        _languageController,
-        _systemPromptController,
-      ];
+    // Resolve language
+    final savedLang = p['language'] as String? ?? 'en';
+    _selectedLanguage = _languages.containsKey(savedLang) ? savedLang : 'en';
+
+    _nameController.addListener(_markDirty);
+    _customToneController.addListener(_markDirty);
+    _systemPromptController.addListener(_markDirty);
+  }
 
   @override
   void didUpdateWidget(covariant _PersonalityTab oldWidget) {
@@ -304,35 +516,42 @@ class _PersonalityTabState extends State<_PersonalityTab> {
   void _syncFromDevice() {
     final p = widget.device.personalityJson;
     _nameController.text = p['name'] as String? ?? '';
-    _toneController.text = p['tone'] as String? ?? '';
-    _languageController.text = p['language'] as String? ?? '';
     _systemPromptController.text = p['system_prompt'] as String? ?? '';
+    final savedTone = p['tone'] as String? ?? 'friendly';
+    if (_tonePresets.contains(savedTone)) {
+      _selectedTone = savedTone;
+      _customToneController.text = '';
+    } else {
+      _selectedTone = 'custom';
+      _customToneController.text = savedTone;
+    }
+    final savedLang = p['language'] as String? ?? 'en';
+    _selectedLanguage = _languages.containsKey(savedLang) ? savedLang : 'en';
     _dirty = false;
   }
 
-  void _onChanged() {
-    final p = widget.device.personalityJson;
-    final isDirty = _nameController.text.trim() != (p['name'] ?? '') ||
-        _toneController.text.trim() != (p['tone'] ?? '') ||
-        _languageController.text.trim() != (p['language'] ?? '') ||
-        _systemPromptController.text.trim() != (p['system_prompt'] ?? '');
-    if (isDirty != _dirty) setState(() => _dirty = isDirty);
+  void _markDirty() {
+    if (!_dirty) setState(() => _dirty = true);
   }
 
   @override
   void dispose() {
-    for (final c in _controllers) {
-      c.dispose();
-    }
+    _nameController.dispose();
+    _customToneController.dispose();
+    _systemPromptController.dispose();
     super.dispose();
   }
+
+  String get _effectiveTone => _selectedTone == 'custom'
+      ? _customToneController.text.trim()
+      : _selectedTone;
 
   void _save() {
     context.read<DevicesBloc>().add(
           UpdatePersonality(widget.device.id, {
             'name': _nameController.text.trim(),
-            'tone': _toneController.text.trim(),
-            'language': _languageController.text.trim(),
+            'tone': _effectiveTone,
+            'language': _selectedLanguage,
             'system_prompt': _systemPromptController.text.trim(),
           }),
         );
@@ -342,46 +561,124 @@ class _PersonalityTabState extends State<_PersonalityTab> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text('Personality Name', style: theme.textTheme.labelLarge),
+        // Bot name
+        Text('Bot name', style: theme.textTheme.labelLarge),
         const SizedBox(height: 8),
         TextField(
           controller: _nameController,
           decoration: const InputDecoration(hintText: 'e.g. Aksa'),
           textCapitalization: TextCapitalization.words,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
 
+        // Tone presets
         Text('Tone', style: theme.textTheme.labelLarge),
         const SizedBox(height: 8),
-        TextField(
-          controller: _toneController,
-          decoration:
-              const InputDecoration(hintText: 'e.g. friendly, sarcastic'),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: RadioGroup<String>(
+            groupValue: _selectedTone,
+            onChanged: (v) {
+              if (v != null) {
+                setState(() {
+                  _selectedTone = v;
+                  _dirty = true;
+                });
+              }
+            },
+            child: Column(
+              children: [
+                for (final tone in _tonePresets)
+                  ListTile(
+                    leading: Radio<String>(value: tone),
+                    title: Text(
+                      tone == 'custom'
+                          ? 'Custom...'
+                          : tone[0].toUpperCase() + tone.substring(1),
+                    ),
+                    onTap: () => setState(() {
+                      _selectedTone = tone;
+                      _dirty = true;
+                    }),
+                  ),
+              ],
+            ),
+          ),
         ),
-        const SizedBox(height: 16),
+        if (_selectedTone == 'custom') ...[
+          const SizedBox(height: 8),
+          TextField(
+            controller: _customToneController,
+            decoration: const InputDecoration(
+              hintText: 'Describe the tone...',
+            ),
+          ),
+        ],
+        const SizedBox(height: 20),
 
+        // Language dropdown
         Text('Language', style: theme.textTheme.labelLarge),
         const SizedBox(height: 8),
-        TextField(
-          controller: _languageController,
-          decoration: const InputDecoration(hintText: 'e.g. en, id'),
-        ),
-        const SizedBox(height: 16),
-
-        Text('System Prompt', style: theme.textTheme.labelLarge),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _systemPromptController,
+        DropdownButtonFormField<String>(
+          initialValue: _selectedLanguage,
           decoration: const InputDecoration(
-            hintText: 'Custom instructions for the AI...',
-            alignLabelWithHint: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
-          maxLines: 5,
-          minLines: 3,
+          items: _languages.entries
+              .map((e) => DropdownMenuItem(
+                    value: e.key,
+                    child: Text(e.value),
+                  ))
+              .toList(),
+          onChanged: (v) {
+            if (v != null) {
+              setState(() {
+                _selectedLanguage = v;
+                _dirty = true;
+              });
+            }
+          },
+        ),
+        const SizedBox(height: 20),
+
+        // Advanced — system prompt (expandable)
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: ExpansionTile(
+            leading: Icon(Icons.code, color: colors.onSurfaceVariant),
+            title: const Text('Advanced'),
+            initiallyExpanded: _advancedExpanded,
+            onExpansionChanged: (v) => _advancedExpanded = v,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('System prompt (optional)',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        )),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _systemPromptController,
+                      decoration: const InputDecoration(
+                        hintText: 'Custom instructions for the AI...',
+                        alignLabelWithHint: true,
+                      ),
+                      maxLines: 5,
+                      minLines: 3,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 24),
 

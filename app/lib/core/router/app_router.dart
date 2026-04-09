@@ -4,12 +4,26 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/presentation/bloc/auth_bloc.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
-import '../../features/devices/presentation/pages/devices_page.dart';
+import '../../features/home/presentation/pages/home_page.dart';
+import '../../features/activity/presentation/pages/activity_page.dart';
+import '../../features/settings/presentation/pages/settings_page.dart';
+import '../../features/devices/presentation/pages/add_device_page.dart';
 import '../../features/devices/presentation/pages/device_detail_page.dart';
+import '../../features/devices/presentation/pages/device_stats_page.dart';
+import '../../features/devices/presentation/pages/presence_settings_page.dart';
+import '../../features/devices/presentation/pages/display_face_page.dart';
+import '../../features/devices/presentation/pages/voice_audio_page.dart';
+import '../../features/devices/presentation/pages/firmware_update_page.dart';
+import '../../features/devices/presentation/pages/diagnostics_page.dart';
+import '../../features/devices/presentation/pages/integrations_page.dart';
+import '../../features/devices/presentation/pages/motion_settings_page.dart';
+import '../../features/devices/presentation/pages/mobility_settings_page.dart';
 import '../../features/conversations/presentation/pages/conversations_page.dart';
 import '../../features/memories/presentation/pages/memories_page.dart';
 import '../../features/scheduler/presentation/pages/reminders_page.dart';
 import '../../features/scheduler/presentation/pages/pomodoro_page.dart';
+import '../../features/scheduler/presentation/pages/focus_mode_page.dart';
+import 'shell_scaffold.dart';
 
 GoRouter createRouter(AuthBloc authBloc) {
   return GoRouter(
@@ -23,10 +37,11 @@ GoRouter createRouter(AuthBloc authBloc) {
           state.matchedLocation == '/register';
 
       if (!isAuth && !isAuthRoute) return '/login';
-      if (isAuth && isAuthRoute) return '/devices';
+      if (isAuth && isAuthRoute) return '/home';
       return null;
     },
     routes: [
+      // Auth routes (outside shell)
       GoRoute(
         path: '/login',
         builder: (context, state) => const LoginPage(),
@@ -35,44 +50,165 @@ GoRouter createRouter(AuthBloc authBloc) {
         path: '/register',
         builder: (context, state) => const RegisterPage(),
       ),
-      GoRoute(
-        path: '/devices',
-        builder: (context, state) => const DevicesPage(),
-      ),
-      GoRoute(
-        path: '/devices/:deviceId',
-        builder: (context, state) => DeviceDetailPage(
-          deviceId: state.pathParameters['deviceId']!,
-        ),
-        routes: [
-          GoRoute(
-            path: 'conversations',
-            builder: (context, state) => ConversationsPage(
-              deviceId: state.pathParameters['deviceId']!,
-            ),
+
+      // Main app shell with bottom navigation
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) {
+          return ShellScaffold(navigationShell: navigationShell);
+        },
+        branches: [
+          // Home tab
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/home',
+                builder: (context, state) => const HomePage(),
+                routes: [
+                  // Device dashboard (for multi-device → tap into one)
+                  GoRoute(
+                    path: 'devices/:deviceId',
+                    builder: (context, state) => DeviceDetailPage(
+                      deviceId: state.pathParameters['deviceId']!,
+                    ),
+                    routes: _deviceSubRoutes(),
+                  ),
+                  // Add device — Wi-Fi (manual) or Bluetooth
+                  GoRoute(
+                    path: 'add-device',
+                    builder: (context, state) => const AddDevicePage(),
+                  ),
+                ],
+              ),
+            ],
           ),
-          GoRoute(
-            path: 'memories',
-            builder: (context, state) => MemoriesPage(
-              deviceId: state.pathParameters['deviceId']!,
-            ),
+
+          // Activity tab
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/activity',
+                builder: (context, state) => const ActivityPage(),
+                routes: [
+                  GoRoute(
+                    path: 'conversations/:deviceId',
+                    builder: (context, state) => ConversationsPage(
+                      deviceId: state.pathParameters['deviceId']!,
+                    ),
+                  ),
+                  GoRoute(
+                    path: 'memories/:deviceId',
+                    builder: (context, state) => MemoriesPage(
+                      deviceId: state.pathParameters['deviceId']!,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-          GoRoute(
-            path: 'reminders',
-            builder: (context, state) => RemindersPage(
-              deviceId: state.pathParameters['deviceId']!,
-            ),
-          ),
-          GoRoute(
-            path: 'pomodoro',
-            builder: (context, state) => PomodoroPage(
-              deviceId: state.pathParameters['deviceId']!,
-            ),
+
+          // Settings tab
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/settings',
+                builder: (context, state) => const SettingsPage(),
+              ),
+            ],
           ),
         ],
       ),
     ],
   );
+}
+
+/// All sub-routes under /home/devices/:deviceId/
+List<RouteBase> _deviceSubRoutes() {
+  return [
+    GoRoute(
+      path: 'personality',
+      builder: (context, state) => DeviceDetailPage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'reminders',
+      builder: (context, state) => RemindersPage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'pomodoro',
+      builder: (context, state) => PomodoroPage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'focus',
+      builder: (context, state) => FocusModePage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'presence',
+      builder: (context, state) => PresenceSettingsPage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'settings',
+      builder: (context, state) => DeviceDetailPage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'stats',
+      builder: (context, state) => DeviceStatsPage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'display',
+      builder: (context, state) => DisplayFacePage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'voice',
+      builder: (context, state) => VoiceAudioPage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'firmware',
+      builder: (context, state) => FirmwareUpdatePage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'diagnostics',
+      builder: (context, state) => DiagnosticsPage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'integrations',
+      builder: (context, state) => IntegrationsPage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'motion',
+      builder: (context, state) => MotionSettingsPage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'mobility',
+      builder: (context, state) => MobilitySettingsPage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+  ];
 }
 
 /// Converts a Stream into a Listenable for GoRouter's refreshListenable.

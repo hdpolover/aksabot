@@ -70,4 +70,58 @@ class SchedulerRepositoryImpl implements SchedulerRepository {
       return Left(ServerFailure(e.message, statusCode: e.statusCode));
     }
   }
+
+  // ── Focus mode ──────────────────────────────────────────
+
+  @override
+  Future<Either<Failure, Map<String, dynamic>>> startFocusMode(
+    String deviceId, {
+    int? durationMinutes,
+  }) async {
+    try {
+      final data = await _datasource.startFocusMode(
+        deviceId,
+        durationMinutes: durationMinutes,
+      );
+      return Right(data);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
+
+  @override
+  Future<Either<Failure, void>> stopFocusMode(String deviceId) async {
+    try {
+      await _datasource.stopFocusMode(deviceId);
+      return const Right(null);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
+
+  // ── Response pool ───────────────────────────────────────
+
+  @override
+  Future<Either<Failure, Map<String, dynamic>>> refillPool(
+    String deviceId,
+  ) async {
+    try {
+      final data = await _datasource.refillPool(deviceId);
+      return Right(data);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
+
+  @override
+  Future<Either<Failure, Map<String, dynamic>>> getPoolStats(
+    String deviceId,
+  ) async {
+    try {
+      final data = await _datasource.getPoolStats(deviceId);
+      return Right(data);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
 }
