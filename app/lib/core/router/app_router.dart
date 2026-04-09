@@ -41,7 +41,7 @@ GoRouter createRouter(AuthBloc authBloc) {
       return null;
     },
     routes: [
-      // Auth routes (outside shell)
+      // Auth routes (outside shell — no nav bar)
       GoRoute(
         path: '/login',
         builder: (context, state) => const LoginPage(),
@@ -51,62 +51,28 @@ GoRouter createRouter(AuthBloc authBloc) {
         builder: (context, state) => const RegisterPage(),
       ),
 
-      // Main app shell with bottom navigation
+      // Main app shell — bottom nav only on these 3 root tabs
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
           return ShellScaffold(navigationShell: navigationShell);
         },
         branches: [
-          // Home tab
           StatefulShellBranch(
             routes: [
               GoRoute(
                 path: '/home',
                 builder: (context, state) => const HomePage(),
-                routes: [
-                  // Device dashboard (for multi-device → tap into one)
-                  GoRoute(
-                    path: 'devices/:deviceId',
-                    builder: (context, state) => DeviceDetailPage(
-                      deviceId: state.pathParameters['deviceId']!,
-                    ),
-                    routes: _deviceSubRoutes(),
-                  ),
-                  // Add device — Wi-Fi (manual) or Bluetooth
-                  GoRoute(
-                    path: 'add-device',
-                    builder: (context, state) => const AddDevicePage(),
-                  ),
-                ],
               ),
             ],
           ),
-
-          // Activity tab
           StatefulShellBranch(
             routes: [
               GoRoute(
                 path: '/activity',
                 builder: (context, state) => const ActivityPage(),
-                routes: [
-                  GoRoute(
-                    path: 'conversations/:deviceId',
-                    builder: (context, state) => ConversationsPage(
-                      deviceId: state.pathParameters['deviceId']!,
-                    ),
-                  ),
-                  GoRoute(
-                    path: 'memories/:deviceId',
-                    builder: (context, state) => MemoriesPage(
-                      deviceId: state.pathParameters['deviceId']!,
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
-
-          // Settings tab
           StatefulShellBranch(
             routes: [
               GoRoute(
@@ -117,11 +83,36 @@ GoRouter createRouter(AuthBloc authBloc) {
           ),
         ],
       ),
+
+      // Detail routes — outside shell, NO bottom nav bar
+      GoRoute(
+        path: '/devices/add',
+        builder: (context, state) => const AddDevicePage(),
+      ),
+      GoRoute(
+        path: '/devices/:deviceId',
+        builder: (context, state) => DeviceDetailPage(
+          deviceId: state.pathParameters['deviceId']!,
+        ),
+        routes: _deviceSubRoutes(),
+      ),
+      GoRoute(
+        path: '/conversations/:deviceId',
+        builder: (context, state) => ConversationsPage(
+          deviceId: state.pathParameters['deviceId']!,
+        ),
+      ),
+      GoRoute(
+        path: '/memories/:deviceId',
+        builder: (context, state) => MemoriesPage(
+          deviceId: state.pathParameters['deviceId']!,
+        ),
+      ),
     ],
   );
 }
 
-/// All sub-routes under /home/devices/:deviceId/
+/// All sub-routes under /devices/:deviceId/
 List<RouteBase> _deviceSubRoutes() {
   return [
     GoRoute(

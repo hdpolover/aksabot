@@ -20,8 +20,22 @@ class HomePage extends StatelessWidget {
   }
 }
 
-class _HomeView extends StatelessWidget {
+class _HomeView extends StatefulWidget {
   const _HomeView();
+
+  @override
+  State<_HomeView> createState() => _HomeViewState();
+}
+
+class _HomeViewState extends State<_HomeView> {
+  void _pushAndReload(BuildContext context, String path) {
+    final bloc = context.read<DevicesBloc>();
+    context.push(path).then((_) {
+      if (mounted) {
+        bloc.add(const LoadDevices());
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -57,12 +71,18 @@ class _HomeView extends StatelessWidget {
 
         if (state is DevicesLoaded) {
           if (state.devices.isEmpty) {
-            return const _EmptyState();
+            return _EmptyState(onNavigate: _pushAndReload);
           }
           if (state.devices.length == 1) {
-            return _DeviceDashboard(device: state.devices.first);
+            return _DeviceDashboard(
+              device: state.devices.first,
+              onNavigate: _pushAndReload,
+            );
           }
-          return _DeviceList(devices: state.devices);
+          return _DeviceList(
+            devices: state.devices,
+            onNavigate: _pushAndReload,
+          );
         }
 
         return const SizedBox.shrink();
@@ -76,7 +96,8 @@ class _HomeView extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+  final void Function(BuildContext, String) onNavigate;
+  const _EmptyState({required this.onNavigate});
 
   @override
   Widget build(BuildContext context) {
@@ -105,7 +126,7 @@ class _EmptyState extends StatelessWidget {
               ),
               const SizedBox(height: 32),
               FilledButton.icon(
-                onPressed: () => context.push('/home/add-device'),
+                onPressed: () => onNavigate(context, '/devices/add'),
                 icon: const Icon(Icons.add),
                 label: const Text('Add Device'),
               ),
@@ -123,7 +144,8 @@ class _EmptyState extends StatelessWidget {
 
 class _DeviceList extends StatelessWidget {
   final List<Device> devices;
-  const _DeviceList({required this.devices});
+  final void Function(BuildContext, String) onNavigate;
+  const _DeviceList({required this.devices, required this.onNavigate});
 
   @override
   Widget build(BuildContext context) {
@@ -133,7 +155,7 @@ class _DeviceList extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Devices')),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push('/home/add-device'),
+        onPressed: () => onNavigate(context, '/devices/add'),
         child: const Icon(Icons.add),
       ),
       body: RefreshIndicator(
@@ -151,8 +173,7 @@ class _DeviceList extends StatelessWidget {
             return Card(
               clipBehavior: Clip.antiAlias,
               child: InkWell(
-                onTap: () =>
-                    context.push('/home/devices/${device.id}'),
+                onTap: () => onNavigate(context, '/devices/${device.id}'),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Row(
@@ -224,7 +245,8 @@ class _DeviceList extends StatelessWidget {
 
 class _DeviceDashboard extends StatelessWidget {
   final Device device;
-  const _DeviceDashboard({required this.device});
+  final void Function(BuildContext, String) onNavigate;
+  const _DeviceDashboard({required this.device, required this.onNavigate});
 
   @override
   Widget build(BuildContext context) {
@@ -326,68 +348,27 @@ class _DeviceDashboard extends StatelessWidget {
               clipBehavior: Clip.antiAlias,
               child: Column(
                 children: [
-                  _QuickActionTile(
-                    icon: Icons.face,
-                    label: 'Personality',
-                    onTap: () => context
-                        .push('/home/devices/${device.id}/personality'),
-                  ),
-                  const Divider(height: 1),
-                  _QuickActionTile(
-                    icon: Icons.notifications_active,
-                    label: 'Reminders',
-                    onTap: () => context
-                        .push('/home/devices/${device.id}/reminders'),
-                  ),
-                  const Divider(height: 1),
-                  _QuickActionTile(
-                    icon: Icons.timer,
-                    label: 'Pomodoro',
-                    onTap: () => context
-                        .push('/home/devices/${device.id}/pomodoro'),
-                  ),
-                  const Divider(height: 1),
-                  _QuickActionTile(
-                    icon: Icons.center_focus_strong,
-                    label: 'Focus Mode',
-                    onTap: () =>
-                        context.push('/home/devices/${device.id}/focus'),
-                  ),
-                  const Divider(height: 1),
-                  _QuickActionTile(
-                    icon: Icons.bluetooth_searching,
-                    label: 'Presence',
-                    onTap: () => context
-                        .push('/home/devices/${device.id}/presence'),
-                  ),
-                  const Divider(height: 1),
-                  _QuickActionTile(
-                    icon: Icons.monitor,
-                    label: 'Display & Face',
-                    onTap: () => context
-                        .push('/home/devices/${device.id}/display'),
-                  ),
-                  const Divider(height: 1),
-                  _QuickActionTile(
-                    icon: Icons.graphic_eq,
-                    label: 'Voice & Audio',
-                    onTap: () =>
-                        context.push('/home/devices/${device.id}/voice'),
-                  ),
-                  const Divider(height: 1),
-                  _QuickActionTile(
-                    icon: Icons.bar_chart,
-                    label: 'Stats',
-                    onTap: () =>
-                        context.push('/home/devices/${device.id}/stats'),
-                  ),
-                  const Divider(height: 1),
-                  _QuickActionTile(
-                    icon: Icons.settings,
-                    label: 'Device Settings',
-                    onTap: () => context
-                        .push('/home/devices/${device.id}/settings'),
-                  ),
+                  for (final action in [
+                    (Icons.face, 'Personality', 'personality'),
+                    (Icons.notifications_active, 'Reminders', 'reminders'),
+                    (Icons.timer, 'Pomodoro', 'pomodoro'),
+                    (Icons.center_focus_strong, 'Focus Mode', 'focus'),
+                    (Icons.bluetooth_searching, 'Presence', 'presence'),
+                    (Icons.monitor, 'Display & Face', 'display'),
+                    (Icons.graphic_eq, 'Voice & Audio', 'voice'),
+                    (Icons.bar_chart, 'Stats', 'stats'),
+                    (Icons.settings, 'Device Settings', 'settings'),
+                  ]) ...[
+                    _QuickActionTile(
+                      icon: action.$1,
+                      label: action.$2,
+                      onTap: () => onNavigate(
+                        context,
+                        '/devices/${device.id}/${action.$3}',
+                      ),
+                    ),
+                    if (action.$3 != 'settings') const Divider(height: 1),
+                  ],
                 ],
               ),
             ),

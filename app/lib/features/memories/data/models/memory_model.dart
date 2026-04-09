@@ -14,7 +14,7 @@ class MemoryModel extends Memory {
       id: json['id'] as String,
       fact: json['fact'] as String,
       category: json['category'] as String,
-      confidence: (json['confidence'] as num).toDouble(),
+      confidence: double.tryParse(json['confidence'].toString()) ?? 0.0,
       createdAt: DateTime.parse(json['createdAt'] as String),
     );
   }
