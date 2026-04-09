@@ -33,3 +33,6 @@ test/fixtures/audio/
 
 # Test simulator state
 .ws-simulator-state.json
+
+# FVM Version Cache
+.fvm/

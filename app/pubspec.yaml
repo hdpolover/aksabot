@@ -1,0 +1,58 @@
+name: aksabot
+description: "Aksabot AI Desk Companion"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  flutter_bloc: ^9.1.0
+  equatable: ^2.0.7
+
+  # Navigation
+  go_router: ^15.1.2
+
+  # Networking
+  dio: ^5.8.0+1
+
+  # Local storage
+  flutter_secure_storage: ^9.2.4
+  shared_preferences: ^2.5.3
+
+  # DI
+  get_it: ^8.0.3
+  injectable: ^2.5.0
+
+  # Functional programming
+  dartz: ^0.10.1
+
+  # Environment
+  flutter_dotenv: ^5.2.1
+
+  # UI
+  cupertino_icons: ^1.0.8
+  google_fonts: ^6.2.1
+  shimmer: ^3.0.0
+
+  # BLE (for Phase 4 provisioning + presence)
+  # flutter_blue_plus: ^1.35.0
+  # flutter_ble_peripheral: ^0.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  injectable_generator: ^2.7.0
+  build_runner: ^2.4.15
+  bloc_test: ^10.0.0
+  mocktail: ^1.0.4
+
+flutter:
+  uses-material-design: true
+  assets:
+    - .env

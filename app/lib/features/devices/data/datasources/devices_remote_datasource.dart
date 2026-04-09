@@ -1,0 +1,55 @@
+import '../../../../core/network/api_client.dart';
+import '../models/device_model.dart';
+
+class DevicesRemoteDatasource {
+  final ApiClient _client;
+
+  DevicesRemoteDatasource(this._client);
+
+  Future<List<DeviceModel>> getDevices() async {
+    final data = await _client.get('/devices');
+    final list = data as List;
+    return list
+        .map((json) => DeviceModel.fromJson(json as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<DeviceModel> getDevice(String id) async {
+    final data = await _client.get('/devices/$id');
+    return DeviceModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Returns the device (without deviceToken — token is only shown once).
+  Future<DeviceModel> createDevice({String? name}) async {
+    final data = await _client.post('/devices', data: {
+      if (name != null) 'name': name, // ignore: use_null_aware_elements
+    });
+    final deviceJson = data['device'] as Map<String, dynamic>;
+    return DeviceModel.fromJson(deviceJson);
+  }
+
+  Future<DeviceModel> updateSettings(
+    String id,
+    Map<String, dynamic> settings,
+  ) async {
+    final data = await _client.patch('/devices/$id/settings', data: settings);
+    return DeviceModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> getPersonality(String id) async {
+    final data = await _client.get('/devices/$id/personality');
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updatePersonality(
+    String id,
+    Map<String, dynamic> personality,
+  ) async {
+    final data = await _client.patch('/devices/$id/personality', data: personality);
+    return data as Map<String, dynamic>;
+  }
+
+  Future<void> deleteDevice(String id) async {
+    await _client.delete('/devices/$id');
+  }
+}
