@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppConfigModule } from './core/config/config.module';
 import { DatabaseModule } from './core/database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -11,6 +12,7 @@ import { MemoriesModule } from './modules/memories/memories.module';
 @Module({
   imports: [
     AppConfigModule,
+    ScheduleModule.forRoot(),
     DatabaseModule,
     AuthModule,
     DevicesModule,

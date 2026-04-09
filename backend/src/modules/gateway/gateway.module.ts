@@ -7,6 +7,7 @@ import {
 } from '../../core/database/entities';
 import { AuthModule } from '../auth/auth.module';
 import { AiModule } from '../ai/ai.module';
+import { MemoriesModule } from '../memories/memories.module';
 import { AudioGateway } from './audio.gateway';
 import { SessionManager } from './session.manager';
 import { ConversationPersistence } from './conversation.persistence';
@@ -16,6 +17,7 @@ import { ConversationPersistence } from './conversation.persistence';
     TypeOrmModule.forFeature([Conversation, Message, Device]),
     AuthModule,
     AiModule,
+    MemoriesModule,
   ],
   providers: [AudioGateway, SessionManager, ConversationPersistence],
   exports: [AudioGateway],

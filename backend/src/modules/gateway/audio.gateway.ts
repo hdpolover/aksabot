@@ -8,6 +8,7 @@ import type { IncomingMessage } from 'http';
 import type WebSocket from 'ws';
 import { AuthService } from '../auth/auth.service';
 import { AiService } from '../ai/ai.service';
+import { MemoriesService } from '../memories/memories.service';
 import { SessionManager } from './session.manager';
 import { ConversationPersistence } from './conversation.persistence';
 import type { SttResult } from '../ai/interfaces';
@@ -29,6 +30,7 @@ export class AudioGateway
   constructor(
     private readonly authService: AuthService,
     private readonly aiService: AiService,
+    private readonly memoriesService: MemoriesService,
     private readonly sessions: SessionManager,
     private readonly persistence: ConversationPersistence,
   ) {}
@@ -244,9 +246,21 @@ export class AudioGateway
     // Exclude the current user message (last in history) from context
     const history = allHistory.slice(0, -1);
 
+    // Fetch relevant memories
+    const memories = await this.memoriesService.getRelevant(deviceId);
+
+    // Bump access on used memories
+    if (memories.length > 0) {
+      this.memoriesService
+        .bumpAccessed(memories.map((m) => m.id))
+        .catch((err) =>
+          this.logger.warn(`Memory bump failed: ${err.message}`),
+        );
+    }
+
     // Run streaming pipeline
     try {
-      await this.runPipeline(deviceId, result.transcript, personality, history);
+      await this.runPipeline(deviceId, result.transcript, personality, memories, history);
     } catch (err: any) {
       this.logger.error(`Pipeline error for ${deviceId}: ${err.message}`);
       this.sendToDevice(deviceId, 'error', {
@@ -269,6 +283,7 @@ export class AudioGateway
     deviceId: string,
     transcript: string,
     personality: Record<string, any>,
+    memories: { fact: string; category: string }[],
     history: { role: string; content: string }[],
   ) {
     const session = this.sessions.get(deviceId);
@@ -277,7 +292,7 @@ export class AudioGateway
     const pipeline = this.aiService.processTranscript(
       transcript,
       personality,
-      [], // memories — stub for Phase 1
+      memories,
       history,
     );
 
@@ -333,6 +348,13 @@ export class AudioGateway
       sessionId: conversationId,
       reason: 'timeout',
     });
+
+    // Extract memories in background (don't block the session end)
+    this.memoriesService
+      .extractFromConversation(conversationId, deviceId)
+      .catch((err) =>
+        this.logger.warn(`Memory extraction failed: ${err.message}`),
+      );
   }
 
   // ── Transport helpers ─────────────────────────────────────────

@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -6,11 +7,13 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MemoriesService } from './memories.service';
+import { UpdateMemoryDto } from './dto/update-memory.dto';
 
 @Controller()
 @UseGuards(JwtAuthGuard)
@@ -23,6 +26,14 @@ export class MemoriesController {
     @Query('category') category?: string,
   ) {
     return this.memoriesService.findByDevice(deviceId, category);
+  }
+
+  @Put('memories/:id')
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateMemoryDto,
+  ) {
+    return this.memoriesService.update(id, dto);
   }
 
   @Delete('memories/:id')

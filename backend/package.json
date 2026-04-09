@@ -37,6 +37,7 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/platform-ws": "^11.1.18",
+    "@nestjs/schedule": "^6.1.1",
     "@nestjs/typeorm": "^11.0.1",
     "@nestjs/websockets": "^11.1.18",
     "bcrypt": "^6.0.0",

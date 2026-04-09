@@ -21,6 +21,6 @@ import { AiService } from './ai.service';
     PromptService,
     AiService,
   ],
-  exports: [AiService],
+  exports: [AiService, LLM_PROVIDER],
 })
 export class AiModule {}
