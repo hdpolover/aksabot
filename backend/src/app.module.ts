@@ -9,6 +9,7 @@ import { AiModule } from './modules/ai/ai.module';
 import { GatewayModule } from './modules/gateway/gateway.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { MemoriesModule } from './modules/memories/memories.module';
+import { SchedulerModule } from './modules/scheduler/scheduler.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { MemoriesModule } from './modules/memories/memories.module';
     GatewayModule,
     ConversationsModule,
     MemoriesModule,
+    SchedulerModule,
   ],
 })
 export class AppModule {}

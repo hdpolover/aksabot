@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   Conversation,
@@ -8,6 +8,7 @@ import {
 import { AuthModule } from '../auth/auth.module';
 import { AiModule } from '../ai/ai.module';
 import { MemoriesModule } from '../memories/memories.module';
+import { SchedulerModule } from '../scheduler/scheduler.module';
 import { AudioGateway } from './audio.gateway';
 import { SessionManager } from './session.manager';
 import { ConversationPersistence } from './conversation.persistence';
@@ -18,8 +19,9 @@ import { ConversationPersistence } from './conversation.persistence';
     AuthModule,
     AiModule,
     MemoriesModule,
+    forwardRef(() => SchedulerModule),
   ],
   providers: [AudioGateway, SessionManager, ConversationPersistence],
-  exports: [AudioGateway],
+  exports: [AudioGateway, SessionManager],
 })
 export class GatewayModule {}

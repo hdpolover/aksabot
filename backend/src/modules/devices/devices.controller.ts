@@ -12,6 +12,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import {
+  RateLimit,
+  RateLimitGuard,
+} from '../../core/common/guards/rate-limit.guard';
 import { CurrentUser } from '../../core/common/decorators/current-user.decorator';
 import type { RequestUser } from '../../core/common/decorators/current-user.decorator';
 import { DevicesService } from './devices.service';
@@ -20,7 +24,8 @@ import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { UpdatePersonalityDto } from './dto/update-personality.dto';
 
 @Controller('devices')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RateLimitGuard)
+@RateLimit({ limit: 60, windowSeconds: 60, keyType: 'user' })
 export class DevicesController {
   constructor(private readonly devicesService: DevicesService) {}
 

@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { Inject, Logger, OnModuleInit, forwardRef } from '@nestjs/common';
 import {
   WebSocketGateway,
   OnGatewayConnection,
@@ -9,6 +9,8 @@ import type WebSocket from 'ws';
 import { AuthService } from '../auth/auth.service';
 import { AiService } from '../ai/ai.service';
 import { MemoriesService } from '../memories/memories.service';
+import { SchedulerService } from '../scheduler/scheduler.service';
+import { ProactiveService } from '../scheduler/proactive.service';
 import { SessionManager } from './session.manager';
 import { ConversationPersistence } from './conversation.persistence';
 import type { SttResult } from '../ai/interfaces';
@@ -20,7 +22,7 @@ interface WsMessage {
 
 @WebSocketGateway({ path: '/ws' })
 export class AudioGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit
 {
   private readonly logger = new Logger(AudioGateway.name);
 
@@ -31,9 +33,21 @@ export class AudioGateway
     private readonly authService: AuthService,
     private readonly aiService: AiService,
     private readonly memoriesService: MemoriesService,
+    @Inject(forwardRef(() => SchedulerService))
+    private readonly scheduler: SchedulerService,
+    @Inject(forwardRef(() => ProactiveService))
+    private readonly proactive: ProactiveService,
     private readonly sessions: SessionManager,
     private readonly persistence: ConversationPersistence,
   ) {}
+
+  onModuleInit() {
+    // Give the scheduler and proactive services a way to push events
+    const sender = (deviceId: string, event: string, data: any) =>
+      this.sendToDevice(deviceId, event, data);
+    this.scheduler.setSendToDevice(sender);
+    this.proactive.setSendToDevice(sender);
+  }
 
   // ── Connection lifecycle ──────────────────────────────────────
 
@@ -69,6 +83,11 @@ export class AudioGateway
     await this.persistence.updateLastSeen(device.id);
     this.logger.log(`Device ${device.id} (${device.name}) connected`);
 
+    // Start proactive scheduler for this device
+    this.scheduler.startDeviceSchedule(device.id).catch((err) =>
+      this.logger.warn(`Scheduler start failed: ${err.message}`),
+    );
+
     client.on('message', (raw: Buffer | string, isBinary: boolean) => {
       this.handleMessage(client, device.id, raw, isBinary);
     });
@@ -83,6 +102,8 @@ export class AudioGateway
       this.endConversation(deviceId);
     }
 
+    this.scheduler.stopDeviceSchedule(deviceId);
+    this.proactive.clearDevice(deviceId);
     this.sessions.remove(deviceId);
     this.socketToDevice.delete(client);
     this.deviceToSocket.delete(deviceId);
@@ -131,6 +152,9 @@ export class AudioGateway
     const session = this.sessions.get(deviceId);
     if (!session) return;
 
+    // Track activity for idle nudge
+    this.proactive.recordActivity(deviceId);
+
     // Create conversation if none active
     if (!session.conversationId) {
       const conversation =
@@ -139,6 +163,16 @@ export class AudioGateway
       this.sendToDevice(deviceId, 'session:start', {
         sessionId: conversation.id,
       });
+
+      // Check for morning briefing (first interaction of the day)
+      this.proactive.checkMorningBriefing(deviceId).then((briefing) => {
+        if (briefing) {
+          this.sendToDevice(deviceId, 'proactive:briefing', {
+            type: 'morning',
+            text: briefing,
+          });
+        }
+      }).catch(() => {});
     }
 
     session.interrupted = false;
