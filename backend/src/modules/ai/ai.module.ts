@@ -8,7 +8,7 @@ import {
 } from './interfaces/tokens';
 import { GoogleSttProvider } from './adapters/google-stt.provider';
 import { GeminiLlmProvider } from './adapters/gemini-llm.provider';
-import { GoogleTtsProvider } from './adapters/google-tts.provider';
+import { ElevenLabsTtsProvider } from './adapters/elevenlabs-tts.provider';
 import { OpusAudioCodec } from './adapters/opus-audio.codec';
 import { RedisTtsCache } from './adapters/redis-tts-cache';
 import { PromptService } from './prompt.service';
@@ -18,7 +18,7 @@ import { AiService } from './ai.service';
   providers: [
     { provide: STT_PROVIDER, useClass: GoogleSttProvider },
     { provide: LLM_PROVIDER, useClass: GeminiLlmProvider },
-    { provide: TTS_PROVIDER, useClass: GoogleTtsProvider },
+    { provide: TTS_PROVIDER, useClass: ElevenLabsTtsProvider },
     { provide: AUDIO_CODEC, useClass: OpusAudioCodec },
     { provide: TTS_CACHE, useClass: RedisTtsCache },
     PromptService,
