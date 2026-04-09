@@ -145,9 +145,117 @@ function connectWebSocket(deviceToken: string): Promise<WebSocket> {
   });
 }
 
+// ── Audio response saving ───────────────────────────────────────
+
+const OUTPUT_DIR = path.join(__dirname, 'fixtures', 'audio', 'responses');
+let responseAudioChunks: Buffer[] = [];
+let responseCount = 0;
+
+function getOpusDecoder() {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const OpusScript = require('opusscript');
+    return new OpusScript(16000, 1, OpusScript.Application.VOIP);
+  } catch {
+    return null;
+  }
+}
+
+function writeWavHeader(pcmLength: number): Buffer {
+  const header = Buffer.alloc(44);
+  const sampleRate = 16000;
+  const channels = 1;
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * channels * (bitsPerSample / 8);
+  const blockAlign = channels * (bitsPerSample / 8);
+
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcmLength, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);        // chunk size
+  header.writeUInt16LE(1, 20);         // PCM format
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcmLength, 40);
+  return header;
+}
+
+function saveResponseAudio(fullText: string) {
+  if (responseAudioChunks.length === 0) return;
+
+  // Concatenate all received binary chunks
+  const raw = Buffer.concat(responseAudioChunks);
+  responseAudioChunks = [];
+  responseCount++;
+
+  // Ensure output dir exists
+  if (!fs.existsSync(OUTPUT_DIR)) {
+    fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  }
+
+  // Save raw opus (length-prefixed frames)
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const baseName = `response-${ts}-${responseCount}`;
+  const opusPath = path.join(OUTPUT_DIR, `${baseName}.opus.bin`);
+  fs.writeFileSync(opusPath, raw);
+  log('ok', `Saved raw Opus: ${opusPath} (${raw.length} bytes)`);
+
+  // Decode to PCM and save as WAV
+  const decoder = getOpusDecoder();
+  if (!decoder) {
+    log('warn', 'Cannot decode to WAV — opusscript not available');
+    return;
+  }
+
+  const pcmChunks: Buffer[] = [];
+  let offset = 0;
+  let frameCount = 0;
+
+  while (offset + 2 <= raw.length) {
+    const frameLen = raw.readUInt16BE(offset);
+    offset += 2;
+    if (offset + frameLen > raw.length) break;
+
+    const opusFrame = raw.subarray(offset, offset + frameLen);
+    offset += frameLen;
+
+    try {
+      const pcm = decoder.decode(Buffer.from(opusFrame));
+      pcmChunks.push(Buffer.from(pcm));
+      frameCount++;
+    } catch {
+      // Skip bad frames
+    }
+  }
+
+  if (pcmChunks.length === 0) return;
+
+  const pcmData = Buffer.concat(pcmChunks);
+  const wavHeader = writeWavHeader(pcmData.length);
+  const wavPath = path.join(OUTPUT_DIR, `${baseName}.wav`);
+  fs.writeFileSync(wavPath, Buffer.concat([wavHeader, pcmData]));
+
+  const durationSec = (pcmData.length / 2 / 16000).toFixed(1);
+  log('ok', `Saved WAV: ${wavPath} (${frameCount} frames, ${durationSec}s)`);
+
+  // Save transcript alongside
+  if (fullText) {
+    const txtPath = path.join(OUTPUT_DIR, `${baseName}.txt`);
+    fs.writeFileSync(txtPath, fullText);
+  }
+}
+
+// ── WebSocket listener ──────────────────────────────────────────
+
 function attachListeners(ws: WebSocket) {
   ws.on('message', (raw: Buffer, isBinary: boolean) => {
     if (isBinary) {
+      responseAudioChunks.push(Buffer.from(raw));
       log('recv', `[binary] ${raw.length} bytes (Opus audio)`);
       return;
     }
@@ -174,6 +282,7 @@ function attachListeners(ws: WebSocket) {
           log('stt', `(final) ${data.text}`);
           break;
         case 'response:start':
+          responseAudioChunks = [];  // reset for new response
           log('recv', `Response started (${data.type})`);
           break;
         case 'response:text':
@@ -184,6 +293,7 @@ function attachListeners(ws: WebSocket) {
           if (data.fullText) {
             log('llm', `[full] ${data.fullText}`);
           }
+          saveResponseAudio(data.fullText ?? '');
           break;
         case 'error':
           log('error', `${data.code}: ${data.message}`);

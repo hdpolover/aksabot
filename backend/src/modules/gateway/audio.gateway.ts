@@ -184,7 +184,7 @@ export class AudioGateway
     session.state = 'listening';
 
     const sttStream = this.aiService.createSttStream({
-      languages: ['id-ID', 'en-US'],
+      languages: ['en-US', 'id-ID'],
     });
     session.sttStream = sttStream;
 

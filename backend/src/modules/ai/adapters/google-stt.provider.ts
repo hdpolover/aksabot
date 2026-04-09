@@ -89,8 +89,8 @@ export class GoogleSttProvider implements ISttProvider {
     return {
       encoding: 'LINEAR16' as const,
       sampleRateHertz: options?.sampleRate ?? 16000,
-      languageCode: options?.languages?.[0] ?? 'id-ID',
-      alternativeLanguageCodes: options?.languages?.slice(1) ?? ['en-US'],
+      languageCode: options?.languages?.[0] ?? 'en-US',
+      alternativeLanguageCodes: options?.languages?.slice(1) ?? ['id-ID'],
     };
   }
 }
