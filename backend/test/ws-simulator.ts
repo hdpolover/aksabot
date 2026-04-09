@@ -134,7 +134,8 @@ function connectWebSocket(deviceToken: string): Promise<WebSocket> {
 
     ws.on('open', () => {
       log('ok', 'WebSocket connected');
-      resolve(ws);
+      // Small delay to let server-side async setup complete
+      setTimeout(() => resolve(ws), 500);
     });
 
     ws.on('error', (err) => {
@@ -206,6 +207,24 @@ function sendEvent(ws: WebSocket, event: string, data?: any) {
   log('send', `${event}${data ? ' ' + JSON.stringify(data) : ''}`);
 }
 
+// ── Opus encoder ────────────────────────────────────────────────
+
+let opusEncoder: any = null;
+
+function getOpusEncoder() {
+  if (opusEncoder) return opusEncoder;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const OpusScript = require('opusscript');
+    opusEncoder = new OpusScript(16000, 1, OpusScript.Application.VOIP);
+    return opusEncoder;
+  } catch (err: any) {
+    log('error', `Failed to load opusscript: ${err.message}`);
+    log('info', 'Install with: npm install opusscript');
+    return null;
+  }
+}
+
 // ── Audio sending ───────────────────────────────────────────────
 
 function sendAudioFile(ws: WebSocket, filePath: string) {
@@ -215,25 +234,50 @@ function sendAudioFile(ws: WebSocket, filePath: string) {
     return;
   }
 
+  const encoder = getOpusEncoder();
+  if (!encoder) {
+    log('error', 'Cannot send audio without Opus encoder');
+    return;
+  }
+
   const audioData = fs.readFileSync(absolutePath);
-  log('info', `Sending audio file: ${absolutePath} (${audioData.length} bytes)`);
+  const isPcm = absolutePath.endsWith('.pcm');
+
+  if (!isPcm) {
+    log('error', 'Only .pcm files supported. Convert with: ffmpeg -i input.m4a -ar 16000 -ac 1 -f s16le output.pcm');
+    return;
+  }
+
+  // PCM: 16-bit mono = 2 bytes per sample, 320 samples per 20ms frame at 16kHz
+  const FRAME_SAMPLES = 320;
+  const FRAME_BYTES = FRAME_SAMPLES * 2; // 640 bytes per frame
+  const totalFrames = Math.floor(audioData.length / FRAME_BYTES);
+  const durationMs = totalFrames * 20;
+
+  log('info', `Sending ${absolutePath} (${totalFrames} frames, ~${(durationMs / 1000).toFixed(1)}s)`);
 
   sendEvent(ws, 'audio:start');
 
-  // Send in chunks (simulate ESP32 streaming at ~20ms Opus frames)
-  const CHUNK_SIZE = 160; // ~20ms of Opus at 16kHz
-  let offset = 0;
+  let frameIndex = 0;
   const interval = setInterval(() => {
-    if (offset >= audioData.length) {
+    if (frameIndex >= totalFrames) {
       clearInterval(interval);
       sendEvent(ws, 'audio:end');
+      log('info', `Finished sending ${totalFrames} Opus frames`);
       return;
     }
 
-    const chunk = audioData.subarray(offset, offset + CHUNK_SIZE);
-    ws.send(chunk);
-    offset += CHUNK_SIZE;
-  }, 20);
+    const offset = frameIndex * FRAME_BYTES;
+    const pcmFrame = audioData.subarray(offset, offset + FRAME_BYTES);
+    try {
+      const opusFrame = encoder.encode(Buffer.from(pcmFrame), FRAME_SAMPLES);
+      ws.send(opusFrame);
+    } catch (err: any) {
+      log('error', `Opus encode error at frame ${frameIndex}: ${err.message}`);
+    }
+
+    frameIndex++;
+  }, 20); // Send one frame every 20ms (real-time)
 }
 
 // ── Interactive REPL ────────────────────────────────────────────

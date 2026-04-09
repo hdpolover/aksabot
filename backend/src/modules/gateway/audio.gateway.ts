@@ -80,17 +80,19 @@ export class AudioGateway
     this.deviceToSocket.set(device.id, client);
     this.sessions.create(device.id, device.userId);
 
-    await this.persistence.updateLastSeen(device.id);
-    this.logger.log(`Device ${device.id} (${device.name}) connected`);
-
-    // Start proactive scheduler for this device
-    this.scheduler.startDeviceSchedule(device.id).catch((err) =>
-      this.logger.warn(`Scheduler start failed: ${err.message}`),
-    );
-
+    // Register message handler FIRST to avoid race condition —
+    // client may send messages before async setup completes
     client.on('message', (raw: Buffer | string, isBinary: boolean) => {
       this.handleMessage(client, device.id, raw, isBinary);
     });
+
+    this.logger.log(`Device ${device.id} (${device.name}) connected`);
+
+    // Async setup (non-blocking)
+    this.persistence.updateLastSeen(device.id).catch(() => {});
+    this.scheduler.startDeviceSchedule(device.id).catch((err) =>
+      this.logger.warn(`Scheduler start failed: ${err.message}`),
+    );
   }
 
   handleDisconnect(client: WebSocket) {
@@ -125,9 +127,12 @@ export class AudioGateway
 
     try {
       const msg: WsMessage = JSON.parse(raw.toString());
+      this.logger.debug(`Event from ${deviceId}: ${msg.event}`);
       switch (msg.event) {
         case 'audio:start':
-          this.onAudioStart(deviceId);
+          this.onAudioStart(deviceId).catch((err) =>
+            this.logger.error(`onAudioStart error: ${err.message}`),
+          );
           break;
         case 'audio:end':
           this.onAudioEnd(deviceId);
@@ -296,7 +301,7 @@ export class AudioGateway
     try {
       await this.runPipeline(deviceId, result.transcript, personality, memories, history);
     } catch (err: any) {
-      this.logger.error(`Pipeline error for ${deviceId}: ${err.message}`);
+      this.logger.error(`Pipeline error for ${deviceId}: ${err.message}`, err.stack);
       this.sendToDevice(deviceId, 'error', {
         code: 'PIPELINE_ERROR',
         message: 'Failed to generate response',

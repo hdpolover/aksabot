@@ -20,7 +20,7 @@ export class GeminiLlmProvider implements ILlmProvider {
     messages: ChatMessage[],
   ): Promise<LlmResponse> {
     const chat = this.model.startChat({
-      systemInstruction: systemPrompt,
+      systemInstruction: { role: 'user', parts: [{ text: systemPrompt }] },
       history: messages.slice(0, -1).map((m) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.content }],
@@ -47,7 +47,7 @@ export class GeminiLlmProvider implements ILlmProvider {
     messages: ChatMessage[],
   ): AsyncGenerator<string> {
     const chat = this.model.startChat({
-      systemInstruction: systemPrompt,
+      systemInstruction: { role: 'user', parts: [{ text: systemPrompt }] },
       history: messages.slice(0, -1).map((m) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.content }],
