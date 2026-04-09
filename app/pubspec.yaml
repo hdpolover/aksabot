@@ -39,9 +39,9 @@ dependencies:
   google_fonts: ^6.2.1
   shimmer: ^3.0.0
 
-  # BLE (for Phase 4 provisioning + presence)
-  # flutter_blue_plus: ^1.35.0
-  # flutter_ble_peripheral: ^0.1.2
+  # BLE (provisioning + presence)
+  flutter_blue_plus: ^1.35.0
+  # flutter_ble_peripheral: ^0.1.2  # Enable when presence detection is needed
 
 dev_dependencies:
   flutter_test:

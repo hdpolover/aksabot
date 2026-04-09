@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/di/injection.dart';
 import '../../domain/repositories/devices_repository.dart';
+import 'ble_provisioning_page.dart';
 
 /// Add Device screen — choose between Wi-Fi (manual token) or Bluetooth.
 class AddDevicePage extends StatelessWidget {
@@ -58,10 +59,9 @@ class AddDevicePage extends StatelessWidget {
             description:
                 'Scan for nearby Aksabot devices and configure Wi-Fi '
                 'credentials over BLE. Requires Bluetooth permission.',
-            tag: 'Coming soon',
-            tagColor: colors.outline,
-            enabled: false,
-            onTap: () {},
+            tag: 'Recommended',
+            tagColor: colors.primary,
+            onTap: () => _showBleFlow(context),
           ),
         ],
       ),
@@ -71,6 +71,12 @@ class AddDevicePage extends StatelessWidget {
   void _showWifiFlow(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const _WifiAddDevicePage()),
+    );
+  }
+
+  void _showBleFlow(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const BleProvisioningPage()),
     );
   }
 }
@@ -233,7 +239,6 @@ class _ConnectionOption extends StatelessWidget {
   final String description;
   final String tag;
   final Color tagColor;
-  final bool enabled;
   final VoidCallback onTap;
 
   const _ConnectionOption({
@@ -242,7 +247,6 @@ class _ConnectionOption extends StatelessWidget {
     required this.description,
     required this.tag,
     required this.tagColor,
-    this.enabled = true,
     required this.onTap,
   });
 
@@ -254,67 +258,58 @@ class _ConnectionOption extends StatelessWidget {
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: enabled ? onTap : null,
-        child: Opacity(
-          opacity: enabled ? 1.0 : 0.5,
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: enabled
-                        ? colors.primaryContainer
-                        : colors.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(icon,
-                      color: enabled
-                          ? colors.onPrimaryContainer
-                          : colors.onSurfaceVariant),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: colors.primaryContainer,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(title, style: theme.textTheme.titleMedium),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: tagColor.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              tag,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: tagColor,
-                              ),
+                child: Icon(icon, color: colors.onPrimaryContainer),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(title, style: theme.textTheme.titleMedium),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: tagColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            tag,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: tagColor,
                             ),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        description,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.onSurfaceVariant,
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      description,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                if (enabled)
-                  Icon(Icons.chevron_right, color: colors.onSurfaceVariant),
-              ],
-            ),
+              ),
+              Icon(Icons.chevron_right, color: colors.onSurfaceVariant),
+            ],
           ),
         ),
       ),
