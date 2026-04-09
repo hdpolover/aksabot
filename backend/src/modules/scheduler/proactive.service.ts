@@ -44,13 +44,20 @@ export class ProactiveService {
    * Called when a device starts its first audio interaction.
    * If it's the first interaction of the day, generates a morning briefing.
    */
-  async checkMorningBriefing(deviceId: string): Promise<string | null> {
+  async checkGreeting(deviceId: string): Promise<string | null> {
     const today = new Date().toISOString().slice(0, 10);
     if (this.lastGreetingDate.get(deviceId) === today) {
       return null; // Already greeted today
     }
 
     this.lastGreetingDate.set(deviceId, today);
+
+    const hour = new Date().getHours();
+    let timeOfDay: string;
+    if (hour < 12) timeOfDay = 'morning';
+    else if (hour < 17) timeOfDay = 'afternoon';
+    else if (hour < 21) timeOfDay = 'evening';
+    else timeOfDay = 'night';
 
     try {
       const memories = await this.memoriesService.getRelevant(deviceId, 5);
@@ -65,21 +72,23 @@ export class ProactiveService {
           : '';
 
       const { text } = await this.llm.generate(
-        `You are a friendly desk companion named ${name}. Generate a brief, warm morning greeting. ` +
+        `You are a friendly desk companion named ${name}. ` +
+          `It is currently ${timeOfDay} (${hour}:00). Generate a brief, warm ${timeOfDay} greeting. ` +
+          `Use an appropriate greeting for the time of day (e.g., "Good morning" before noon, "Good afternoon", "Good evening", or "Hey, still up?" late at night). ` +
           `If you have context about what the user was working on, reference it naturally. ` +
           `Keep it under 30 words. Be conversational, not robotic.`,
         [
           {
             role: 'user',
-            content: `${memoryContext}\n\nGenerate a morning greeting for the start of a new day.`,
+            content: `${memoryContext}\n\nGenerate a ${timeOfDay} greeting. The current time is ${hour}:00.`,
           },
         ],
       );
 
-      this.logger.log(`Morning briefing for device ${deviceId}: ${text.slice(0, 50)}...`);
+      this.logger.log(`Greeting for device ${deviceId}: ${text.slice(0, 50)}...`);
       return text;
     } catch (err: any) {
-      this.logger.warn(`Morning briefing failed: ${err.message}`);
+      this.logger.warn(`Greeting failed: ${err.message}`);
       return null;
     }
   }

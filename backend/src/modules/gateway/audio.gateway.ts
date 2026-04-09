@@ -169,8 +169,8 @@ export class AudioGateway
         sessionId: conversation.id,
       });
 
-      // Check for morning briefing (first interaction of the day)
-      this.proactive.checkMorningBriefing(deviceId).then((briefing) => {
+      // Check for greeting (first interaction of the day, time-aware)
+      this.proactive.checkGreeting(deviceId).then((briefing) => {
         if (briefing) {
           this.sendToDevice(deviceId, 'proactive:briefing', {
             type: 'morning',
