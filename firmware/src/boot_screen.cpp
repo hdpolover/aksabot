@@ -179,6 +179,24 @@ void boot_screen::showProvisioningStatus(const char* status) {
     drawSmall(status, 260, GREEN);
 }
 
+void boot_screen::tickProvisioningAnimation(uint32_t nowMs) {
+    static uint32_t lastMs = 0;
+    static uint8_t phase = 0;
+
+    if (nowMs - lastMs < 500) return;
+    lastMs = nowMs;
+    phase = (phase + 1) % 3;
+
+    // Three cycling dots just below the "Waiting..." label to show life
+    int dotY = 245;
+    int spacing = 14;
+    for (int i = 0; i < 3; i++) {
+        // Dim all three then highlight the active one
+        uint16_t col = (i == phase) ? CYAN : DIM;
+        tft.fillCircle(CX + (i - 1) * spacing, dotY, 4, col);
+    }
+}
+
 void boot_screen::showConnecting(const char* ssid) {
     clearScreen();
 

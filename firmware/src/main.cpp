@@ -520,10 +520,12 @@ void setup() {
         // Poll rather than blocking — lets us update the screen when phone connects
         bool bleConnectedShown = false;
         while (!ble_manager::isProvisioned()) {
+            uint32_t now = millis();
             if (!bleConnectedShown && ble_manager::isClientConnected()) {
                 boot_screen::showProvisioningStatus("Phone connected...");
                 bleConnectedShown = true;
             }
+            boot_screen::tickProvisioningAnimation(now);
             delay(100);
         }
         boot_screen::showProvisioningStatus("WiFi credentials received!");

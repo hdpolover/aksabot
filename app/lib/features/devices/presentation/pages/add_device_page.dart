@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:dio/dio.dart';
 
-import '../../../../core/di/injection.dart';
-import '../../domain/repositories/devices_repository.dart';
 import 'ble_provisioning_page.dart';
 
 /// Add Device screen — choose between Wi-Fi (SoftAP) or Bluetooth.
@@ -32,7 +29,7 @@ class AddDevicePage extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Choose a connection method to pair your Aksabot device.',
+            'Choose how your phone will talk to your Aksabot device.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: colors.onSurfaceVariant,
@@ -40,32 +37,32 @@ class AddDevicePage extends StatelessWidget {
           ),
           const SizedBox(height: 32),
 
-          // Option 1: Wi-Fi (SoftAP)
-          _ConnectionOption(
-            icon: Icons.wifi,
-            title: 'Wi-Fi',
-            description:
-                'Connect to your Aksabot\'s hotspot and enter your '
-                'home Wi-Fi credentials. No Bluetooth required.',
-            tag: 'Easy setup',
-            tagColor: colors.primary,
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const _WifiSetupPage()),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Option 2: Bluetooth
+          // Option 1: Bluetooth (primary)
           _ConnectionOption(
             icon: Icons.bluetooth,
             title: 'Bluetooth',
             description:
-                'Scan for nearby Aksabot devices and configure Wi-Fi '
-                'credentials over BLE. Requires Bluetooth permission.',
+                'Scan for your Aksabot nearby and send Wi-Fi credentials '
+                'over BLE. The recommended way to set up a new device.',
             tag: 'Recommended',
             tagColor: colors.primary,
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const BleProvisioningPage()),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Option 2: Wi-Fi SoftAP
+          _ConnectionOption(
+            icon: Icons.wifi_tethering,
+            title: 'Wi-Fi Hotspot',
+            description:
+                'Connect your phone to the Aksabot hotspot and send '
+                'credentials over Wi-Fi. Use this if Bluetooth is unavailable.',
+            tag: 'Alternative',
+            tagColor: colors.secondary,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const _WifiSetupPage()),
             ),
           ),
         ],
@@ -82,11 +79,10 @@ class AddDevicePage extends StatelessWidget {
 // 1. ESP32 boots in AP mode, creating hotspot "Aksabot-XXXX"
 // 2. User connects phone to that hotspot (in phone Settings)
 // 3. In the app, user enters home Wi-Fi SSID + password
-// 4. App creates device on backend → gets deviceToken
-// 5. App sends SSID + password + deviceToken to ESP32 via HTTP (192.168.4.1)
-// 6. ESP32 stores creds, switches to station mode, connects to home Wi-Fi
-// 7. ESP32 connects to backend via WebSocket using the token
-// 8. Device appears online in the app
+// 4. App POSTs credentials to ESP32 at http://192.168.4.1/provision
+// 5. ESP32 stores creds, switches to station mode, connects to home Wi-Fi
+//
+// Note: No backend registration is required for initial setup.
 // ---------------------------------------------------------------------------
 
 class _WifiSetupPage extends StatefulWidget {
@@ -100,16 +96,13 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
   final _pageController = PageController();
   int _step = 0;
 
-  // Step 2: Wi-Fi credentials
   final _ssidController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _nameController = TextEditingController(text: 'My Aksabot');
   bool _obscurePassword = true;
 
-  // Step 3: provisioning
-  bool _isProvisioning = false;
+  bool _isSending = false;
   String? _error;
-  List<_ProvisionStep> _provisionSteps = [];
+  _SendState _sendState = _SendState.idle;
 
   // ESP32 SoftAP address
   static const _espBaseUrl = 'http://192.168.4.1';
@@ -119,7 +112,6 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
     _pageController.dispose();
     _ssidController.dispose();
     _passwordController.dispose();
-    _nameController.dispose();
     super.dispose();
   }
 
@@ -132,10 +124,9 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
     setState(() => _step = step);
   }
 
-  Future<void> _startProvisioning() async {
+  Future<void> _sendCredentials() async {
     final ssid = _ssidController.text.trim();
     final password = _passwordController.text;
-    final name = _nameController.text.trim();
 
     if (ssid.isEmpty) {
       setState(() => _error = 'Please enter your Wi-Fi network name');
@@ -143,34 +134,12 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
     }
 
     setState(() {
-      _isProvisioning = true;
+      _isSending = true;
       _error = null;
-      _provisionSteps = [
-        _ProvisionStep('Registering device...', _StepState.loading),
-        _ProvisionStep('Sending Wi-Fi credentials', _StepState.pending),
-        _ProvisionStep('Waiting for device to connect', _StepState.pending),
-      ];
+      _sendState = _SendState.sending;
     });
     _goToStep(2);
 
-    // Step 1: Create device on backend
-    final repo = sl<DevicesRepository>();
-    final result = await repo.createDevice(name: name.isEmpty ? 'My Aksabot' : name);
-
-    final device = result.fold(
-      (failure) {
-        _setProvisionError(0, failure.message);
-        return null;
-      },
-      (device) => device,
-    );
-
-    if (device == null) return;
-
-    _updateProvisionStep(0, _StepState.done);
-    _updateProvisionStep(1, _StepState.loading);
-
-    // Step 2: Send Wi-Fi credentials + device token to ESP32 via SoftAP HTTP
     try {
       final dio = Dio(BaseOptions(
         baseUrl: _espBaseUrl,
@@ -181,91 +150,73 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
       await dio.post('/provision', data: {
         'ssid': ssid,
         'password': password,
-        'deviceId': device.id,
-        if (device.deviceToken != null) 'deviceToken': device.deviceToken,
       });
 
-      _updateProvisionStep(1, _StepState.done);
-      _updateProvisionStep(2, _StepState.loading);
+      // Credentials accepted — give device a moment to process
+      setState(() => _sendState = _SendState.waiting);
+      await Future.delayed(const Duration(seconds: 3));
+      if (!mounted) return;
 
-      // Step 3: Wait for the ESP32 to connect to Wi-Fi and appear online
-      // Poll the backend to check if the device comes online
-      bool online = false;
-      for (int i = 0; i < 30; i++) {
-        await Future.delayed(const Duration(seconds: 2));
-        if (!mounted) return;
-
-        final check = await repo.getDevice(device.id);
-        final isOnline = check.fold((_) => false, (d) => d.isOnline);
-        if (isOnline) {
-          online = true;
-          break;
-        }
-      }
-
-      if (online) {
-        _updateProvisionStep(2, _StepState.done);
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (mounted) _goToStep(3); // Success
-      } else {
-        _setProvisionError(
-          2,
-          'Device didn\'t come online within 60 seconds. '
-          'Check that your Wi-Fi credentials are correct.',
-        );
-      }
+      setState(() {
+        _isSending = false;
+        _sendState = _SendState.done;
+      });
+      await Future.delayed(const Duration(milliseconds: 400));
+      if (mounted) _goToStep(3);
     } on DioException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSending = false;
+        _sendState = _SendState.idle;
+      });
+
       if (e.type == DioExceptionType.connectionTimeout ||
           e.type == DioExceptionType.connectionError) {
-        _setProvisionError(
-          1,
-          'Could not reach the device. Make sure you\'re connected '
+        _showSendError(
+          'Could not reach the device. Make sure your phone is connected '
           'to the "Aksabot-XXXX" Wi-Fi hotspot.',
         );
       } else {
-        _setProvisionError(1, 'Failed to send credentials: ${e.message}');
+        _showSendError('Failed to send credentials: ${e.message}');
       }
     } catch (e) {
-      _setProvisionError(1, 'Unexpected error: $e');
+      if (!mounted) return;
+      setState(() {
+        _isSending = false;
+        _sendState = _SendState.idle;
+      });
+      _showSendError('Unexpected error: $e');
     }
   }
 
-  void _updateProvisionStep(int index, _StepState state) {
-    if (!mounted) return;
-    setState(() {
-      _provisionSteps[index] = _ProvisionStep(
-        _provisionSteps[index].label,
-        state,
-      );
-    });
-  }
-
-  void _setProvisionError(int failedStep, String message) {
-    if (!mounted) return;
-    setState(() {
-      _isProvisioning = false;
-      _provisionSteps[failedStep] = _ProvisionStep(
-        _provisionSteps[failedStep].label,
-        _StepState.error,
-      );
-      _error = message;
-    });
+  void _showSendError(String message) {
+    setState(() => _error = message);
+    // Stay on progress step so error is visible
   }
 
   @override
   Widget build(BuildContext context) {
+    final stepLabels = ['Hotspot', 'Credentials', 'Sending', 'Done'];
+
     return Scaffold(
       appBar: AppBar(
-        title: Text('Wi-Fi Setup${_step > 0 ? ' — Step ${_step + 1}/4' : ''}'),
+        title: Text('Wi-Fi Setup — ${stepLabels[_step.clamp(0, 3)]}'),
       ),
-      body: PageView(
-        controller: _pageController,
-        physics: const NeverScrollableScrollPhysics(),
+      body: Column(
         children: [
-          _buildConnectHotspotStep(),
-          _buildCredentialsStep(),
-          _buildProvisioningStep(),
-          _buildSuccessStep(),
+          _StepProgressBar(current: _step, total: 4),
+          Expanded(
+            child: PageView(
+              controller: _pageController,
+              physics: const NeverScrollableScrollPhysics(),
+              children: [
+                _buildConnectHotspotStep(),
+                _buildCredentialsStep(),
+                _buildSendingStep(),
+                _buildSuccessStep(),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -285,13 +236,12 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
           Icon(Icons.wifi_tethering, size: 48, color: colors.primary),
           const SizedBox(height: 16),
           Text(
-            'Connect to your Aksabot',
+            'Connect to your Aksabot hotspot',
             textAlign: TextAlign.center,
             style: theme.textTheme.titleLarge,
           ),
           const SizedBox(height: 16),
 
-          // Instruction card
           Card(
             color: colors.primaryContainer.withValues(alpha: 0.3),
             child: Padding(
@@ -301,7 +251,7 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
                 children: [
                   _InstructionRow(
                     number: '1',
-                    text: 'Make sure your Aksabot is powered on',
+                    text: 'Power on your Aksabot',
                   ),
                   const SizedBox(height: 12),
                   _InstructionRow(
@@ -316,7 +266,7 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
                   const SizedBox(height: 12),
                   _InstructionRow(
                     number: '4',
-                    text: 'Come back to this app',
+                    text: 'Return to this app',
                   ),
                 ],
               ),
@@ -324,8 +274,8 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
           ),
           const SizedBox(height: 16),
           Text(
-            'The device creates a temporary hotspot for setup. '
-            'After setup, it will connect to your home Wi-Fi.',
+            'Aksabot creates a temporary hotspot for setup only. '
+            'After setup it will connect to your home Wi-Fi.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: colors.onSurfaceVariant,
@@ -341,7 +291,7 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
     );
   }
 
-  // ── Step 2: Enter Wi-Fi credentials ──────────────────────────
+  // ── Step 2: Enter credentials ────────────────────────────────
 
   Widget _buildCredentialsStep() {
     final theme = Theme.of(context);
@@ -355,13 +305,13 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
           Icon(Icons.wifi_lock, size: 48, color: colors.primary),
           const SizedBox(height: 16),
           Text(
-            'Enter your Wi-Fi credentials',
+            'Enter your home Wi-Fi',
             textAlign: TextAlign.center,
             style: theme.textTheme.titleLarge,
           ),
           const SizedBox(height: 8),
           Text(
-            'Your Aksabot will use these to connect to your home network.',
+            'Your Aksabot will use these to connect to the internet.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: colors.onSurfaceVariant,
@@ -371,7 +321,7 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
           TextField(
             controller: _ssidController,
             decoration: const InputDecoration(
-              labelText: 'Wi-Fi network name',
+              labelText: 'Wi-Fi network name (SSID)',
               prefixIcon: Icon(Icons.wifi),
             ),
           ),
@@ -393,24 +343,14 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _nameController,
-            decoration: const InputDecoration(
-              labelText: 'Device name',
-              prefixIcon: Icon(Icons.smart_toy_outlined),
-              hintText: 'My Aksabot',
-            ),
-            textCapitalization: TextCapitalization.words,
-          ),
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(_error!, style: TextStyle(color: colors.error)),
           ],
           const SizedBox(height: 24),
           FilledButton(
-            onPressed: _isProvisioning ? null : _startProvisioning,
-            child: const Text('Set Up Device'),
+            onPressed: _isSending ? null : _sendCredentials,
+            child: const Text('Send to Device'),
           ),
           const SizedBox(height: 8),
           TextButton(
@@ -422,9 +362,9 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
     );
   }
 
-  // ── Step 3: Provisioning progress ────────────────────────────
+  // ── Step 3: Sending progress ─────────────────────────────────
 
-  Widget _buildProvisioningStep() {
+  Widget _buildSendingStep() {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
 
@@ -439,26 +379,24 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
             textAlign: TextAlign.center,
             style: theme.textTheme.titleLarge,
           ),
-          const SizedBox(height: 32),
-          ..._provisionSteps.map((step) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    _stepIcon(step.state, colors),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        step.label,
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          color: step.state == _StepState.pending
-                              ? colors.onSurfaceVariant
-                              : null,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              )),
+          const SizedBox(height: 40),
+          _ProgressItem(
+            label: 'Sending credentials to device',
+            state: _sendState == _SendState.sending
+                ? _ItemState.loading
+                : (_sendState == _SendState.idle
+                    ? _ItemState.pending
+                    : _ItemState.done),
+          ),
+          const SizedBox(height: 16),
+          _ProgressItem(
+            label: 'Device connecting to Wi-Fi',
+            state: _sendState == _SendState.waiting
+                ? _ItemState.loading
+                : (_sendState == _SendState.done
+                    ? _ItemState.done
+                    : _ItemState.pending),
+          ),
           if (_error != null) ...[
             const SizedBox(height: 24),
             Card(
@@ -477,7 +415,7 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
             FilledButton.tonal(
               onPressed: () {
                 setState(() => _error = null);
-                _goToStep(1); // Back to credentials
+                _goToStep(1);
               },
               child: const Text('Try Again'),
             ),
@@ -487,31 +425,12 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
     );
   }
 
-  Widget _stepIcon(_StepState state, ColorScheme colors) {
-    switch (state) {
-      case _StepState.done:
-        return const Icon(Icons.check_circle, color: Colors.green, size: 24);
-      case _StepState.loading:
-        return SizedBox(
-          width: 24,
-          height: 24,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: colors.primary,
-          ),
-        );
-      case _StepState.error:
-        return Icon(Icons.cancel, color: colors.error, size: 24);
-      case _StepState.pending:
-        return Icon(Icons.circle_outlined, color: colors.outline, size: 24);
-    }
-  }
-
   // ── Step 4: Success ──────────────────────────────────────────
 
   Widget _buildSuccessStep() {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final ssid = _ssidController.text.trim();
 
     return Padding(
       padding: const EdgeInsets.all(24),
@@ -519,10 +438,14 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Icon(Icons.check_circle, size: 64, color: Colors.green),
-          const SizedBox(height: 16),
+          const Icon(
+            Icons.check_circle_rounded,
+            size: 72,
+            color: Colors.green,
+          ),
+          const SizedBox(height: 20),
           Text(
-            "You're all set!",
+            "Device connected!",
             textAlign: TextAlign.center,
             style: theme.textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.bold,
@@ -530,20 +453,43 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            '${_nameController.text.trim()} is connected to Wi-Fi and '
-            'ready to use.',
+            ssid.isNotEmpty
+                ? 'Your Aksabot is now connected to "$ssid".'
+                : 'Your Aksabot is connected to the internet.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: colors.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 12),
+          Center(
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: colors.secondaryContainer,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.info_outline,
+                      size: 14, color: colors.onSecondaryContainer),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Connect to backend later to unlock AI features',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: colors.onSecondaryContainer,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 40),
           FilledButton(
-            onPressed: () {
-              Navigator.of(context).pop(); // pop wifi flow
-              context.pop(); // pop add-device route
-            },
-            child: const Text('Go to Dashboard'),
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Done'),
           ),
         ],
       ),
@@ -552,15 +498,53 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
 }
 
 // ---------------------------------------------------------------------------
-// Helper models
+// Helper models & widgets shared by both flows
 // ---------------------------------------------------------------------------
 
-enum _StepState { pending, loading, done, error }
+enum _SendState { idle, sending, waiting, done }
 
-class _ProvisionStep {
+enum _ItemState { pending, loading, done }
+
+class _ProgressItem extends StatelessWidget {
   final String label;
-  final _StepState state;
-  const _ProvisionStep(this.label, this.state);
+  final _ItemState state;
+
+  const _ProgressItem({required this.label, required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    Widget leading;
+    switch (state) {
+      case _ItemState.done:
+        leading = const Icon(Icons.check_circle, color: Colors.green, size: 24);
+      case _ItemState.loading:
+        leading = SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(strokeWidth: 2, color: colors.primary),
+        );
+      case _ItemState.pending:
+        leading = Icon(Icons.circle_outlined, color: colors.outline, size: 24);
+    }
+
+    return Row(
+      children: [
+        leading,
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            label,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: state == _ItemState.pending ? colors.onSurfaceVariant : null,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _InstructionRow extends StatelessWidget {
@@ -600,8 +584,39 @@ class _InstructionRow extends StatelessWidget {
   }
 }
 
+class _StepProgressBar extends StatelessWidget {
+  final int current;
+  final int total;
+
+  const _StepProgressBar({required this.current, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+      child: Row(
+        children: List.generate(total, (index) {
+          final active = index <= current;
+          return Expanded(
+            child: Container(
+              margin: EdgeInsets.only(right: index < total - 1 ? 4 : 0),
+              height: 4,
+              decoration: BoxDecoration(
+                color: active ? colors.primary : colors.outlineVariant,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Connection option card (shared between Wi-Fi and Bluetooth)
+// Connection option card
 // ---------------------------------------------------------------------------
 
 class _ConnectionOption extends StatelessWidget {
@@ -662,9 +677,8 @@ class _ConnectionOption extends StatelessWidget {
                           ),
                           child: Text(
                             tag,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: tagColor,
-                            ),
+                            style: theme.textTheme.labelSmall
+                                ?.copyWith(color: tagColor),
                           ),
                         ),
                       ],

@@ -27,6 +27,10 @@ void showProvisioningPrompt();
 /// Update provisioning status line (e.g., "Phone connected!", "Receiving WiFi...").
 void showProvisioningStatus(const char* status);
 
+/// Animate the provisioning waiting indicator (call in a loop while blocking).
+/// Cycles three dots so the screen never looks frozen. Safe to call every 100ms.
+void tickProvisioningAnimation(uint32_t nowMs);
+
 /// Show setup complete celebration (first successful WiFi connection).
 void showSetupComplete(const char* ssid);
 

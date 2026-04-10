@@ -39,12 +39,14 @@ static void scheduleNextBlink(uint32_t nowMs) {
 }
 
 static bool shouldBlink(face::Expression expr) {
-    // Only blink in idle-like states
+    // Blink in all "awake" states — including OFFLINE so the face never
+    // looks completely frozen when the device has no internet connection.
     return expr == face::Expression::IDLE ||
            expr == face::Expression::ENCOURAGING ||
            expr == face::Expression::CALM ||
            expr == face::Expression::FOCUSED ||
-           expr == face::Expression::SPEAKING;
+           expr == face::Expression::SPEAKING ||
+           expr == face::Expression::OFFLINE;
 }
 
 // ── Public API ─────────────────────────────────────────
