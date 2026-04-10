@@ -1,6 +1,7 @@
 #include "ws_client.h"
 #include "config.h"
 #include "state.h"
+#include "nvs_store.h"
 #include <ArduinoJson.h>
 #include <Arduino.h>
 
@@ -13,6 +14,10 @@ static ws_client::BinaryCallback binaryCb;
 static uint32_t reconnectDelay = WS_RECONNECT_BASE_MS;
 static unsigned long lastReconnectAttempt = 0;
 static bool shouldReconnect = true;
+
+// Resolved from NVS or compile-time fallback
+static char wsUrlBuf[256];
+static char tokenBuf[128];
 
 // ── Event handlers ──────────────────────────────────────
 
@@ -77,15 +82,25 @@ void ws_client::init(JsonCallback onJson, BinaryCallback onBinary) {
     client.onMessage(onMessage);
     client.onEvent(onEvent);
 
+    // Resolve backend URL: NVS first, then compile-time fallback
+    if (!nvs_store::getBackendUrl(wsUrlBuf, sizeof(wsUrlBuf))) {
+        strncpy(wsUrlBuf, BACKEND_WS_URL, sizeof(wsUrlBuf) - 1);
+    }
+
+    // Resolve device token: NVS first, then compile-time fallback
+    if (!nvs_store::getDeviceToken(tokenBuf, sizeof(tokenBuf))) {
+        strncpy(tokenBuf, DEVICE_TOKEN, sizeof(tokenBuf) - 1);
+    }
+
     // Set device token auth header
-    String authHeader = String("DeviceToken ") + DEVICE_TOKEN;
+    String authHeader = String("DeviceToken ") + tokenBuf;
     client.addHeader("Authorization", authHeader.c_str());
 }
 
 void ws_client::connect() {
     shouldReconnect = true;
-    Serial.printf("[WS] Connecting to %s...\n", BACKEND_WS_URL);
-    client.connect(BACKEND_WS_URL);
+    Serial.printf("[WS] Connecting to %s...\n", wsUrlBuf);
+    client.connect(wsUrlBuf);
 }
 
 void ws_client::poll() {
@@ -98,7 +113,7 @@ void ws_client::poll() {
         unsigned long now = millis();
         if ((now - lastReconnectAttempt) > reconnectDelay) {
             Serial.printf("[WS] Reconnecting (backoff %ums)...\n", reconnectDelay);
-            client.connect(BACKEND_WS_URL);
+            client.connect(wsUrlBuf);
             lastReconnectAttempt = now;
             reconnectDelay = min(reconnectDelay * 2, (uint32_t)WS_RECONNECT_MAX_MS);
         }

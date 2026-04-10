@@ -1,11 +1,16 @@
 #include "wifi_manager.h"
 #include "config.h"
 #include "state.h"
+#include "nvs_store.h"
 #include <WiFi.h>
 #include <Arduino.h>
 
 static uint32_t reconnectDelay = WIFI_RECONNECT_BASE_MS;
 static unsigned long lastReconnectAttempt = 0;
+
+// Resolved credentials (NVS or compile-time fallback)
+static char ssidBuf[64];
+static char passBuf[128];
 
 static void onWiFiEvent(WiFiEvent_t event) {
     switch (event) {
@@ -30,8 +35,18 @@ void wifi_manager::init() {
     WiFi.onEvent(onWiFiEvent);
     WiFi.setAutoReconnect(false);  // we handle reconnect manually for backoff
 
-    Serial.printf("[WiFi] Connecting to %s...\n", WIFI_SSID);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    // Try NVS credentials first, fall back to compile-time constants
+    if (nvs_store::hasWifiCredentials() &&
+        nvs_store::getWifiSsid(ssidBuf, sizeof(ssidBuf)) &&
+        nvs_store::getWifiPassword(passBuf, sizeof(passBuf))) {
+        Serial.printf("[WiFi] Using provisioned credentials for '%s'\n", ssidBuf);
+    } else {
+        strncpy(ssidBuf, WIFI_SSID, sizeof(ssidBuf) - 1);
+        strncpy(passBuf, WIFI_PASS, sizeof(passBuf) - 1);
+        Serial.printf("[WiFi] Using compile-time credentials for '%s'\n", ssidBuf);
+    }
+
+    WiFi.begin(ssidBuf, passBuf);
 }
 
 bool wifi_manager::isConnected() {
@@ -49,7 +64,7 @@ bool wifi_manager::waitForConnection(uint32_t timeout_ms) {
         if (!WiFi.isConnected() && (millis() - lastReconnectAttempt) > reconnectDelay) {
             Serial.printf("[WiFi] Reconnecting (backoff %ums)...\n", reconnectDelay);
             WiFi.disconnect();
-            WiFi.begin(WIFI_SSID, WIFI_PASS);
+            WiFi.begin(ssidBuf, passBuf);
             lastReconnectAttempt = millis();
 
             // Exponential backoff with cap
@@ -59,4 +74,16 @@ bool wifi_manager::waitForConnection(uint32_t timeout_ms) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     return true;
+}
+
+void wifi_manager::reconnect(const char* ssid, const char* password) {
+    strncpy(ssidBuf, ssid, sizeof(ssidBuf) - 1);
+    ssidBuf[sizeof(ssidBuf) - 1] = '\0';
+    strncpy(passBuf, password, sizeof(passBuf) - 1);
+    passBuf[sizeof(passBuf) - 1] = '\0';
+
+    Serial.printf("[WiFi] Reconnecting with new credentials for '%s'\n", ssidBuf);
+    WiFi.disconnect();
+    reconnectDelay = WIFI_RECONNECT_BASE_MS;
+    WiFi.begin(ssidBuf, passBuf);
 }
