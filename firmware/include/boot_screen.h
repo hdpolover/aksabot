@@ -21,8 +21,9 @@ void showHardwareCheck(const char* component, uint8_t status);
 /// Explains what Aksabot is before BLE provisioning begins.
 void showFirstBoot();
 
-/// Show BLE provisioning prompt: "Open Aksabot app to set up".
-void showProvisioningPrompt();
+/// Show provisioning prompt. Pass the SoftAP name so users see both options.
+/// apName may be nullptr when SoftAP is not active.
+void showProvisioningPrompt(const char* apName = nullptr);
 
 /// Update provisioning status line (e.g., "Phone connected!", "Receiving WiFi...").
 void showProvisioningStatus(const char* status);

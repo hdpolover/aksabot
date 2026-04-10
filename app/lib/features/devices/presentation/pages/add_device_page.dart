@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 
+import '../../../../core/local/local_device_store.dart';
 import 'ble_provisioning_page.dart';
 
 /// Add Device screen — choose between Wi-Fi (SoftAP) or Bluetooth.
@@ -156,6 +157,13 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
       setState(() => _sendState = _SendState.waiting);
       await Future.delayed(const Duration(seconds: 3));
       if (!mounted) return;
+
+      // Persist locally so the home screen shows this device immediately
+      final device = LocalDeviceStore.create(
+        name: 'Aksabot',
+        ssid: _ssidController.text.trim(),
+      );
+      await LocalDeviceStore.save(device);
 
       setState(() {
         _isSending = false;

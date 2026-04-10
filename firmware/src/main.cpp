@@ -514,21 +514,37 @@ void setup() {
     bool hasCompileCreds = (strlen(WIFI_SSID) > 0);
 
     if (!hasNvsCreds && !hasCompileCreds) {
-        Serial.println("[Main] No WiFi credentials — entering BLE provisioning mode");
-        boot_screen::showProvisioningPrompt();
+        Serial.println("[Main] No WiFi credentials — entering provisioning mode");
 
-        // Poll rather than blocking — lets us update the screen when phone connects
+        // Build SoftAP name from last 2 MAC bytes for uniqueness
+        char apName[24];
+        uint8_t mac[6];
+        WiFi.macAddress(mac);
+        snprintf(apName, sizeof(apName), "Aksabot-%02X%02X", mac[4], mac[5]);
+
+        wifi_manager::startAP(apName);
+        boot_screen::showProvisioningPrompt(apName);
+
+        // Poll for either BLE or SoftAP HTTP to deliver credentials
         bool bleConnectedShown = false;
-        while (!ble_manager::isProvisioned()) {
+        while (!ble_manager::isProvisioned() && !wifi_manager::isAPProvisioned()) {
             uint32_t now = millis();
             if (!bleConnectedShown && ble_manager::isClientConnected()) {
-                boot_screen::showProvisioningStatus("Phone connected...");
+                boot_screen::showProvisioningStatus("Phone connected via BLE...");
                 bleConnectedShown = true;
             }
             boot_screen::tickProvisioningAnimation(now);
+            wifi_manager::tickAP();
             delay(100);
         }
-        boot_screen::showProvisioningStatus("WiFi credentials received!");
+
+        wifi_manager::stopAP();
+
+        const char* method = ble_manager::isProvisioned() ? "BLE" : "Wi-Fi hotspot";
+        char statusMsg[48];
+        snprintf(statusMsg, sizeof(statusMsg), "Credentials received via %s", method);
+        boot_screen::showProvisioningStatus(statusMsg);
+        Serial.printf("[Main] Provisioned via %s\n", method);
         delay(600);
     } else if (hasNvsCreds) {
         Serial.println("[Main] Using NVS WiFi credentials");

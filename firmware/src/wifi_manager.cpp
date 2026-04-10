@@ -3,6 +3,8 @@
 #include "state.h"
 #include "nvs_store.h"
 #include <WiFi.h>
+#include <WebServer.h>
+#include <ArduinoJson.h>
 #include <Arduino.h>
 
 static uint32_t reconnectDelay = WIFI_RECONNECT_BASE_MS;
@@ -11,6 +13,11 @@ static unsigned long lastReconnectAttempt = 0;
 // Resolved credentials (NVS or compile-time fallback)
 static char ssidBuf[64];
 static char passBuf[128];
+
+// ── SoftAP state ──────────────────────────────────────────────
+static WebServer* apServer = nullptr;
+static volatile bool apProvisioned = false;
+static bool apActive = false;
 
 static void onWiFiEvent(WiFiEvent_t event) {
     switch (event) {
@@ -86,4 +93,91 @@ void wifi_manager::reconnect(const char* ssid, const char* password) {
     WiFi.disconnect();
     reconnectDelay = WIFI_RECONNECT_BASE_MS;
     WiFi.begin(ssidBuf, passBuf);
+}
+
+// ── SoftAP provisioning ───────────────────────────────────────
+
+void wifi_manager::startAP(const char* apName) {
+    // AP+STA so BLE can coexist and we can switch to STA without re-init
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.softAP(apName, "");  // open network — no password needed for setup
+    WiFi.onEvent(onWiFiEvent);
+
+    Serial.printf("[WiFi] SoftAP '%s' started — IP: %s\n",
+                  apName, WiFi.softAPIP().toString().c_str());
+
+    apServer = new WebServer(80);
+    apProvisioned = false;
+
+    // POST /provision — accepts JSON body {ssid, password}
+    apServer->on("/provision", HTTP_POST, []() {
+        const String body = apServer->arg("plain");
+
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, body);
+        if (err) {
+            apServer->send(400, "application/json",
+                           "{\"error\":\"invalid JSON\"}");
+            Serial.println("[WiFi AP] /provision — bad JSON");
+            return;
+        }
+
+        const char* ssid     = doc["ssid"]     | (const char*)nullptr;
+        const char* password = doc["password"] | "";
+
+        if (!ssid || strlen(ssid) == 0) {
+            apServer->send(400, "application/json",
+                           "{\"error\":\"ssid required\"}");
+            return;
+        }
+
+        nvs_store::setWifiSsid(ssid);
+        nvs_store::setWifiPassword(password);
+        apProvisioned = true;
+
+        apServer->send(200, "application/json", "{\"ok\":true}");
+        Serial.printf("[WiFi AP] /provision — credentials received: %s\n", ssid);
+    });
+
+    // GET /status — lets the app poll connection state
+    apServer->on("/status", HTTP_GET, []() {
+        JsonDocument doc;
+        doc["provisioned"] = (bool)apProvisioned;
+        doc["wifiConnected"] = appState.wifiConnected;
+        String out;
+        serializeJson(doc, out);
+        apServer->send(200, "application/json", out);
+    });
+
+    apServer->onNotFound([]() {
+        apServer->send(404, "application/json", "{\"error\":\"not found\"}");
+    });
+
+    apServer->begin();
+    apActive = true;
+    Serial.println("[WiFi AP] HTTP server started on port 80");
+}
+
+void wifi_manager::stopAP() {
+    if (!apActive) return;
+
+    if (apServer) {
+        apServer->stop();
+        delete apServer;
+        apServer = nullptr;
+    }
+
+    WiFi.softAPdisconnect(true);
+    apActive = false;
+    Serial.println("[WiFi AP] Stopped");
+}
+
+bool wifi_manager::isAPProvisioned() {
+    return apProvisioned;
+}
+
+void wifi_manager::tickAP() {
+    if (apActive && apServer) {
+        apServer->handleClient();
+    }
 }

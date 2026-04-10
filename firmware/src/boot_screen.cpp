@@ -149,12 +149,12 @@ void boot_screen::showFirstBoot() {
     delay(2500);
 }
 
-void boot_screen::showProvisioningPrompt() {
+void boot_screen::showProvisioningPrompt(const char* apName) {
     clearScreen();
 
-    // BLE icon (compact Bluetooth shape)
-    int iconY = 55;
-    int s = 10;
+    // Bluetooth icon
+    int iconY = 40;
+    int s = 9;
     tft.drawLine(CX, iconY, CX + s, iconY + s*2, CYAN);
     tft.drawLine(CX + s, iconY + s*2, CX - s, iconY + s*4, CYAN);
     tft.drawLine(CX - s, iconY + s*4, CX + s, iconY + s*6, CYAN);
@@ -165,12 +165,23 @@ void boot_screen::showProvisioningPrompt() {
     tft.drawLine(CX, iconY + s*4, CX - s, iconY + s*6, CYAN);
     tft.drawLine(CX - s, iconY + s*6, CX, iconY + s*8, CYAN);
 
-    drawCentered("Setup Required", 155, WHITE);
-    drawSmall("Open the Aksabot app", 185, DIM);
-    drawSmall("to connect this device", 205, DIM);
+    drawCentered("Setup Required", 132, WHITE);
 
-    tft.fillCircle(CX, 245, 3, CYAN);
-    drawSmall("Waiting for connection...", 260, DIM);
+    if (apName && strlen(apName) > 0) {
+        // Both BLE and SoftAP available
+        drawSmall("Open the Aksabot app", 155, DIM);
+        drawSmall("— or connect to Wi-Fi —", 173, DIM);
+        char apLine[48];
+        snprintf(apLine, sizeof(apLine), "\"%s\"", apName);
+        drawSmall(apLine, 191, CYAN);
+    } else {
+        // BLE only
+        drawSmall("Open the Aksabot app", 158, DIM);
+        drawSmall("to connect this device", 178, DIM);
+    }
+
+    // Animated dots slot (updated by tickProvisioningAnimation)
+    drawSmall("Waiting...", 225, DIM);
 }
 
 void boot_screen::showProvisioningStatus(const char* status) {

@@ -5,6 +5,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import '../../../../core/ble/ble_constants.dart';
 import '../../../../core/ble/ble_provisioning_service.dart';
+import '../../../../core/local/local_device_store.dart';
 
 /// 3-step BLE provisioning wizard.
 ///
@@ -143,6 +144,13 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
         setState(() => _wifiStatus = status);
 
         if (status == BleConstants.wifiConnected) {
+          // Persist locally so the home screen shows this device immediately
+          final device = LocalDeviceStore.create(
+            name: _connectedDeviceName,
+            ssid: _ssidController.text.trim(),
+          );
+          await LocalDeviceStore.save(device);
+
           setState(() => _isConnectingWifi = false);
           _goToStep(2); // Done
           return;
