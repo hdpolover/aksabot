@@ -52,6 +52,15 @@ bool setPresenceRssiThreshold(int8_t rssi);
 uint8_t getPresenceGracePeriodSec();   // default 45
 bool setPresenceGracePeriodSec(uint8_t seconds);
 
+// ── Setup state ───────────────────────────────────────
+
+/// Returns true if this device has never completed first-time setup.
+/// Becomes false after markSetupComplete(). Resets to true after eraseAll().
+bool isFirstBoot();
+
+/// Mark setup as complete. Call after first successful WiFi connection.
+bool markSetupComplete();
+
 // ── Factory reset ─────────────────────────────────────
 
 /// Erase all stored values. Device will need re-provisioning.

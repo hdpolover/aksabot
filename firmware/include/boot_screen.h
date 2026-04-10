@@ -17,11 +17,18 @@ void showSplash(const char* version);
 /// status: 0=checking, 1=ok, 2=failed, 3=skipped
 void showHardwareCheck(const char* component, uint8_t status);
 
+/// Show first-boot introduction screen (new device, never been set up).
+/// Explains what Aksabot is before BLE provisioning begins.
+void showFirstBoot();
+
 /// Show BLE provisioning prompt: "Open Aksabot app to set up".
 void showProvisioningPrompt();
 
-/// Update provisioning status (e.g., "Phone connected", "Receiving WiFi...").
+/// Update provisioning status line (e.g., "Phone connected!", "Receiving WiFi...").
 void showProvisioningStatus(const char* status);
+
+/// Show setup complete celebration (first successful WiFi connection).
+void showSetupComplete(const char* ssid);
 
 /// Show WiFi connecting progress.
 void showConnecting(const char* ssid);

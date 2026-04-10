@@ -500,7 +500,14 @@ void setup() {
 
     delay(2000);  // Let user see the hardware check results
 
-    // ── 5. BLE provisioning gate ───────────────────────────
+    // ── 5. First-boot detection ────────────────────────────
+    bool firstBoot = nvs_store::isFirstBoot();
+    if (firstBoot) {
+        Serial.println("[Main] First boot detected — showing introduction");
+        boot_screen::showFirstBoot();
+    }
+
+    // ── 6. BLE provisioning gate ───────────────────────────
     // Skip if NVS has credentials OR compile-time credentials exist.
     // wifi_manager::init() falls back to credentials.h when NVS is empty.
     bool hasNvsCreds = nvs_store::hasWifiCredentials();
@@ -509,61 +516,70 @@ void setup() {
     if (!hasNvsCreds && !hasCompileCreds) {
         Serial.println("[Main] No WiFi credentials — entering BLE provisioning mode");
         boot_screen::showProvisioningPrompt();
-        ble_manager::waitForProvisioning(0);  // blocks until creds arrive via BLE
-        boot_screen::showProvisioningStatus("Credentials received!");
-        delay(500);
+
+        // Poll rather than blocking — lets us update the screen when phone connects
+        bool bleConnectedShown = false;
+        while (!ble_manager::isProvisioned()) {
+            if (!bleConnectedShown && ble_manager::isClientConnected()) {
+                boot_screen::showProvisioningStatus("Phone connected...");
+                bleConnectedShown = true;
+            }
+            delay(100);
+        }
+        boot_screen::showProvisioningStatus("WiFi credentials received!");
+        delay(600);
     } else if (hasNvsCreds) {
         Serial.println("[Main] Using NVS WiFi credentials");
     } else {
         Serial.println("[Main] Using compile-time WiFi credentials");
     }
 
-    // ── 6. WiFi connect ────────────────────────────────────
+    // ── 7. WiFi connect ────────────────────────────────────
     char ssidBuf[64] = {};
+    const char* ssidDisplay = WIFI_SSID;
     if (nvs_store::getWifiSsid(ssidBuf, sizeof(ssidBuf)) && strlen(ssidBuf) > 0) {
-        boot_screen::showConnecting(ssidBuf);
-    } else {
-        boot_screen::showConnecting(WIFI_SSID);
+        ssidDisplay = ssidBuf;
     }
+    boot_screen::showConnecting(ssidDisplay);
 
     wifi_manager::init();
     Serial.println("[Main] Waiting for Wi-Fi...");
     wifi_manager::waitForConnection(15000);
 
     if (wifi_manager::isConnected()) {
-        boot_screen::showConnected(WiFi.localIP().toString().c_str());
         ble_manager::notifyWifiStatus(2);  // connected
-        boot_screen::showHardwareCheck("WiFi", 1);
+        if (firstBoot) {
+            // First successful WiFi connection — celebrate and mark done
+            nvs_store::markSetupComplete();
+            boot_screen::showSetupComplete(ssidDisplay);
+        } else {
+            boot_screen::showConnected(WiFi.localIP().toString().c_str());
+        }
+        appState.wifiConnected = true;
     } else {
-        boot_screen::showConnectionFailed("Timeout — will retry");
+        boot_screen::showConnectionFailed("Timeout — will retry in background");
         ble_manager::notifyWifiStatus(3);  // failed
         appState.botState = BotState::OFFLINE;
     }
 
-    // ── 7. WebSocket backend connection ────────────────────
+    // ── 8. Initialize WS client (connects in background via ws task) ──
     ws_client::init(onWsJson, onWsBinary);
     if (wifi_manager::isConnected()) {
         ws_client::connect();
     }
 
-    // ── 8. Start FreeRTOS tasks ────────────────────────────
+    // ── 9. Start FreeRTOS tasks ────────────────────────────
     xTaskCreatePinnedToCore(audioCaptureLoop, "audio_cap", 24576, nullptr, 5, &audioCaptureTask, 0);
     xTaskCreatePinnedToCore(wsLoop, "ws_poll", 12288, nullptr, 3, &wsTask, 1);
     xTaskCreatePinnedToCore(displayLoop, "display", 8192, nullptr, 3, &displayTask, 1);
 
-    // Wait for WS connection
-    unsigned long wsStart = millis();
-    while (!appState.wsConnected && (millis() - wsStart) < 5000) {
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-
-    // ── 9. Start presence scanning ─────────────────────────
+    // ── 10. Start presence scanning ───────────────────────
     if (nvs_store::getPresenceEnabled()) {
         ble_manager::startPresenceScan();
     }
 
-    // ── 10. Ready — transition to face UI ──────────────────
-    if (appState.wsConnected) {
+    // ── 11. Ready — transition to face UI ─────────────────
+    if (appState.wifiConnected) {
         appState.botState = BotState::IDLE;
     }
     boot_screen::showReady();
@@ -613,7 +629,7 @@ void loop() {
     BotState prevState = appState.botState;
     if (!appState.wifiConnected && appState.botState != BotState::OFFLINE) {
         appState.botState = BotState::OFFLINE;
-    } else if (appState.wsConnected && appState.botState == BotState::OFFLINE) {
+    } else if (appState.wifiConnected && appState.botState == BotState::OFFLINE) {
         appState.botState = BotState::IDLE;
     }
 
