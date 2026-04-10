@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include "config.h"
 #include "state.h"
 #include "nvs_store.h"
@@ -22,6 +23,7 @@
 #include "power_manager.h"
 #include "ble_manager.h"
 #include "boot_screen.h"
+#include "device_server.h"
 
 #define FIRMWARE_VERSION "1.0.0"
 
@@ -566,6 +568,18 @@ void setup() {
 
     if (wifi_manager::isConnected()) {
         ble_manager::notifyWifiStatus(2);  // connected
+
+        // mDNS: advertise as aksabot.local + _aksabot._tcp service on port 80
+        if (MDNS.begin("aksabot")) {
+            MDNS.addService("aksabot", "tcp", 80);
+            Serial.println("[Main] mDNS: aksabot.local registered");
+        } else {
+            Serial.println("[Main] mDNS: failed to start");
+        }
+
+        // HTTP status server so the app can verify it found the right device
+        device_server::start(FIRMWARE_VERSION);
+
         if (firstBoot) {
             // First successful WiFi connection — celebrate and mark done
             nvs_store::markSetupComplete();
@@ -635,6 +649,9 @@ void loop() {
     } else {
         stuckCheckMs = 0;
     }
+
+    // Serve HTTP status requests (used by Flutter mDNS discovery)
+    device_server::tick();
 
     // Tick presence detector + BLE scanner
     presence_detector::tick(now);

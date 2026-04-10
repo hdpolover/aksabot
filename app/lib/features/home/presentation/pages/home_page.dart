@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/local/local_device.dart';
 import '../../../../core/local/local_device_store.dart';
+import '../../../../core/local/mdns_discovery_service.dart';
 import '../../../devices/domain/entities/device_entity.dart';
 import '../../../devices/presentation/bloc/devices_bloc.dart';
 
@@ -92,6 +93,11 @@ class _HomeViewState extends State<_HomeView> {
                 await LocalDeviceStore.remove(locals.first.id);
                 _loadLocalDevices();
               },
+              onIpDiscovered: (ip) async {
+                final updated = locals.first.copyWith(localIp: ip);
+                await LocalDeviceStore.save(updated);
+                _loadLocalDevices();
+              },
             );
           }
           return _LocalDeviceList(
@@ -159,21 +165,45 @@ class _EmptyState extends StatelessWidget {
 // Local device dashboard (single, no backend)
 // ---------------------------------------------------------------------------
 
-class _LocalDeviceDashboard extends StatelessWidget {
+enum _DiscoverState { idle, searching, found, notFound }
+
+class _LocalDeviceDashboard extends StatefulWidget {
   final LocalDevice device;
   final VoidCallback onAdd;
   final VoidCallback onRemove;
+  final Future<void> Function(String ip) onIpDiscovered;
 
   const _LocalDeviceDashboard({
     required this.device,
     required this.onAdd,
     required this.onRemove,
+    required this.onIpDiscovered,
   });
+
+  @override
+  State<_LocalDeviceDashboard> createState() => _LocalDeviceDashboardState();
+}
+
+class _LocalDeviceDashboardState extends State<_LocalDeviceDashboard> {
+  _DiscoverState _discoverState = _DiscoverState.idle;
+
+  Future<void> _discoverDevice() async {
+    setState(() => _discoverState = _DiscoverState.searching);
+    final found = await MdnsDiscoveryService().discoverFirst();
+    if (!mounted) return;
+    if (found != null) {
+      setState(() => _discoverState = _DiscoverState.found);
+      await widget.onIpDiscovered(found.ip);
+    } else {
+      setState(() => _discoverState = _DiscoverState.notFound);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final device = widget.device;
 
     return Scaffold(
       body: ListView(
@@ -210,14 +240,18 @@ class _LocalDeviceDashboard extends StatelessWidget {
                         Container(
                           width: 8,
                           height: 8,
-                          decoration: const BoxDecoration(
+                          decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: Colors.orange,
+                            color: device.localIp != null
+                                ? Colors.green
+                                : Colors.orange,
                           ),
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          'Wi-Fi connected — not synced',
+                          device.localIp != null
+                              ? 'Found on network'
+                              : 'Wi-Fi connected — not synced',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: colors.onSurfaceVariant,
                           ),
@@ -260,12 +294,29 @@ class _LocalDeviceDashboard extends StatelessWidget {
                       label: 'Local IP',
                       value: device.localIp!,
                     ),
+                    const SizedBox(height: 8),
+                    _InfoRow(
+                      icon: Icons.public,
+                      label: 'Address',
+                      value: 'aksabot.local',
+                    ),
                   ],
                 ],
               ),
             ),
           ),
           const SizedBox(height: 12),
+
+          // Discover on network button
+          if (device.localIp == null) ...[
+            _DiscoverButton(
+              state: _discoverState,
+              onTap: _discoverState == _DiscoverState.searching
+                  ? null
+                  : _discoverDevice,
+            ),
+            const SizedBox(height: 12),
+          ],
 
           // Cloud sync banner
           _CloudSyncBanner(),
@@ -301,7 +352,7 @@ class _LocalDeviceDashboard extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         title: const Text('Remove device?'),
         content: Text(
-            'This will remove "${device.name}" from this app. '
+            'This will remove "${widget.device.name}" from this app. '
             'The device will stay connected to Wi-Fi.'),
         actions: [
           TextButton(
@@ -315,7 +366,67 @@ class _LocalDeviceDashboard extends StatelessWidget {
         ],
       ),
     );
-    if (confirmed == true) onRemove();
+    if (confirmed == true) widget.onRemove();
+  }
+}
+
+class _DiscoverButton extends StatelessWidget {
+  final _DiscoverState state;
+  final VoidCallback? onTap;
+
+  const _DiscoverButton({required this.state, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+
+    Widget icon;
+    String label;
+    Color? labelColor;
+
+    switch (state) {
+      case _DiscoverState.searching:
+        icon = SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(strokeWidth: 2, color: colors.primary),
+        );
+        label = 'Searching...';
+        labelColor = colors.onSurfaceVariant;
+      case _DiscoverState.found:
+        icon = Icon(Icons.check_circle_outline, size: 20, color: Colors.green);
+        label = 'Found on network!';
+        labelColor = Colors.green;
+      case _DiscoverState.notFound:
+        icon = Icon(Icons.wifi_find, size: 20, color: colors.error);
+        label = 'Not found — make sure device is on same network';
+        labelColor = colors.error;
+      case _DiscoverState.idle:
+        icon = Icon(Icons.wifi_find, size: 20, color: colors.primary);
+        label = 'Find device on network';
+        labelColor = null;
+    }
+
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        alignment: Alignment.centerLeft,
+      ),
+      child: Row(
+        children: [
+          icon,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label,
+              style: theme.textTheme.bodyMedium?.copyWith(color: labelColor),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
