@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <WiFi.h>
 #include "config.h"
 #include "state.h"
 #include "nvs_store.h"
@@ -19,6 +20,10 @@
 #include "ota_update.h"
 #include "debug_log.h"
 #include "power_manager.h"
+#include "ble_manager.h"
+#include "boot_screen.h"
+
+#define FIRMWARE_VERSION "1.0.0"
 
 // Global application state
 AppState appState;
@@ -411,34 +416,39 @@ void setup() {
     delay(1000);
     Serial.println("\n=== Aksabot Firmware ===\n");
 
-    // Allocate audio buffers in PSRAM
-    // pcmBuffer is 2x because readMic reads stereo then extracts mono in-place
+    // ── 1. Core init (logging, NVS, PSRAM) ─────────────────
+    debug_log::init();
+    nvs_store::init();
+
     pcmBuffer = (int16_t*)ps_malloc(OPUS_FRAME_SAMPLES * 2 * sizeof(int16_t));
     opusBuffer = (uint8_t*)ps_malloc(OPUS_MAX_FRAME_BYTES);
     playbackBuffer = (int16_t*)ps_malloc(OPUS_FRAME_SAMPLES * sizeof(int16_t));
     cacheAccumBuf = (uint8_t*)ps_malloc(CACHE_ACCUM_MAX);
-
     if (!pcmBuffer || !opusBuffer || !playbackBuffer) {
         Serial.println("[Main] FATAL: Failed to allocate PSRAM buffers");
         while (true) { delay(1000); }
     }
     Serial.printf("[Main] PSRAM free: %u bytes\n", ESP.getFreePsram());
 
-    // 1. Debug logging (first so all modules can use LOG macros)
-    debug_log::init();
+    // ── 2. Display init (early — needed for boot screen) ───
+    display::init();
 
-    // 2. NVS
-    nvs_store::init();
+    // ── 3. Boot splash ─────────────────────────────────────
+    boot_screen::init();
+    boot_screen::showSplash(FIRMWARE_VERSION);
 
-    // 2. MicroSD (SDIO 4-bit)
+    // ── 4. Hardware checks ─────────────────────────────────
+    boot_screen::showHardwareCheck("Display", 1);   // already working
+
     sd_storage::init();
+    boot_screen::showHardwareCheck("MicroSD",
+        sd_storage::isMounted() ? 1 : 3);  // 3=skipped if no card
 
-    // 3. TTS cache + recording buffer + resilience audio (depend on SD)
     tts_cache::init();
     recording_buffer::init();
     resilience_audio::init();
 
-    // 4. Presence detector
+    // Presence detector
     {
         presence_detector::Config presCfg;
         presCfg.rssiThreshold = nvs_store::getPresenceRssiThreshold();
@@ -461,50 +471,84 @@ void setup() {
         });
     }
 
-    // 5. Display + face + touch
-    display::init();
+    // Touch
     touch::init();
     touch::onEvent(onTouchEvent);
+    boot_screen::showHardwareCheck("Touch", 1);
 
-    // 5b. Voice Activity Detection
-    vad::init();
+    // Audio
+    audio_io::init();
+    audioInitialized = true;
+    boot_screen::showHardwareCheck("Audio (ES8311)", 1);
 
-    // 5c. OTA subsystem
-    ota_update::init();
-
-    // 5d. Power management
-    power_manager::init();
-
-    // 6. Opus codec
-    if (!opus_codec::init()) {
+    // Opus codec
+    bool opusOk = opus_codec::init();
+    boot_screen::showHardwareCheck("Opus Codec", opusOk ? 1 : 2);
+    if (!opusOk) {
         Serial.println("[Main] FATAL: Opus init failed");
         while (true) { delay(1000); }
     }
 
-    // 7. Audio I/O (ES8311 codec + I2S)
-    audio_io::init();
-    audioInitialized = true;
+    // VAD, OTA, power
+    vad::init();
+    ota_update::init();
+    power_manager::init();
 
-    // 8. Wi-Fi
+    // BLE
+    ble_manager::init();
+    boot_screen::showHardwareCheck("Bluetooth LE", 1);
+
+    delay(2000);  // Let user see the hardware check results
+
+    // ── 5. BLE provisioning gate ───────────────────────────
+    // Skip if NVS has credentials OR compile-time credentials exist.
+    // wifi_manager::init() falls back to credentials.h when NVS is empty.
+    bool hasNvsCreds = nvs_store::hasWifiCredentials();
+    bool hasCompileCreds = (strlen(WIFI_SSID) > 0);
+
+    if (!hasNvsCreds && !hasCompileCreds) {
+        Serial.println("[Main] No WiFi credentials — entering BLE provisioning mode");
+        boot_screen::showProvisioningPrompt();
+        ble_manager::waitForProvisioning(0);  // blocks until creds arrive via BLE
+        boot_screen::showProvisioningStatus("Credentials received!");
+        delay(500);
+    } else if (hasNvsCreds) {
+        Serial.println("[Main] Using NVS WiFi credentials");
+    } else {
+        Serial.println("[Main] Using compile-time WiFi credentials");
+    }
+
+    // ── 6. WiFi connect ────────────────────────────────────
+    char ssidBuf[64] = {};
+    if (nvs_store::getWifiSsid(ssidBuf, sizeof(ssidBuf)) && strlen(ssidBuf) > 0) {
+        boot_screen::showConnecting(ssidBuf);
+    } else {
+        boot_screen::showConnecting(WIFI_SSID);
+    }
+
     wifi_manager::init();
     Serial.println("[Main] Waiting for Wi-Fi...");
     wifi_manager::waitForConnection(15000);
 
-    if (!wifi_manager::isConnected()) {
-        Serial.println("[Main] Wi-Fi failed — continuing in offline mode");
+    if (wifi_manager::isConnected()) {
+        boot_screen::showConnected(WiFi.localIP().toString().c_str());
+        ble_manager::notifyWifiStatus(2);  // connected
+        boot_screen::showHardwareCheck("WiFi", 1);
+    } else {
+        boot_screen::showConnectionFailed("Timeout — will retry");
+        ble_manager::notifyWifiStatus(3);  // failed
         appState.botState = BotState::OFFLINE;
-        syncFaceToState();
     }
 
-    // 9. WebSocket
+    // ── 7. WebSocket backend connection ────────────────────
     ws_client::init(onWsJson, onWsBinary);
     if (wifi_manager::isConnected()) {
         ws_client::connect();
     }
 
-    // 10. Start FreeRTOS tasks
-    xTaskCreatePinnedToCore(audioCaptureLoop, "audio_cap", 24576, nullptr, 5, &audioCaptureTask, 0);  // 24KB — Opus encoder needs ~10-15KB stack
-    xTaskCreatePinnedToCore(wsLoop, "ws_poll", 12288, nullptr, 3, &wsTask, 1);  // 12KB — handles JSON + binary
+    // ── 8. Start FreeRTOS tasks ────────────────────────────
+    xTaskCreatePinnedToCore(audioCaptureLoop, "audio_cap", 24576, nullptr, 5, &audioCaptureTask, 0);
+    xTaskCreatePinnedToCore(wsLoop, "ws_poll", 12288, nullptr, 3, &wsTask, 1);
     xTaskCreatePinnedToCore(displayLoop, "display", 8192, nullptr, 3, &displayTask, 1);
 
     // Wait for WS connection
@@ -513,15 +557,21 @@ void setup() {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 
-    if (appState.wsConnected) {
-        appState.botState = BotState::IDLE;
-        syncFaceToState();
-        Serial.println("\n[Main] Ready! Controls: s=start, e=end, i=interrupt, q=quit, w=wake\n");
-    } else {
-        Serial.println("\n[Main] WebSocket not connected — will auto-reconnect\n");
+    // ── 9. Start presence scanning ─────────────────────────
+    if (nvs_store::getPresenceEnabled()) {
+        ble_manager::startPresenceScan();
     }
 
+    // ── 10. Ready — transition to face UI ──────────────────
+    if (appState.wsConnected) {
+        appState.botState = BotState::IDLE;
+    }
+    boot_screen::showReady();
+
+    // Face UI takes over from here (via displayLoop task)
+    syncFaceToState();
     updateStatusBar();
+    Serial.println("\n[Main] Ready! Hold screen to talk.\n");
 }
 
 void loop() {
@@ -552,8 +602,9 @@ void loop() {
         stuckCheckMs = 0;
     }
 
-    // Tick presence detector
+    // Tick presence detector + BLE scanner
     presence_detector::tick(now);
+    ble_manager::tickPresenceScan(now);
 
     // Tick power management
     power_manager::tick(now);
