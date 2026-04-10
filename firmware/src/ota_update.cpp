@@ -1,6 +1,7 @@
 #include "ota_update.h"
 #include "sd_storage.h"
-#include <SD.h>
+#include <SD_MMC.h>
+#define SD SD_MMC
 #include <HTTPClient.h>
 #include <mbedtls/sha256.h>
 #include <Arduino.h>

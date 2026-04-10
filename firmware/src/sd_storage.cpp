@@ -1,8 +1,10 @@
 #include "sd_storage.h"
 #include "config.h"
-#include <SD.h>
-#include <SPI.h>
 #include <Arduino.h>
+
+// This board uses SDIO (4-bit) for the SD card, not SPI.
+// SD_MMC is the ESP32 SDIO driver.
+#include <SD_MMC.h>
 
 static bool mounted = false;
 
@@ -17,14 +19,20 @@ static const char* DIRS[] = {
 };
 
 bool sd_storage::init() {
-    SPI.begin(SPI_CLK, SPI_MISO, SPI_MOSI, SD_CS);
+    // Configure SDIO pins for this board
+    SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0, SD_D1, SD_D2, SD_D3);
 
-    if (!SD.begin(SD_CS)) {
-        Serial.println("[SD] Mount failed — check card and wiring");
-        return false;
+    if (!SD_MMC.begin("/sdcard", false, false)) {
+        Serial.println("[SD] Mount failed — check card");
+        // Try 1-bit mode as fallback
+        if (!SD_MMC.begin("/sdcard", true, false)) {
+            Serial.println("[SD] 1-bit fallback also failed");
+            return false;
+        }
+        Serial.println("[SD] Mounted in 1-bit mode");
     }
 
-    uint8_t cardType = SD.cardType();
+    uint8_t cardType = SD_MMC.cardType();
     if (cardType == CARD_NONE) {
         Serial.println("[SD] No card detected");
         return false;
@@ -37,10 +45,10 @@ bool sd_storage::init() {
         case CARD_SDHC: typeStr = "SDHC";  break;
     }
 
-    uint64_t totalBytes = SD.totalBytes();
-    uint64_t usedBytes = SD.usedBytes();
+    uint64_t totalBytes = SD_MMC.totalBytes();
+    uint64_t usedBytes = SD_MMC.usedBytes();
 
-    Serial.printf("[SD] Mounted — Type: %s, Size: %lluMB, Used: %lluMB\n",
+    Serial.printf("[SD] Mounted (SDIO) — Type: %s, Size: %lluMB, Used: %lluMB\n",
                   typeStr, totalBytes / (1024 * 1024), usedBytes / (1024 * 1024));
 
     mounted = true;
@@ -56,8 +64,8 @@ void sd_storage::createDirectories() {
     if (!mounted) return;
 
     for (const char* dir : DIRS) {
-        if (!SD.exists(dir)) {
-            if (SD.mkdir(dir)) {
+        if (!SD_MMC.exists(dir)) {
+            if (SD_MMC.mkdir(dir)) {
                 Serial.printf("[SD] Created: %s\n", dir);
             } else {
                 Serial.printf("[SD] Failed to create: %s\n", dir);
@@ -68,5 +76,5 @@ void sd_storage::createDirectories() {
 
 uint64_t sd_storage::getFreeBytes() {
     if (!mounted) return 0;
-    return SD.totalBytes() - SD.usedBytes();
+    return SD_MMC.totalBytes() - SD_MMC.usedBytes();
 }

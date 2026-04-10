@@ -1,5 +1,7 @@
 #include "touch.h"
 #include "display.h"
+#include "config.h"
+#include <Wire.h>
 #include <Arduino.h>
 
 // ── Configuration ──────────────────────────────────────
@@ -8,12 +10,41 @@ static const uint16_t TAP_MAX_MS = 300;
 static const uint16_t HOLD_THRESHOLD_MS = 300;
 static const uint16_t LONG_PRESS_MS = 3000;
 
+// ── FT6336G I2C Touch Driver ──────────────────────────
+// Register addresses for FT6336G capacitive touch IC
+static const uint8_t FT_REG_NUM_TOUCHES = 0x02;
+static const uint8_t FT_REG_TOUCH1_XH   = 0x03;
+static const uint8_t FT_REG_TOUCH1_XL   = 0x04;
+static const uint8_t FT_REG_TOUCH1_YH   = 0x05;
+static const uint8_t FT_REG_TOUCH1_YL   = 0x06;
+static const uint8_t FT_I2C_ADDR        = TOUCH_I2C_ADDR;
+
+static TwoWire touchWire(0);  // I2C bus 0 for touch
+static bool hwInitialized = false;
+
+// Read a register from the touch IC
+static uint8_t ft_readReg(uint8_t reg) {
+    touchWire.beginTransmission(FT_I2C_ADDR);
+    touchWire.write(reg);
+    touchWire.endTransmission(false);
+    touchWire.requestFrom((uint8_t)FT_I2C_ADDR, (uint8_t)1);
+    if (touchWire.available()) {
+        return touchWire.read();
+    }
+    return 0;
+}
+
+// Poll touch state from hardware
+static bool ft_isTouched() {
+    if (!hwInitialized) return false;
+    uint8_t numTouches = ft_readReg(FT_REG_NUM_TOUCHES);
+    return (numTouches > 0 && numTouches < 5);
+}
+
 // ── Internal state ─────────────────────────────────────
 static touch::EventCallback eventCb;
 static bool currentlyTouched = false;
 static uint32_t touchStartMs = 0;
-static uint32_t lastRawChangeMs = 0;
-static bool lastRawState = false;
 static bool holdFired = false;
 static bool longPressFired = false;
 
@@ -34,10 +65,29 @@ void touch::init() {
     holdFired = false;
     longPressFired = false;
 
-    // TODO: Initialize capacitive touch controller over SPI
-    // For now, touch input comes from serial simulation.
+    // Initialize I2C for FT6336G touch controller
+    touchWire.begin(TOUCH_SDA, TOUCH_SCL, 400000);
 
-    Serial.println("[Touch] Initialized (serial simulation active)");
+    // Reset touch IC
+    pinMode(TOUCH_RST, OUTPUT);
+    digitalWrite(TOUCH_RST, LOW);
+    delay(10);
+    digitalWrite(TOUCH_RST, HIGH);
+    delay(100);
+
+    // Configure interrupt pin
+    pinMode(TOUCH_INT, INPUT_PULLUP);
+
+    // Verify touch IC is responding
+    touchWire.beginTransmission(FT_I2C_ADDR);
+    uint8_t err = touchWire.endTransmission();
+    if (err == 0) {
+        hwInitialized = true;
+        Serial.println("[Touch] FT6336G initialized (I2C)");
+    } else {
+        Serial.printf("[Touch] FT6336G not found at 0x%02X (err=%d), using serial simulation\n",
+            FT_I2C_ADDR, err);
+    }
 }
 
 void touch::onEvent(EventCallback callback) {
@@ -45,60 +95,54 @@ void touch::onEvent(EventCallback callback) {
 }
 
 void touch::feedRaw(bool pressed, uint32_t nowMs) {
-    // Debounce
-    if (pressed == lastRawState && (nowMs - lastRawChangeMs) < DEBOUNCE_MS) {
-        return;
-    }
-    lastRawState = pressed;
-    lastRawChangeMs = nowMs;
-
     if (pressed && !currentlyTouched) {
-        // Touch start
         currentlyTouched = true;
         touchStartMs = nowMs;
         holdFired = false;
         longPressFired = false;
 
-        // If display is sleeping, wake instead of starting interaction
         if (display::isSleeping()) {
             fireEvent(Event::WAKE);
             display::wake();
-            // Consume this touch — don't also start recording
             currentlyTouched = false;
             return;
         }
     }
     else if (!pressed && currentlyTouched) {
-        // Touch end
         uint32_t holdDuration = nowMs - touchStartMs;
         currentlyTouched = false;
 
         if (longPressFired) {
-            // Long press already handled
+            // Already handled
         } else if (holdFired) {
             fireEvent(Event::HOLD_END);
         } else if (holdDuration < TAP_MAX_MS) {
             fireEvent(Event::TAP);
         } else {
-            // Held past tap threshold but never crossed hold threshold
-            // (shouldn't happen with current thresholds but handle gracefully)
             fireEvent(Event::TAP);
         }
     }
 }
 
 void touch::tick(uint32_t nowMs) {
+    // Poll hardware touch if available
+    if (hwInitialized) {
+        bool touched = ft_isTouched();
+        if (touched != currentlyTouched) {
+            feedRaw(touched, nowMs);
+        }
+    }
+
+    // Check for hold/long press transitions
     if (!currentlyTouched) return;
 
     uint32_t holdDuration = nowMs - touchStartMs;
 
-    // Check for hold start
     if (!holdFired && holdDuration >= HOLD_THRESHOLD_MS) {
         holdFired = true;
         fireEvent(Event::HOLD_START);
     }
 
-    // Check for long press
     if (!longPressFired && holdDuration >= LONG_PRESS_MS) {
         longPressFired = true;
         fireEvent(Event::LONG_PRESS);
@@ -114,47 +158,41 @@ uint32_t touch::getHoldDurationMs() {
     return millis() - touchStartMs;
 }
 
-// ── Serial simulation ──────────────────────────────────
+// ── Serial simulation (fallback) ───────────────────────
 
 void touch::processSerial(uint32_t nowMs) {
     if (!Serial.available()) return;
 
     char c = Serial.read();
     switch (c) {
-        case 's':  // Simulate touch press (start recording)
+        case 's':
             feedRaw(true, nowMs);
-            // Auto-fire hold after threshold for convenience
             holdFired = true;
             fireEvent(Event::HOLD_START);
-            Serial.println("[Touch] Serial: press (hold start)");
             break;
 
-        case 'e':  // Simulate touch release (stop recording)
+        case 'e':
             if (currentlyTouched) {
                 feedRaw(false, nowMs);
-                Serial.println("[Touch] Serial: release");
             }
             break;
 
-        case 'i':  // Simulate quick tap (interrupt)
+        case 'i':
             feedRaw(true, nowMs);
-            feedRaw(false, nowMs + 50);  // Instant release = tap
-            Serial.println("[Touch] Serial: tap (interrupt)");
+            feedRaw(false, nowMs + 50);
             break;
 
-        case 'q':  // Simulate long press (end session)
+        case 'q':
             feedRaw(true, nowMs);
             longPressFired = true;
             fireEvent(Event::LONG_PRESS);
             feedRaw(false, nowMs);
-            Serial.println("[Touch] Serial: long press (end session)");
             break;
 
-        case 'w':  // Simulate wake
+        case 'w':
             if (display::isSleeping()) {
                 fireEvent(Event::WAKE);
                 display::wake();
-                Serial.println("[Touch] Serial: wake");
             }
             break;
     }

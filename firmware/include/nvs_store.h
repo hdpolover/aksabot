@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cstddef>
 
 /// Non-volatile storage wrapper for Aksabot.
 ///

@@ -1,6 +1,7 @@
 #include "resilience_audio.h"
 #include "sd_storage.h"
-#include <SD.h>
+#include <SD_MMC.h>
+#define SD SD_MMC
 #include <Arduino.h>
 
 static const char* AUDIO_DIR = "/audio/resilience";

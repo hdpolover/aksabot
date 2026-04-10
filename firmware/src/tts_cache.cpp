@@ -1,6 +1,7 @@
 #include "tts_cache.h"
 #include "sd_storage.h"
-#include <SD.h>
+#include <SD_MMC.h>
+#define SD SD_MMC
 #include <ArduinoJson.h>
 #include <Arduino.h>
 

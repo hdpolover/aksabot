@@ -1,6 +1,7 @@
 #include "debug_log.h"
 #include "sd_storage.h"
-#include <SD.h>
+#include <SD_MMC.h>
+#define SD SD_MMC
 #include <Arduino.h>
 #include <cstdarg>
 

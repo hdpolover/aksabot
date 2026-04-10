@@ -1,7 +1,8 @@
 #include "recording_buffer.h"
 #include "sd_storage.h"
 #include "ws_client.h"
-#include <SD.h>
+#include <SD_MMC.h>
+#define SD SD_MMC
 #include <Arduino.h>
 
 static const char* BUFFER_DIR = "/audio/buffer";

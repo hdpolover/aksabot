@@ -271,8 +271,15 @@ static void onTouchEvent(touch::Event event) {
 
 // ── Audio capture task (Core 0, high priority) ──────────
 
+static bool audioInitialized = false;
+
 static void audioCaptureLoop(void* param) {
     for (;;) {
+        // Skip if audio I/O not initialized (ES8311 codec not set up yet)
+        if (!audioInitialized) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
         if (appState.botState != BotState::LISTENING) {
             if (recording_buffer::isBuffering()) {
                 recording_buffer::stopBuffering();
@@ -303,6 +310,7 @@ static void audioCaptureLoop(void* param) {
                     recording_buffer::stopBuffering();
                 }
                 ws_client::sendBinary(opusBuffer, opusBytes);
+                vTaskDelay(pdMS_TO_TICKS(5));  // Yield to let WS poll task breathe
             } else {
                 if (!recording_buffer::isBuffering()) {
                     recording_buffer::startBuffering();
@@ -339,7 +347,8 @@ void setup() {
     Serial.println("\n=== Aksabot Firmware ===\n");
 
     // Allocate audio buffers in PSRAM
-    pcmBuffer = (int16_t*)ps_malloc(OPUS_FRAME_SAMPLES * sizeof(int16_t));
+    // pcmBuffer is 2x because readMic reads stereo then extracts mono in-place
+    pcmBuffer = (int16_t*)ps_malloc(OPUS_FRAME_SAMPLES * 2 * sizeof(int16_t));
     opusBuffer = (uint8_t*)ps_malloc(OPUS_MAX_FRAME_BYTES);
     playbackBuffer = (int16_t*)ps_malloc(OPUS_FRAME_SAMPLES * sizeof(int16_t));
     cacheAccumBuf = (uint8_t*)ps_malloc(CACHE_ACCUM_MAX);
@@ -356,7 +365,7 @@ void setup() {
     // 2. NVS
     nvs_store::init();
 
-    // 2. MicroSD
+    // 2. MicroSD (SDIO 4-bit)
     sd_storage::init();
 
     // 3. TTS cache + recording buffer + resilience audio (depend on SD)
@@ -407,8 +416,9 @@ void setup() {
         while (true) { delay(1000); }
     }
 
-    // 7. Audio I/O
+    // 7. Audio I/O (ES8311 codec + I2S)
     audio_io::init();
+    audioInitialized = true;
 
     // 8. Wi-Fi
     wifi_manager::init();
@@ -428,7 +438,7 @@ void setup() {
     }
 
     // 10. Start FreeRTOS tasks
-    xTaskCreatePinnedToCore(audioCaptureLoop, "audio_cap", 4096, nullptr, 5, &audioCaptureTask, 0);
+    xTaskCreatePinnedToCore(audioCaptureLoop, "audio_cap", 8192, nullptr, 5, &audioCaptureTask, 0);
     xTaskCreatePinnedToCore(wsLoop, "ws_poll", 8192, nullptr, 3, &wsTask, 1);
     xTaskCreatePinnedToCore(displayLoop, "display", 8192, nullptr, 3, &displayTask, 1);
 
