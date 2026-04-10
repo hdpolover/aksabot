@@ -1,4 +1,5 @@
 #include "device_server.h"
+#include "nvs_store.h"
 #include <WebServer.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
@@ -6,6 +7,7 @@
 
 static WebServer* server = nullptr;
 static char versionBuf[16] = {};
+static volatile bool tokenJustReceived = false;
 
 void device_server::start(const char* version) {
     strncpy(versionBuf, version, sizeof(versionBuf) - 1);
@@ -33,6 +35,35 @@ void device_server::start(const char* version) {
         server->send(200, "application/json", out);
     });
 
+    // POST /token — receives device token from Flutter app after backend registration
+    server->on("/token", HTTP_POST, []() {
+        const String body = server->arg("plain");
+        JsonDocument doc;
+        if (deserializeJson(doc, body) != DeserializationError::Ok) {
+            server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
+            return;
+        }
+
+        const char* token = doc["token"] | (const char*)nullptr;
+        if (!token || strlen(token) == 0) {
+            server->send(400, "application/json", "{\"error\":\"token required\"}");
+            return;
+        }
+
+        nvs_store::setDeviceToken(token);
+
+        // Optional: backend URL override
+        const char* backendUrl = doc["backendUrl"] | (const char*)nullptr;
+        if (backendUrl && strlen(backendUrl) > 0) {
+            nvs_store::setBackendUrl(backendUrl);
+        }
+
+        server->sendHeader("Access-Control-Allow-Origin", "*");
+        server->send(200, "application/json", "{\"ok\":true}");
+        Serial.println("[DeviceServer] Device token saved via HTTP — will reconnect WS");
+        tokenJustReceived = true;
+    });
+
     server->onNotFound([]() {
         server->send(404, "text/plain", "not found");
     });
@@ -53,4 +84,12 @@ void device_server::stop() {
     delete server;
     server = nullptr;
     Serial.println("[DeviceServer] Stopped");
+}
+
+bool device_server::consumeNewToken() {
+    if (tokenJustReceived) {
+        tokenJustReceived = false;
+        return true;
+    }
+    return false;
 }

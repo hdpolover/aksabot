@@ -34,4 +34,8 @@ void waitForPollIdle(uint32_t timeoutMs = 500);
 /// Disconnect gracefully.
 void disconnect();
 
+/// Re-read device token and backend URL from NVS, then reconnect.
+/// Call after receiving a new token via device_server POST /token.
+void reconnectWithToken();
+
 }  // namespace ws_client

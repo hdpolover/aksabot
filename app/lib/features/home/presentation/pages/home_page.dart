@@ -8,6 +8,7 @@ import '../../../../core/local/local_device_store.dart';
 import '../../../../core/local/mdns_discovery_service.dart';
 import '../../../devices/domain/entities/device_entity.dart';
 import '../../../devices/presentation/bloc/devices_bloc.dart';
+import '../../../devices/presentation/pages/cloud_register_page.dart';
 
 /// Home tab root. Shows a single-device dashboard when 1 device exists,
 /// a device list when 2+, or an empty state when 0.
@@ -98,6 +99,10 @@ class _HomeViewState extends State<_HomeView> {
                 await LocalDeviceStore.save(updated);
                 _loadLocalDevices();
               },
+              onRegistered: () {
+                context.read<DevicesBloc>().add(const LoadDevices());
+                _loadLocalDevices();
+              },
             );
           }
           return _LocalDeviceList(
@@ -172,12 +177,14 @@ class _LocalDeviceDashboard extends StatefulWidget {
   final VoidCallback onAdd;
   final VoidCallback onRemove;
   final Future<void> Function(String ip) onIpDiscovered;
+  final VoidCallback onRegistered;
 
   const _LocalDeviceDashboard({
     required this.device,
     required this.onAdd,
     required this.onRemove,
     required this.onIpDiscovered,
+    required this.onRegistered,
   });
 
   @override
@@ -196,6 +203,17 @@ class _LocalDeviceDashboardState extends State<_LocalDeviceDashboard> {
       await widget.onIpDiscovered(found.ip);
     } else {
       setState(() => _discoverState = _DiscoverState.notFound);
+    }
+  }
+
+  Future<void> _connectToBackend() async {
+    final registered = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => CloudRegisterPage(device: widget.device),
+      ),
+    );
+    if (registered == true && mounted) {
+      widget.onRegistered();
     }
   }
 
@@ -307,7 +325,7 @@ class _LocalDeviceDashboardState extends State<_LocalDeviceDashboard> {
           ),
           const SizedBox(height: 12),
 
-          // Discover on network button
+          // Discover on network button (shown when IP not yet known)
           if (device.localIp == null) ...[
             _DiscoverButton(
               state: _discoverState,
@@ -318,8 +336,10 @@ class _LocalDeviceDashboardState extends State<_LocalDeviceDashboard> {
             const SizedBox(height: 12),
           ],
 
-          // Cloud sync banner
-          _CloudSyncBanner(),
+          // Cloud sync / connect banner
+          _CloudSyncBanner(
+            onConnect: device.localIp != null ? _connectToBackend : null,
+          ),
           const SizedBox(height: 20),
 
           // Danger zone
@@ -459,7 +479,7 @@ class _LocalDeviceList extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _CloudSyncBanner(),
+          const _CloudSyncBanner(),
           const SizedBox(height: 12),
           ...devices.map((device) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -786,30 +806,58 @@ class _DeviceDashboard extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _CloudSyncBanner extends StatelessWidget {
-  const _CloudSyncBanner();
+  /// If provided, shows a "Connect" action button.
+  /// Pass null when the device IP is not yet known.
+  final VoidCallback? onConnect;
+
+  const _CloudSyncBanner({this.onConnect});
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
+    final hasAction = onConnect != null;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: EdgeInsets.fromLTRB(14, 10, hasAction ? 4 : 14, 10),
       decoration: BoxDecoration(
-        color: colors.secondaryContainer.withValues(alpha: 0.6),
+        color: hasAction
+            ? colors.primaryContainer.withValues(alpha: 0.55)
+            : colors.secondaryContainer.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          Icon(Icons.cloud_off, size: 18, color: colors.onSecondaryContainer),
+          Icon(
+            hasAction ? Icons.cloud_queue : Icons.cloud_off,
+            size: 18,
+            color: hasAction
+                ? colors.onPrimaryContainer
+                : colors.onSecondaryContainer,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Not synced to cloud — AI features require backend setup.',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: colors.onSecondaryContainer),
+              hasAction
+                  ? 'Connect to AI cloud to unlock voice features.'
+                  : 'Not synced — find device on network to connect to AI cloud.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: hasAction
+                    ? colors.onPrimaryContainer
+                    : colors.onSecondaryContainer,
+              ),
             ),
           ),
+          if (hasAction) ...[
+            TextButton(
+              onPressed: onConnect,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
+              child: const Text('Connect'),
+            ),
+          ],
         ],
       ),
     );

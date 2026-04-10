@@ -596,8 +596,11 @@ void setup() {
 
     // ── 8. Initialize WS client (connects in background via ws task) ──
     ws_client::init(onWsJson, onWsBinary);
-    if (wifi_manager::isConnected()) {
+    if (wifi_manager::isConnected() && nvs_store::hasDeviceToken()) {
+        Serial.println("[Main] Device token found — connecting to backend");
         ws_client::connect();
+    } else if (!nvs_store::hasDeviceToken()) {
+        Serial.println("[Main] No device token — register via Aksabot app to enable AI features");
     }
 
     // ── 9. Start FreeRTOS tasks ────────────────────────────
@@ -650,8 +653,16 @@ void loop() {
         stuckCheckMs = 0;
     }
 
-    // Serve HTTP status requests (used by Flutter mDNS discovery)
+    // Serve HTTP status requests + token delivery (used by Flutter app)
     device_server::tick();
+
+    // Check if device token was received via HTTP → connect to backend
+    if (device_server::consumeNewToken() && wifi_manager::isConnected()) {
+        Serial.println("[Main] New device token received — connecting to backend WS");
+        ws_client::reconnectWithToken();
+        ble_manager::notifyAuthStatus(1);  // 1 = token stored
+        updateStatusBar();
+    }
 
     // Tick presence detector + BLE scanner
     presence_detector::tick(now);

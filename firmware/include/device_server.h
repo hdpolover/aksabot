@@ -15,4 +15,8 @@ void tick();
 /// Stop the server (e.g., before deep sleep or reset).
 void stop();
 
+/// Returns true (once) if a device token was received via POST /token
+/// since the last call. Call from loop() to trigger WS reconnect.
+bool consumeNewToken();
+
 }  // namespace device_server
