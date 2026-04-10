@@ -174,9 +174,11 @@ export class AudioGateway
         sessionId: conversation.id,
       });
 
-      // Check for greeting (first interaction of the day, time-aware)
+      // Check for greeting (first interaction of the day, time-aware).
+      // Fire-and-forget: don't block STT stream creation.
+      // The greeting is sent as a separate event — won't interfere with audio.
       this.proactive.checkGreeting(deviceId).then((briefing) => {
-        if (briefing) {
+        if (briefing && session.state !== 'listening') {
           this.sendToDevice(deviceId, 'proactive:briefing', {
             type: 'morning',
             text: briefing,
@@ -187,6 +189,7 @@ export class AudioGateway
 
     session.interrupted = false;
     session.state = 'listening';
+    this.chunkCount.set(deviceId, 0);  // Reset chunk counter
 
     const sttStream = this.aiService.createSttStream({
       languages: ['en-US', 'id-ID'],
@@ -205,13 +208,17 @@ export class AudioGateway
     });
 
     sttStream.on('error', (err: Error) => {
-      this.logger.error(`STT error for ${deviceId}: ${err.message}`);
-      this.sendToDevice(deviceId, 'error', {
-        code: 'STT_ERROR',
-        message: 'Speech recognition failed',
-      });
-      session.state = 'idle';
-      this.sendToDevice(deviceId, 'state:update', { state: 'idle' });
+      // Only log first error per stream — avoid flooding from "write after destroyed"
+      if (session.sttStream === sttStream) {
+        this.logger.error(`STT error for ${deviceId}: ${err.message}`);
+        session.sttStream = null;  // Stop further writes
+        this.sendToDevice(deviceId, 'error', {
+          code: 'STT_ERROR',
+          message: 'Speech recognition failed',
+        });
+        session.state = 'idle';
+        this.sendToDevice(deviceId, 'state:update', { state: 'idle' });
+      }
     });
 
     this.sendToDevice(deviceId, 'state:update', { state: 'listening' });
@@ -227,44 +234,37 @@ export class AudioGateway
     return count > AudioGateway.AUDIO_RATE_LIMIT;
   }
 
+  private chunkCount = new Map<string, number>();
+
   private onAudioChunk(deviceId: string, opusData: Buffer) {
     const session = this.sessions.get(deviceId);
     if (!session?.sttStream) return;
 
-    // Rate limit check — async but non-blocking: we fire-and-forget with a
-    // callback pattern so the hot path stays synchronous for the common case.
-    this.isAudioRateLimited(deviceId)
-      .then((limited) => {
-        if (limited) {
-          this.logger.warn(
-            `audio:chunk rate limit exceeded for device ${deviceId} — chunk dropped`,
-          );
-          return;
-        }
-        try {
-          const pcm = this.aiService.decodeAudio(opusData);
-          session.sttStream!.write(pcm);
-        } catch (err: any) {
-          this.logger.error(`Decode error for ${deviceId}: ${err.message}`);
-        }
-      })
-      .catch((err: any) => {
-        // Redis failure is non-fatal — let the chunk through rather than
-        // silently dropping audio when the cache layer is unavailable.
-        this.logger.warn(`Rate limit Redis error for ${deviceId}: ${err.message} — chunk passed`);
-        try {
-          const pcm = this.aiService.decodeAudio(opusData);
-          session.sttStream?.write(pcm);
-        } catch (decodeErr: any) {
-          this.logger.error(`Decode error for ${deviceId}: ${decodeErr.message}`);
-        }
-      });
+    const count = (this.chunkCount.get(deviceId) ?? 0) + 1;
+    this.chunkCount.set(deviceId, count);
+
+    // Decode Opus → PCM and write to STT stream synchronously.
+    // No async rate limiter — Google STT requires real-time pacing.
+    try {
+      const pcm = this.aiService.decodeAudio(opusData);
+      session.sttStream.write(pcm);
+
+      if (count === 1) {
+        this.logger.debug(`First audio chunk for ${deviceId}: ${opusData.length}B opus → ${pcm.length}B pcm`);
+      }
+    } catch (err: any) {
+      if (count <= 3) {
+        this.logger.error(`Decode error for ${deviceId} chunk #${count}: ${err.message}`);
+      }
+    }
   }
 
   private onAudioEnd(deviceId: string) {
     const session = this.sessions.get(deviceId);
     if (!session?.sttStream) return;
-    session.sttStream.end();
+    const stream = session.sttStream;
+    session.sttStream = null;  // Prevent late chunks from writing after end
+    stream.end();
   }
 
   private onAudioInterrupt(deviceId: string) {

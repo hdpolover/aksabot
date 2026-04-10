@@ -124,8 +124,20 @@ static void onWsJson(const char* event, const char* data) {
     }
     else if (strcmp(event, "error") == 0) {
         Serial.printf("[Main] Error: %s\n", data);
-        face::setExpression(face::Expression::CONFUSED, 200);
         appState.botState = BotState::IDLE;
+        syncFaceToState();
+    }
+    else if (strcmp(event, "state:update") == 0) {
+        // Backend state sync (e.g., after STT error resets to idle)
+        JsonDocument doc;
+        if (deserializeJson(doc, data) == DeserializationError::Ok) {
+            const char* state = doc["state"] | "";
+            if (strcmp(state, "idle") == 0 && appState.botState != BotState::IDLE) {
+                Serial.println("[Main] Backend reset to idle");
+                appState.botState = BotState::IDLE;
+                syncFaceToState();
+            }
+        }
     }
     // ── Proactive events → display mode switching ────────
     else if (strcmp(event, "proactive:reminder") == 0) {
@@ -212,35 +224,55 @@ static void onWsBinary(const uint8_t* data, size_t len) {
 
 // ── Touch event handler ────────────────────────────────
 
+// Timer for reverting face expression after a visual feedback
+static uint32_t faceRevertAtMs = 0;
+static bool faceRevertPending = false;
+
+static void scheduleFaceRevert(uint16_t delayMs) {
+    faceRevertAtMs = millis() + delayMs;
+    faceRevertPending = true;
+}
+
 static void onTouchEvent(touch::Event event) {
     // Any touch interaction resets idle timer
     power_manager::recordInteraction();
 
     switch (event) {
         case touch::Event::HOLD_START:
-            // Start recording
-            if (appState.botState == BotState::IDLE && appState.wsConnected) {
-                appState.botState = BotState::LISTENING;
-                syncFaceToState();
-                ws_client::sendEvent("audio:start");
-                Serial.println("[Main] Recording started");
+            if (appState.botState == BotState::IDLE) {
+                if (appState.wsConnected) {
+                    // Connected — start recording
+                    appState.botState = BotState::LISTENING;
+                    syncFaceToState();
+                    ws_client::sendEvent("audio:start");
+                    Serial.println("[Main] Recording started");
+                } else {
+                    // Not connected — show listening face briefly, then confused
+                    face::setExpression(face::Expression::LISTENING, 100);
+                    Serial.println("[Main] Hold detected but offline");
+                }
             }
             break;
 
         case touch::Event::HOLD_END:
-            // Stop recording
             if (appState.botState == BotState::LISTENING) {
+                // Was recording — send to backend
                 appState.botState = BotState::THINKING;
                 syncFaceToState();
                 ws_client::sendEvent("audio:end");
                 audio_io::stopMic();
                 Serial.println("[Main] Recording stopped, waiting for response...");
+            } else if (!appState.wsConnected) {
+                // Wasn't actually recording — show offline feedback
+                face::setExpression(face::Expression::CONFUSED, 200);
+                scheduleFaceRevert(1500);
+                Serial.println("[Main] Not connected — can't send audio");
             }
             break;
 
         case touch::Event::TAP:
-            // Interrupt playback, or dismiss reminder
             if (appState.botState == BotState::SPEAKING) {
+                // Interrupt playback
                 appState.interrupted = true;
                 appState.botState = BotState::IDLE;
                 syncFaceToState();
@@ -249,21 +281,38 @@ static void onTouchEvent(touch::Event event) {
                 Serial.println("[Main] Interrupted");
             }
             else if (display::getMode() == display::Mode::REMINDER) {
+                // Dismiss reminder
                 display::setMode(display::Mode::FACE);
                 ws_client::sendEvent("proactive:dismiss");
+            }
+            else if (appState.botState == BotState::IDLE) {
+                // Idle tap — acknowledge with a brief expression change
+                face::setExpression(face::Expression::ENCOURAGING, 150);
+                scheduleFaceRevert(800);
             }
             break;
 
         case touch::Event::LONG_PRESS:
-            // End session
-            ws_client::sendEvent("session:end");
-            appState.botState = BotState::IDLE;
-            syncFaceToState();
-            Serial.println("[Main] Session ended");
+            // Only end session if not actively recording/processing
+            if (appState.botState == BotState::LISTENING ||
+                appState.botState == BotState::THINKING) {
+                // Ignore long press during active voice interaction
+                Serial.println("[Main] Long press ignored — recording active");
+            } else {
+                if (appState.wsConnected) {
+                    ws_client::sendEvent("session:end");
+                }
+                appState.botState = BotState::IDLE;
+                face::setExpression(face::Expression::CALM, 200);
+                scheduleFaceRevert(1200);
+                Serial.println("[Main] Session ended");
+            }
             break;
 
         case touch::Event::WAKE:
-            // Display handles wake — just log
+            // Show a friendly wake expression
+            face::setExpression(face::Expression::ENCOURAGING, 200);
+            scheduleFaceRevert(1500);
             Serial.println("[Main] Woke from touch");
             break;
     }
@@ -274,6 +323,7 @@ static void onTouchEvent(touch::Event event) {
 static bool audioInitialized = false;
 
 static void audioCaptureLoop(void* param) {
+    bool stackLogged = false;
     for (;;) {
         // Skip if audio I/O not initialized (ES8311 codec not set up yet)
         if (!audioInitialized) {
@@ -284,8 +334,15 @@ static void audioCaptureLoop(void* param) {
             if (recording_buffer::isBuffering()) {
                 recording_buffer::stopBuffering();
             }
+            stackLogged = false;
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
+        }
+
+        // One-time sync: wait for poll task to see LISTENING and exit.
+        // client.poll() is non-blocking so this completes in <10ms.
+        if (!stackLogged) {
+            vTaskDelay(pdMS_TO_TICKS(60));
         }
 
         size_t samplesRead = audio_io::readMic(pcmBuffer, OPUS_FRAME_SAMPLES);
@@ -304,13 +361,20 @@ static void audioCaptureLoop(void* param) {
         }
 
         int opusBytes = opus_codec::encode(pcmBuffer, opusBuffer, OPUS_MAX_FRAME_BYTES);
+
+        // Log stack watermark once per recording session
+        if (!stackLogged) {
+            UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
+            Serial.printf("[Audio] Stack watermark: %u bytes free\n", hwm * 4);
+            stackLogged = true;
+        }
+
         if (opusBytes > 0) {
             if (appState.wsConnected) {
                 if (recording_buffer::isBuffering()) {
                     recording_buffer::stopBuffering();
                 }
                 ws_client::sendBinary(opusBuffer, opusBytes);
-                vTaskDelay(pdMS_TO_TICKS(5));  // Yield to let WS poll task breathe
             } else {
                 if (!recording_buffer::isBuffering()) {
                     recording_buffer::startBuffering();
@@ -324,6 +388,7 @@ static void audioCaptureLoop(void* param) {
 // ── WebSocket polling task (Core 1) ─────────────────────
 
 static void wsLoop(void* param) {
+    Serial.println("[WS Task] Started on core " + String(xPortGetCoreID()));
     for (;;) {
         ws_client::poll();
         vTaskDelay(pdMS_TO_TICKS(5));
@@ -438,8 +503,8 @@ void setup() {
     }
 
     // 10. Start FreeRTOS tasks
-    xTaskCreatePinnedToCore(audioCaptureLoop, "audio_cap", 8192, nullptr, 5, &audioCaptureTask, 0);
-    xTaskCreatePinnedToCore(wsLoop, "ws_poll", 8192, nullptr, 3, &wsTask, 1);
+    xTaskCreatePinnedToCore(audioCaptureLoop, "audio_cap", 24576, nullptr, 5, &audioCaptureTask, 0);  // 24KB — Opus encoder needs ~10-15KB stack
+    xTaskCreatePinnedToCore(wsLoop, "ws_poll", 12288, nullptr, 3, &wsTask, 1);  // 12KB — handles JSON + binary
     xTaskCreatePinnedToCore(displayLoop, "display", 8192, nullptr, 3, &displayTask, 1);
 
     // Wait for WS connection
@@ -465,6 +530,27 @@ void loop() {
     // Process touch (serial simulation or hardware)
     touch::processSerial(now);
     touch::tick(now);
+
+    // Revert face expression after visual feedback timeout
+    if (faceRevertPending && now >= faceRevertAtMs) {
+        faceRevertPending = false;
+        syncFaceToState();
+    }
+
+    // Safety: auto-revert from THINKING/LISTENING if stuck for 15s
+    static uint32_t stuckCheckMs = 0;
+    if (appState.botState == BotState::THINKING || appState.botState == BotState::LISTENING) {
+        if (stuckCheckMs == 0) {
+            stuckCheckMs = now;
+        } else if ((now - stuckCheckMs) > 15000) {
+            Serial.println("[Main] Stuck state timeout — reverting to IDLE");
+            appState.botState = BotState::IDLE;
+            syncFaceToState();
+            stuckCheckMs = 0;
+        }
+    } else {
+        stuckCheckMs = 0;
+    }
 
     // Tick presence detector
     presence_detector::tick(now);

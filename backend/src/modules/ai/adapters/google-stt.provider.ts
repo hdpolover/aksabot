@@ -41,6 +41,7 @@ class GoogleSttStream extends EventEmitter implements SttStream {
   }
 
   write(pcmChunk: Buffer): void {
+    if (this.recognizeStream.destroyed) return;
     this.recognizeStream.write(pcmChunk);
   }
 

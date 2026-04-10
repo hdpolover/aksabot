@@ -72,15 +72,35 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
   // ── Step 1: Scan ─────────────────────────────────────────────
 
   Future<void> _startScan() async {
+    // Check Bluetooth is on before scanning
+    final btState = await FlutterBluePlus.adapterState.first;
+    if (btState != BluetoothAdapterState.on) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enable Bluetooth and try again.')),
+      );
+      return;
+    }
+
     setState(() {
       _isScanning = true;
       _scanResults = [];
     });
 
-    _scanSub?.cancel();
-    _scanSub = _ble.startScan().listen((results) {
-      setState(() => _scanResults = results);
-    });
+    try {
+      _scanSub?.cancel();
+      final resultsStream = await _ble.startScan();
+      _scanSub = resultsStream.listen((results) {
+        if (mounted) setState(() => _scanResults = results);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isScanning = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Scan failed: $e')),
+      );
+      return;
+    }
 
     // Auto-stop after timeout
     await Future.delayed(const Duration(seconds: 10));

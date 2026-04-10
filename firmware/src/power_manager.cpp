@@ -41,6 +41,9 @@ void power_manager::recordInteraction() {
 void power_manager::tick(uint32_t nowMs) {
     if (!initialized) return;
 
+    // Guard against underflow: recordInteraction() calls millis() which can be
+    // newer than the nowMs snapshot passed from the main loop
+    if (nowMs < lastInteractionMs) return;
     uint32_t idleMs = nowMs - lastInteractionMs;
     uint32_t idleSec = idleMs / 1000;
 

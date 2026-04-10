@@ -23,8 +23,13 @@ bool isConnected();
 /// Send a JSON event: {"event":"<name>","data":<data>}
 void sendEvent(const char* event, const char* jsonData = nullptr);
 
-/// Send binary data (Opus audio chunk).
+/// Send binary data (Opus audio chunk). No mutex — caller must ensure
+/// poll() is not running (set botState to LISTENING first).
 void sendBinary(const uint8_t* data, size_t len);
+
+/// Wait for poll() to release the mutex (call after setting LISTENING,
+/// before starting audio capture). Blocks up to timeoutMs.
+void waitForPollIdle(uint32_t timeoutMs = 500);
 
 /// Disconnect gracefully.
 void disconnect();

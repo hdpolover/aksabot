@@ -24,7 +24,7 @@ bool opus_codec::init() {
     opus_encoder_ctl(encoder, OPUS_SET_BITRATE(OPUS_BITRATE));
     opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(5));       // balanced CPU/quality
     opus_encoder_ctl(encoder, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
-    opus_encoder_ctl(encoder, OPUS_SET_DTX(1));              // discontinuous transmission
+    opus_encoder_ctl(encoder, OPUS_SET_DTX(0));              // DTX off — always send real frames for STT
 
     decoder = opus_decoder_create(
         I2S_MIC_SAMPLE_RATE,

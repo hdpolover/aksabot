@@ -19,8 +19,8 @@ class BleProvisioningService {
 
   /// Starts scanning for Aksabot devices (advertising 0xFFE0).
   /// Returns a stream of discovered devices.
-  Stream<List<ScanResult>> startScan({Duration timeout = const Duration(seconds: 10)}) {
-    FlutterBluePlus.startScan(
+  Future<Stream<List<ScanResult>>> startScan({Duration timeout = const Duration(seconds: 10)}) async {
+    await FlutterBluePlus.startScan(
       withServices: [BleConstants.wifiService],
       timeout: timeout,
     );

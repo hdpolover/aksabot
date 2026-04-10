@@ -1,8 +1,7 @@
 #include "display.h"
 #include "face.h"
 #include "config.h"
-#include <SPI.h>
-#include <TFT_eSPI.h>
+#include "lgfx_config.h"
 #include <Arduino.h>
 #include "bitmap_font.h"
 
@@ -28,11 +27,11 @@ static uint32_t autoReturnAtMs = 0;
 static uint32_t lastRenderMs = 0;
 static const uint16_t RENDER_INTERVAL_MS = 33;  // ~30fps
 
-// ── TFT_eSPI display driver ───────────────────────────
-static TFT_eSPI tft = TFT_eSPI();
-static TFT_eSprite sprite = TFT_eSprite(&tft);  // Off-screen sprite for flicker-free rendering
+// ── LovyanGFX display driver ─────────────────────────
+LGFX tft;  // Non-static: shared with touch.cpp via extern
+static LGFX_Sprite sprite(&tft);
 
-// Colors
+// Colors (RGB565)
 static const uint16_t COL_BG        = TFT_BLACK;
 static const uint16_t COL_FACE      = TFT_WHITE;
 static const uint16_t COL_EYE       = TFT_WHITE;
@@ -54,17 +53,11 @@ static const int CY = LCD_HEIGHT / 2;
 namespace display_hw {
 
 void init() {
-    // Backlight on first so we can see any init issues
-    pinMode(LCD_BL, OUTPUT);
-    digitalWrite(LCD_BL, HIGH);
-
-    // Initialize SPI bus for the LCD
-    SPI.begin(LCD_SCLK, LCD_MISO, LCD_MOSI, LCD_CS);
-
     tft.init();
-    tft.invertDisplay(false);  // ILI9341V normal mode
     tft.setRotation(0);        // Portrait: 240 wide x 320 tall
+    tft.invertDisplay(false);  // ILI9341V normal mode
     tft.fillScreen(COL_BG);
+    tft.setBrightness(255);    // Backlight on via PWM
 
     COL_DIM = tft.color565(80, 80, 80);
     COL_STATUS_BG = tft.color565(20, 20, 30);
@@ -78,7 +71,20 @@ void init() {
             LCD_WIDTH, LCD_HEIGHT, (LCD_WIDTH * LCD_HEIGHT * 2) / 1024.0f);
     }
 
-    Serial.println("[Display HW] ILI9341 initialized (240x320)");
+    // Static test pattern — diagnose scrolling
+    tft.fillScreen(COL_BG);
+    tft.drawRect(0, 0, LCD_WIDTH, LCD_HEIGHT, COL_ACCENT);   // border
+    tft.drawLine(0, 0, LCD_WIDTH, LCD_HEIGHT, COL_ACCENT);   // diagonal
+    tft.fillCircle(CX, CY, 30, COL_FACE);                    // center dot
+    tft.setTextColor(COL_FACE);
+    tft.setTextDatum(lgfx::middle_center);
+    tft.setTextSize(2);
+    tft.drawString("LovyanGFX OK", CX, CY + 60);
+    Serial.println("[Display HW] Test pattern drawn");
+    delay(1000);
+    tft.fillScreen(COL_BG);
+
+    Serial.println("[Display HW] LovyanGFX ILI9341 initialized (240x320)");
 }
 
 void clear() {
@@ -86,19 +92,20 @@ void clear() {
 }
 
 void setBacklight(uint8_t level) {
-    // This board uses a simple on/off backlight (GPIO 45)
-    // For dimming, we could use analogWrite/ledcWrite
+    // LovyanGFX handles PWM backlight via the Light driver
     if (level == 0) {
-        digitalWrite(LCD_BL, LOW);
+        tft.setBrightness(0);
     } else {
-        digitalWrite(LCD_BL, HIGH);
+        // Map 1-100 range to 30-255 (avoid too-dim levels)
+        uint8_t pwm = map(level, 1, 100, 30, 255);
+        tft.setBrightness(pwm);
     }
 }
 
 void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     // Draw to sprite buffer, then push to screen in one shot (no flicker)
-    TFT_eSprite& s = sprite.created() ? sprite : (TFT_eSprite&)tft;
-    bool useSprite = sprite.created();
+    LGFX_Sprite& s = sprite.getBuffer() ? sprite : (LGFX_Sprite&)tft;
+    bool useSprite = (sprite.getBuffer() != nullptr);
 
     if (useSprite) {
         s.fillSprite(COL_BG);
@@ -121,59 +128,142 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     int eyeY = CY - 30;
     int eyeSpacing = 45;
     int eyeW = 28, eyeH = 32;
+    int pupilR = 8;
+    int pupilOffX = 0, pupilOffY = 0;  // Pupil offset for "looking around"
+
+    // Per-expression eye shape
+    switch (fs.expression) {
+        case face::Expression::LISTENING:
+            eyeW = 34; eyeH = 38;  // Big wide eyes
+            pupilR = 6;            // Smaller pupils = surprised look
+            break;
+        case face::Expression::FOCUSED:
+            eyeH = 20;            // Squinted
+            pupilR = 7;
+            break;
+        case face::Expression::ENCOURAGING:
+            eyeW = 30; eyeH = 28; // Slightly wider, shorter = happy squint
+            pupilR = 7;
+            eyeY -= 5;            // Eyes shift up slightly = perky
+            break;
+        case face::Expression::CALM:
+            eyeH = 24;            // Relaxed, slightly droopy
+            pupilR = 9;           // Larger pupils = calm
+            break;
+        case face::Expression::CONFUSED:
+            pupilOffX = 5;        // Pupils look to the side
+            pupilOffY = -3;
+            break;
+        case face::Expression::THINKING:
+            pupilOffX = -8;       // Looking up-left
+            pupilOffY = -6;
+            eyeH = 30;
+            break;
+        case face::Expression::OFFLINE:
+            eyeH = 18;            // Droopy/sad eyes
+            eyeW = 24;
+            break;
+        default: break;
+    }
 
     if (fs.eyesOpen) {
-        // Open eyes — white ovals with dark pupils
-        if (fs.expression == face::Expression::LISTENING) {
-            // Wide eyes
-            eyeW = 32; eyeH = 36;
-        } else if (fs.expression == face::Expression::FOCUSED) {
-            // Squinted eyes
-            eyeH = 22;
-        }
-
         // Left eye
         s.fillEllipse(CX - eyeSpacing, eyeY, eyeW, eyeH, COL_EYE);
-        s.fillCircle(CX - eyeSpacing, eyeY, 8, COL_PUPIL);
+        s.fillCircle(CX - eyeSpacing + pupilOffX, eyeY + pupilOffY, pupilR, COL_PUPIL);
         // Right eye
         s.fillEllipse(CX + eyeSpacing, eyeY, eyeW, eyeH, COL_EYE);
-        s.fillCircle(CX + eyeSpacing, eyeY, 8, COL_PUPIL);
+        s.fillCircle(CX + eyeSpacing + pupilOffX, eyeY + pupilOffY, pupilR, COL_PUPIL);
+
+        // Encouraging: curved "eyebrows" above eyes
+        if (fs.expression == face::Expression::ENCOURAGING) {
+            for (int x = -12; x <= 12; x++) {
+                int y = eyeY - eyeH - 8 + (x * x) / 40;
+                s.drawPixel(CX - eyeSpacing + x, y, accentCol);
+                s.drawPixel(CX - eyeSpacing + x, y - 1, accentCol);
+                s.drawPixel(CX + eyeSpacing + x, y, accentCol);
+                s.drawPixel(CX + eyeSpacing + x, y - 1, accentCol);
+            }
+        }
+
+        // Offline: X marks over eyes
+        if (fs.expression == face::Expression::OFFLINE) {
+            int cx1 = CX - eyeSpacing, cx2 = CX + eyeSpacing;
+            s.drawLine(cx1 - 10, eyeY - 10, cx1 + 10, eyeY + 10, COL_ERROR);
+            s.drawLine(cx1 + 10, eyeY - 10, cx1 - 10, eyeY + 10, COL_ERROR);
+            s.drawLine(cx2 - 10, eyeY - 10, cx2 + 10, eyeY + 10, COL_ERROR);
+            s.drawLine(cx2 + 10, eyeY - 10, cx2 - 10, eyeY + 10, COL_ERROR);
+        }
     } else {
-        // Closed eyes — horizontal lines
-        s.drawLine(CX - eyeSpacing - eyeW, eyeY, CX - eyeSpacing + eyeW, eyeY, COL_EYE);
-        s.drawLine(CX + eyeSpacing - eyeW, eyeY, CX + eyeSpacing + eyeW, eyeY, COL_EYE);
+        // Closed eyes — curved lines (happy closed vs flat closed)
+        if (fs.expression == face::Expression::ENCOURAGING ||
+            fs.expression == face::Expression::CALM) {
+            // Happy closed eyes — upward curve (^  ^)
+            for (int x = -eyeW; x <= eyeW; x++) {
+                int y = eyeY - abs(x) / 3;
+                s.drawPixel(CX - eyeSpacing + x, y, COL_EYE);
+                s.drawPixel(CX + eyeSpacing + x, y, COL_EYE);
+            }
+        } else {
+            // Flat closed eyes
+            s.drawLine(CX - eyeSpacing - eyeW, eyeY, CX - eyeSpacing + eyeW, eyeY, COL_EYE);
+            s.drawLine(CX + eyeSpacing - eyeW, eyeY, CX + eyeSpacing + eyeW, eyeY, COL_EYE);
+        }
     }
 
     // ── Mouth ────────────────────────────────────────
     int mouthY = CY + 40;
 
     if (fs.expression == face::Expression::SLEEPING) {
-        s.setTextColor(COL_DIM, COL_BG);
-        s.setTextDatum(MC_DATUM);
+        s.setTextColor(COL_DIM);
+        s.setTextDatum(lgfx::middle_center);
         s.setTextSize(2);
         int zOffset = (int)(fs.breathPhase * 10);
         s.drawString("z", CX + 50, eyeY - 20 - zOffset);
         s.setTextSize(3);
         s.drawString("Z", CX + 65, eyeY - 40 - zOffset);
     } else if (fs.expression == face::Expression::CONFUSED) {
+        // Wavy mouth
         for (int x = -30; x < 30; x += 2) {
             int y = mouthY + (int)(sin(x * 0.3) * 5);
             s.drawPixel(CX + x, y, COL_MOUTH);
             s.drawPixel(CX + x, y + 1, COL_MOUTH);
         }
-        s.setTextColor(COL_WARM, COL_BG);
-        s.setTextDatum(MC_DATUM);
-        s.setTextSize(3);
-        s.drawString("?", CX + 70, eyeY - 30);
+        // Big "?" to the side
+        s.setTextColor(COL_WARM);
+        s.setTextDatum(lgfx::middle_center);
+        s.setTextSize(4);
+        s.drawString("?", CX + 70, eyeY - 20);
+    } else if (fs.expression == face::Expression::ENCOURAGING) {
+        // Wide smile — deep upward curve
+        for (int x = -30; x <= 30; x++) {
+            int y = mouthY - 5 + (x * x) / 80;
+            s.drawPixel(CX + x, y, COL_MOUTH);
+            s.drawPixel(CX + x, y + 1, COL_MOUTH);
+            s.drawPixel(CX + x, y + 2, COL_MOUTH);
+        }
+    } else if (fs.expression == face::Expression::CALM) {
+        // Gentle small smile
+        for (int x = -18; x <= 18; x++) {
+            int y = mouthY + (x * x) / 150;
+            s.drawPixel(CX + x, y, COL_MOUTH);
+            s.drawPixel(CX + x, y + 1, COL_MOUTH);
+        }
+    } else if (fs.expression == face::Expression::OFFLINE) {
+        // Flat line mouth (neutral/sad)
+        s.drawLine(CX - 20, mouthY, CX + 20, mouthY, COL_DIM);
+        s.drawLine(CX - 20, mouthY + 1, CX + 20, mouthY + 1, COL_DIM);
     } else {
+        // Default mouth — speaking or idle
         int mouthOpen = (int)(fs.mouthOpenness * 20);
         if (mouthOpen < 3) {
+            // Slight smile curve
             for (int x = -25; x <= 25; x++) {
                 int y = mouthY + (x * x) / 120;
                 s.drawPixel(CX + x, y, COL_MOUTH);
                 s.drawPixel(CX + x, y + 1, COL_MOUTH);
             }
         } else {
+            // Open mouth (speaking)
             s.fillEllipse(CX, mouthY, 25, mouthOpen, COL_MOUTH);
             s.fillEllipse(CX, mouthY, 20, mouthOpen - 3, COL_BG);
         }
@@ -232,8 +322,8 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
 void renderClock(const display::StatusBar& status) {
     tft.fillScreen(COL_BG);
 
-    // Large time
-    tft.setTextDatum(MC_DATUM);
+    // Large time — use LovyanGFX native font
+    tft.setTextDatum(lgfx::middle_center);
     tft.setTextSize(5);
     tft.setTextColor(COL_FACE);
 
@@ -255,7 +345,7 @@ void renderPomodoro(const display::PomodoroData& data) {
     tft.fillScreen(COL_BG);
 
     // Phase label
-    tft.setTextDatum(MC_DATUM);
+    tft.setTextDatum(lgfx::middle_center);
     tft.setTextSize(3);
     bool isFocus = (strcmp(data.phaseLabel, "focus") == 0 || strcmp(data.phaseLabel, "work") == 0);
     tft.setTextColor(isFocus ? COL_ACCENT : COL_CALM);
@@ -282,17 +372,15 @@ void renderReminder(const display::ReminderData& data) {
     tft.fillScreen(COL_BG);
 
     // Icon area
-    tft.setTextDatum(MC_DATUM);
+    tft.setTextDatum(lgfx::middle_center);
     tft.setTextSize(4);
     tft.setTextColor(COL_WARM);
     tft.drawString("!", CX, 60);
 
-    // Reminder text (word-wrapped)
+    // Reminder text
     tft.setTextSize(2);
     tft.setTextColor(COL_FACE);
-    tft.setTextDatum(MC_DATUM);
-
-    // Simple center-aligned text (TFT_eSPI handles basic wrapping)
+    tft.setTextDatum(lgfx::middle_center);
     tft.drawString(data.text, CX, CY);
 
     // Dismiss hint
@@ -305,7 +393,7 @@ void renderCountdown(const display::CountdownData& data) {
     tft.fillScreen(COL_BG);
 
     // Large number
-    tft.setTextDatum(MC_DATUM);
+    tft.setTextDatum(lgfx::middle_center);
     tft.setTextSize(8);
     tft.setTextColor(COL_CALM);
     char numBuf[4];
@@ -320,7 +408,7 @@ void renderCountdown(const display::CountdownData& data) {
 
 void renderStatus(const display::StatusBar& status) {
     tft.fillScreen(COL_BG);
-    tft.setTextDatum(TL_DATUM);
+    tft.setTextDatum(lgfx::top_left);
     tft.setTextSize(2);
 
     int y = 20;
@@ -355,7 +443,7 @@ void renderTranscriptOverlay(const char* speaker, const char* text) {
     int barY = LCD_HEIGHT - barH;
     tft.fillRect(0, barY, LCD_WIDTH, barH, COL_STATUS_BG);
 
-    tft.setTextDatum(TL_DATUM);
+    tft.setTextDatum(lgfx::top_left);
     tft.setTextSize(1);
     tft.setTextColor(COL_ACCENT);
     tft.drawString(speaker, 8, barY + 4);

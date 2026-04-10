@@ -1,45 +1,20 @@
 #include "touch.h"
 #include "display.h"
 #include "config.h"
-#include <Wire.h>
+#include "lgfx_config.h"
 #include <Arduino.h>
 
 // ── Configuration ──────────────────────────────────────
 static const uint16_t DEBOUNCE_MS = 30;
-static const uint16_t TAP_MAX_MS = 300;
+static const uint16_t TAP_MAX_MS = 400;
 static const uint16_t HOLD_THRESHOLD_MS = 300;
-static const uint16_t LONG_PRESS_MS = 3000;
+static const uint16_t LONG_PRESS_MS = 5000;  // 5s — avoid conflict with hold-to-talk
+static const uint8_t  CONFIRM_COUNT = 2;
+static const uint16_t POLL_INTERVAL_MS = 15;
+static const uint16_t WAKE_COOLDOWN_MS = 500;  // Suppress touch reads after wake
 
-// ── FT6336G I2C Touch Driver ──────────────────────────
-// Register addresses for FT6336G capacitive touch IC
-static const uint8_t FT_REG_NUM_TOUCHES = 0x02;
-static const uint8_t FT_REG_TOUCH1_XH   = 0x03;
-static const uint8_t FT_REG_TOUCH1_XL   = 0x04;
-static const uint8_t FT_REG_TOUCH1_YH   = 0x05;
-static const uint8_t FT_REG_TOUCH1_YL   = 0x06;
-static const uint8_t FT_I2C_ADDR        = TOUCH_I2C_ADDR;
-
-static TwoWire touchWire(0);  // I2C bus 0 for touch
-static bool hwInitialized = false;
-
-// Read a register from the touch IC
-static uint8_t ft_readReg(uint8_t reg) {
-    touchWire.beginTransmission(FT_I2C_ADDR);
-    touchWire.write(reg);
-    touchWire.endTransmission(false);
-    touchWire.requestFrom((uint8_t)FT_I2C_ADDR, (uint8_t)1);
-    if (touchWire.available()) {
-        return touchWire.read();
-    }
-    return 0;
-}
-
-// Poll touch state from hardware
-static bool ft_isTouched() {
-    if (!hwInitialized) return false;
-    uint8_t numTouches = ft_readReg(FT_REG_NUM_TOUCHES);
-    return (numTouches > 0 && numTouches < 5);
-}
+// ── LovyanGFX display instance (defined in display.cpp) ──
+extern LGFX tft;
 
 // ── Internal state ─────────────────────────────────────
 static touch::EventCallback eventCb;
@@ -48,12 +23,53 @@ static uint32_t touchStartMs = 0;
 static bool holdFired = false;
 static bool longPressFired = false;
 
+// Debounce state
+static uint32_t lastPollMs = 0;
+static uint32_t lastTransitionMs = 0;
+static uint8_t sameStateCount = 0;
+static bool pendingState = false;
+
+// Wake cooldown
+static uint32_t wakeCooldownUntil = 0;
+
+// Boot stabilization — FT6336G needs ~300ms after reset to produce valid readings
+static uint32_t bootReadyMs = 0;
+
 // ── Helpers ────────────────────────────────────────────
 
 static void fireEvent(touch::Event event) {
-    Serial.printf("[Touch] Event: %u\n", (uint8_t)event);
+    const char* names[] = {"TAP", "HOLD_START", "HOLD_END", "LONG_PRESS", "WAKE"};
+    Serial.printf("[Touch] %s\n", names[(uint8_t)event]);
     if (eventCb) {
         eventCb(event);
+    }
+}
+
+static void processStateChange(bool pressed, uint32_t nowMs) {
+    if (pressed && !currentlyTouched) {
+        currentlyTouched = true;
+        touchStartMs = nowMs;
+        holdFired = false;
+        longPressFired = false;
+
+        if (display::isSleeping()) {
+            fireEvent(touch::Event::WAKE);
+            display::wake();
+            currentlyTouched = false;
+            wakeCooldownUntil = nowMs + WAKE_COOLDOWN_MS;
+            return;
+        }
+    }
+    else if (!pressed && currentlyTouched) {
+        uint32_t holdDuration = nowMs - touchStartMs;
+        currentlyTouched = false;
+
+        if (holdFired) {
+            // Always fire HOLD_END on release so recording stops
+            fireEvent(touch::Event::HOLD_END);
+        } else if (holdDuration <= TAP_MAX_MS) {
+            fireEvent(touch::Event::TAP);
+        }
     }
 }
 
@@ -64,30 +80,20 @@ void touch::init() {
     touchStartMs = 0;
     holdFired = false;
     longPressFired = false;
+    sameStateCount = 0;
+    pendingState = false;
+    lastPollMs = 0;
+    lastTransitionMs = 0;
+    wakeCooldownUntil = 0;
 
-    // Initialize I2C for FT6336G touch controller
-    touchWire.begin(TOUCH_SDA, TOUCH_SCL, 400000);
-
-    // Reset touch IC
-    pinMode(TOUCH_RST, OUTPUT);
-    digitalWrite(TOUCH_RST, LOW);
-    delay(10);
-    digitalWrite(TOUCH_RST, HIGH);
-    delay(100);
-
-    // Configure interrupt pin
+    // INT pin: goes LOW when finger touches, HIGH when released
+    // We read this manually to filter phantom touches from getTouch()
     pinMode(TOUCH_INT, INPUT_PULLUP);
 
-    // Verify touch IC is responding
-    touchWire.beginTransmission(FT_I2C_ADDR);
-    uint8_t err = touchWire.endTransmission();
-    if (err == 0) {
-        hwInitialized = true;
-        Serial.println("[Touch] FT6336G initialized (I2C)");
-    } else {
-        Serial.printf("[Touch] FT6336G not found at 0x%02X (err=%d), using serial simulation\n",
-            FT_I2C_ADDR, err);
-    }
+    // FT6336G needs ~300ms after reset (done by LovyanGFX via TOUCH_RST pin)
+    bootReadyMs = millis() + 500;
+
+    Serial.println("[Touch] Using LovyanGFX Touch_FT5x06 driver");
 }
 
 void touch::onEvent(EventCallback callback) {
@@ -95,45 +101,53 @@ void touch::onEvent(EventCallback callback) {
 }
 
 void touch::feedRaw(bool pressed, uint32_t nowMs) {
-    if (pressed && !currentlyTouched) {
-        currentlyTouched = true;
-        touchStartMs = nowMs;
-        holdFired = false;
-        longPressFired = false;
-
-        if (display::isSleeping()) {
-            fireEvent(Event::WAKE);
-            display::wake();
-            currentlyTouched = false;
-            return;
-        }
-    }
-    else if (!pressed && currentlyTouched) {
-        uint32_t holdDuration = nowMs - touchStartMs;
-        currentlyTouched = false;
-
-        if (longPressFired) {
-            // Already handled
-        } else if (holdFired) {
-            fireEvent(Event::HOLD_END);
-        } else if (holdDuration < TAP_MAX_MS) {
-            fireEvent(Event::TAP);
-        } else {
-            fireEvent(Event::TAP);
-        }
-    }
+    processStateChange(pressed, nowMs);
 }
 
 void touch::tick(uint32_t nowMs) {
-    // Poll hardware touch if available
-    if (hwInitialized) {
-        bool touched = ft_isTouched();
-        if (touched != currentlyTouched) {
-            feedRaw(touched, nowMs);
+    // Poll at controlled rate
+    if ((nowMs - lastPollMs) < POLL_INTERVAL_MS) goto check_hold;
+    lastPollMs = nowMs;
+
+    // Suppress reads during boot stabilization and wake cooldown
+    if (nowMs < bootReadyMs) goto check_hold;
+    if (nowMs < wakeCooldownUntil) goto check_hold;
+
+    {
+        // Use INT pin as primary gate: LOW = finger on screen
+        // This filters out FT6336G phantom touches that getTouch() can't catch
+        bool intLow = (digitalRead(TOUCH_INT) == LOW);
+
+        bool rawTouched = false;
+        if (intLow) {
+            // INT says something is touching — confirm via I2C
+            lgfx::touch_point_t tp;
+            uint8_t count = tft.getTouch(&tp, 1);
+            rawTouched = (count > 0);
+        }
+        // If INT is HIGH, rawTouched stays false (no touch)
+
+        // Debounce: require consecutive matching reads
+        if (rawTouched != currentlyTouched) {
+            if (rawTouched == pendingState) {
+                sameStateCount++;
+            } else {
+                pendingState = rawTouched;
+                sameStateCount = 1;
+            }
+
+            if (sameStateCount >= CONFIRM_COUNT &&
+                (nowMs - lastTransitionMs) >= DEBOUNCE_MS) {
+                lastTransitionMs = nowMs;
+                sameStateCount = 0;
+                processStateChange(rawTouched, nowMs);
+            }
+        } else {
+            sameStateCount = 0;
         }
     }
 
-    // Check for hold/long press transitions
+check_hold:
     if (!currentlyTouched) return;
 
     uint32_t holdDuration = nowMs - touchStartMs;
@@ -166,27 +180,27 @@ void touch::processSerial(uint32_t nowMs) {
     char c = Serial.read();
     switch (c) {
         case 's':
-            feedRaw(true, nowMs);
+            processStateChange(true, nowMs);
             holdFired = true;
             fireEvent(Event::HOLD_START);
             break;
 
         case 'e':
             if (currentlyTouched) {
-                feedRaw(false, nowMs);
+                processStateChange(false, nowMs);
             }
             break;
 
         case 'i':
-            feedRaw(true, nowMs);
-            feedRaw(false, nowMs + 50);
+            processStateChange(true, nowMs);
+            processStateChange(false, nowMs + 50);
             break;
 
         case 'q':
-            feedRaw(true, nowMs);
+            processStateChange(true, nowMs);
             longPressFired = true;
             fireEvent(Event::LONG_PRESS);
-            feedRaw(false, nowMs);
+            processStateChange(false, nowMs);
             break;
 
         case 'w':
