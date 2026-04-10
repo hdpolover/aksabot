@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/presentation/bloc/auth_bloc.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
+import '../../features/auth/presentation/pages/forgot_password_page.dart';
 import '../../features/home/presentation/pages/home_page.dart';
 import '../../features/activity/presentation/pages/activity_page.dart';
 import '../../features/settings/presentation/pages/settings_page.dart';
@@ -34,7 +35,8 @@ GoRouter createRouter(AuthBloc authBloc) {
       final isAuth = authState is Authenticated;
       final isAuthRoute =
           state.matchedLocation == '/login' ||
-          state.matchedLocation == '/register';
+          state.matchedLocation == '/register' ||
+          state.matchedLocation == '/forgot-password';
 
       if (!isAuth && !isAuthRoute) return '/login';
       if (isAuth && isAuthRoute) return '/home';
@@ -49,6 +51,10 @@ GoRouter createRouter(AuthBloc authBloc) {
       GoRoute(
         path: '/register',
         builder: (context, state) => const RegisterPage(),
+      ),
+      GoRoute(
+        path: '/forgot-password',
+        builder: (context, state) => const ForgotPasswordPage(),
       ),
 
       // Main app shell — bottom nav only on these 3 root tabs

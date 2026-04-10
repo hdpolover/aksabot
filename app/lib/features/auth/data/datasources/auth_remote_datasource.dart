@@ -34,6 +34,24 @@ class AuthRemoteDatasource {
     final data = await _apiClient.get('/auth/me');
     return UserModel.fromJson(data as Map<String, dynamic>);
   }
+
+  Future<void> forgotPassword({required String email}) async {
+    await _apiClient.post(
+      '/auth/forgot-password',
+      data: {'email': email},
+    );
+  }
+
+  Future<void> resetPassword({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async {
+    await _apiClient.post(
+      '/auth/reset-password',
+      data: {'email': email, 'code': code, 'newPassword': newPassword},
+    );
+  }
 }
 
 /// Parsed auth response after envelope unwrapping.

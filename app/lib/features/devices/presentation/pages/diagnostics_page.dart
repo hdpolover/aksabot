@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
-/// Diagnostics screen — planned UI.
+import '../../../../core/di/injection.dart';
+import '../../../../core/network/api_client.dart';
+import '../../domain/repositories/devices_repository.dart';
+
+/// Diagnostics screen — real connectivity and device stats.
 class DiagnosticsPage extends StatefulWidget {
   final String deviceId;
   const DiagnosticsPage({super.key, required this.deviceId});
@@ -12,26 +16,89 @@ class DiagnosticsPage extends StatefulWidget {
 class _DiagnosticsPageState extends State<DiagnosticsPage> {
   bool _testing = false;
   Map<String, _TestResult>? _results;
+  Map<String, dynamic>? _stats;
+  bool _loadingStats = true;
 
-  void _runTest() async {
+  final _devicesRepo = sl<DevicesRepository>();
+  final _apiClient = sl<ApiClient>();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStats();
+  }
+
+  Future<void> _loadStats() async {
+    setState(() => _loadingStats = true);
+    final result = await _devicesRepo.getStats(widget.deviceId);
+    if (!mounted) return;
+    result.fold(
+      (_) => setState(() => _loadingStats = false),
+      (stats) => setState(() {
+        _stats = stats;
+        _loadingStats = false;
+      }),
+    );
+  }
+
+  Future<void> _runTest() async {
     setState(() {
       _testing = true;
       _results = null;
     });
 
-    // Simulate connection test
-    await Future.delayed(const Duration(seconds: 1));
-    if (!mounted) return;
+    // Run all checks concurrently.
+    final stopwatch = Stopwatch()..start();
+    final apiFuture = _checkBackendApi(stopwatch);
+    final deviceFuture = _checkDeviceOnline();
 
+    final apiResult = await apiFuture;
+    final deviceResult = await deviceFuture;
+
+    if (!mounted) return;
     setState(() {
       _testing = false;
       _results = {
-        'Backend API': _TestResult(true, '42ms'),
-        'WebSocket': _TestResult(true, 'connected'),
-        'BLE': _TestResult(false, 'not connected'),
-        'Wi-Fi (ESP32)': _TestResult(true, '-55 dBm'),
+        'Backend API': apiResult,
+        'WebSocket (lastSeen)': deviceResult,
       };
     });
+  }
+
+  Future<_TestResult> _checkBackendApi(Stopwatch sw) async {
+    try {
+      sw.reset();
+      // A lightweight authenticated endpoint — /auth/me is a good canary.
+      await _apiClient.get('/auth/me');
+      final ms = sw.elapsedMilliseconds;
+      return _TestResult(true, '${ms}ms');
+    } catch (_) {
+      return _TestResult(false, 'unreachable');
+    }
+  }
+
+  Future<_TestResult> _checkDeviceOnline() async {
+    final result = await _devicesRepo.getDevice(widget.deviceId);
+    return result.fold(
+      (_) => _TestResult(false, 'fetch failed'),
+      (device) {
+        if (device.lastSeenAt == null) {
+          return _TestResult(false, 'never seen');
+        }
+        final diff = DateTime.now().difference(device.lastSeenAt!);
+        if (device.isOnline) {
+          return _TestResult(true, 'online (${_formatAgo(diff)})');
+        } else {
+          return _TestResult(false, 'offline (${_formatAgo(diff)} ago)');
+        }
+      },
+    );
+  }
+
+  String _formatAgo(Duration d) {
+    if (d.inSeconds < 60) return '${d.inSeconds}s';
+    if (d.inMinutes < 60) return '${d.inMinutes}m';
+    return '${d.inHours}h';
   }
 
   @override
@@ -44,6 +111,52 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // Device stats
+          Text('Device Stats', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: _loadingStats
+                  ? const Center(child: CircularProgressIndicator())
+                  : _stats == null
+                      ? Text(
+                          'Could not load stats',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colors.error,
+                          ),
+                        )
+                      : Column(
+                          children: [
+                            _StatRow(
+                              label: 'Conversations',
+                              value: '${_stats!['conversations'] ?? 0}',
+                              icon: Icons.chat_bubble_outline,
+                              colors: colors,
+                              theme: theme,
+                            ),
+                            const SizedBox(height: 8),
+                            _StatRow(
+                              label: 'Memories',
+                              value: '${_stats!['memories'] ?? 0}',
+                              icon: Icons.memory,
+                              colors: colors,
+                              theme: theme,
+                            ),
+                            const SizedBox(height: 8),
+                            _StatRow(
+                              label: 'Response pool',
+                              value: '${_stats!['responsePool'] ?? 0}',
+                              icon: Icons.queue,
+                              colors: colors,
+                              theme: theme,
+                            ),
+                          ],
+                        ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
           // Connection test
           Text('Connection Test', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
@@ -135,13 +248,8 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
               ),
               child: SingleChildScrollView(
                 child: Text(
-                  '[14:23:01] WebSocket connected\n'
-                  '[14:23:02] Audio session started\n'
-                  '[14:23:05] STT: "hello there"\n'
-                  '[14:23:06] LLM streaming response\n'
-                  '[14:23:07] TTS: 2 chunks encoded\n'
-                  '[14:23:08] Audio playback complete\n'
-                  '[14:23:10] Session idle\n',
+                  'Logs are streamed from the ESP32 over WebSocket.\n'
+                  'Live log viewer requires Phase 5 firmware.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     fontFamily: 'monospace',
                     color: colors.onSurfaceVariant,
@@ -206,6 +314,40 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _StatRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final ColorScheme colors;
+  final ThemeData theme;
+
+  const _StatRow({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.colors,
+    required this.theme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: colors.primary),
+        const SizedBox(width: 12),
+        Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
+        Text(
+          value,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+            color: colors.primary,
+          ),
+        ),
+      ],
     );
   }
 }

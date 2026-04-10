@@ -143,17 +143,7 @@ class _LoginPageState extends State<LoginPage> {
                       Align(
                         alignment: Alignment.centerRight,
                         child: TextButton(
-                          onPressed: () {
-                            ScaffoldMessenger.of(context)
-                              ..hideCurrentSnackBar()
-                              ..showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                      'Password reset is not yet available.'),
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                          },
+                          onPressed: () => context.push('/forgot-password'),
                           child: const Text('Forgot password?'),
                         ),
                       ),

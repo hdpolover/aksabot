@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
-/// Voice & Audio settings — planned UI (Phase 5 for VAD).
+import '../../../../core/di/injection.dart';
+import '../../domain/entities/device_entity.dart';
+import '../../domain/repositories/devices_repository.dart';
+
+/// Voice & Audio settings — persisted via PATCH /devices/:id/settings.
 class VoiceAudioPage extends StatefulWidget {
   final String deviceId;
   const VoiceAudioPage({super.key, required this.deviceId});
@@ -10,6 +14,12 @@ class VoiceAudioPage extends StatefulWidget {
 }
 
 class _VoiceAudioPageState extends State<VoiceAudioPage> {
+  final _devicesRepo = sl<DevicesRepository>();
+
+  bool _loading = true;
+  bool _saving = false;
+
+  // Voice settings fields — mirror the keys stored in settingsJson.
   String _voicePreset = 'ziggy';
   double _speed = 0.8;
   double _stability = 0.6;
@@ -18,13 +28,90 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
   bool _reminderChime = true;
   double _vadSensitivity = 0.5;
 
+  // Full settings snapshot so we don't clobber unrelated keys on PATCH.
+  Map<String, dynamic> _rawSettings = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    setState(() => _loading = true);
+    final result = await _devicesRepo.getDevice(widget.deviceId);
+    if (!mounted) return;
+    result.fold(
+      (_) => setState(() => _loading = false),
+      (device) => _applySettings(device),
+    );
+  }
+
+  void _applySettings(Device device) {
+    final s = device.settingsJson;
+    setState(() {
+      _rawSettings = Map<String, dynamic>.from(s);
+      _voicePreset = s['voice_preset'] as String? ?? 'ziggy';
+      _speed = (s['voice_speed'] as num?)?.toDouble() ?? 0.8;
+      _stability = (s['voice_stability'] as num?)?.toDouble() ?? 0.6;
+      _wakeSound = s['audio_wake_sound'] as bool? ?? true;
+      _sleepSound = s['audio_sleep_sound'] as bool? ?? true;
+      _reminderChime = s['audio_reminder_chime'] as bool? ?? true;
+      _vadSensitivity = (s['vad_sensitivity'] as num?)?.toDouble() ?? 0.5;
+      _loading = false;
+    });
+  }
+
+  /// Persist a single changed key without clobbering other settings.
+  Future<void> _save(String key, dynamic value) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+
+    final patch = Map<String, dynamic>.from(_rawSettings)..[key] = value;
+    final result = await _devicesRepo.updateSettings(widget.deviceId, patch);
+    if (!mounted) return;
+
+    result.fold(
+      (failure) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save: ${failure.message}')),
+        );
+      },
+      (device) {
+        _applySettings(device);
+        setState(() => _saving = false);
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
 
+    if (_loading) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Voice & Audio')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Voice & Audio')),
+      appBar: AppBar(
+        title: const Text('Voice & Audio'),
+        actions: [
+          if (_saving)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -39,25 +126,34 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
                 children: [
                   Text('Voice preset', style: theme.textTheme.bodyMedium),
                   const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    initialValue: _voicePreset,
+                  InputDecorator(
                     decoration: const InputDecoration(
                       contentPadding:
-                          EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     ),
-                    items: const [
-                      DropdownMenuItem(
-                          value: 'ziggy', child: Text('Ziggy (energetic boy)')),
-                      DropdownMenuItem(
-                          value: 'aria', child: Text('Aria (warm female)')),
-                      DropdownMenuItem(
-                          value: 'roger', child: Text('Roger (calm male)')),
-                      DropdownMenuItem(
-                          value: 'sarah', child: Text('Sarah (friendly)')),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) setState(() => _voicePreset = v);
-                    },
+                    child: DropdownButton<String>(
+                      value: _voicePreset,
+                      isExpanded: true,
+                      underline: const SizedBox.shrink(),
+                      items: const [
+                        DropdownMenuItem(
+                            value: 'ziggy',
+                            child: Text('Ziggy (energetic boy)')),
+                        DropdownMenuItem(
+                            value: 'aria', child: Text('Aria (warm female)')),
+                        DropdownMenuItem(
+                            value: 'roger', child: Text('Roger (calm male)')),
+                        DropdownMenuItem(
+                            value: 'sarah', child: Text('Sarah (friendly)')),
+                      ],
+                      onChanged: _saving
+                          ? null
+                          : (v) {
+                              if (v == null) return;
+                              setState(() => _voicePreset = v);
+                              _save('voice_preset', v);
+                            },
+                    ),
                   ),
                   const SizedBox(height: 16),
                   Text('Speed', style: theme.textTheme.bodyMedium),
@@ -71,7 +167,12 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
                           max: 1.5,
                           divisions: 10,
                           label: '${_speed.toStringAsFixed(1)}x',
-                          onChanged: (v) => setState(() => _speed = v),
+                          onChanged: _saving
+                              ? null
+                              : (v) => setState(() => _speed = v),
+                          onChangeEnd: _saving
+                              ? null
+                              : (v) => _save('voice_speed', v),
                         ),
                       ),
                       Text('Faster', style: theme.textTheme.bodySmall),
@@ -89,7 +190,12 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
                           max: 1.0,
                           divisions: 10,
                           label: _stability.toStringAsFixed(1),
-                          onChanged: (v) => setState(() => _stability = v),
+                          onChanged: _saving
+                              ? null
+                              : (v) => setState(() => _stability = v),
+                          onChangeEnd: _saving
+                              ? null
+                              : (v) => _save('voice_stability', v),
                         ),
                       ),
                       Text('Stable', style: theme.textTheme.bodySmall),
@@ -122,19 +228,34 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
                 SwitchListTile(
                   title: const Text('Wake sound'),
                   value: _wakeSound,
-                  onChanged: (v) => setState(() => _wakeSound = v),
+                  onChanged: _saving
+                      ? null
+                      : (v) {
+                          setState(() => _wakeSound = v);
+                          _save('audio_wake_sound', v);
+                        },
                 ),
                 const Divider(height: 1),
                 SwitchListTile(
                   title: const Text('Sleep sound'),
                   value: _sleepSound,
-                  onChanged: (v) => setState(() => _sleepSound = v),
+                  onChanged: _saving
+                      ? null
+                      : (v) {
+                          setState(() => _sleepSound = v);
+                          _save('audio_sleep_sound', v);
+                        },
                 ),
                 const Divider(height: 1),
                 SwitchListTile(
                   title: const Text('Reminder chime'),
                   value: _reminderChime,
-                  onChanged: (v) => setState(() => _reminderChime = v),
+                  onChanged: _saving
+                      ? null
+                      : (v) {
+                          setState(() => _reminderChime = v);
+                          _save('audio_reminder_chime', v);
+                        },
                 ),
               ],
             ),
@@ -160,8 +281,12 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
                           min: 0.0,
                           max: 1.0,
                           divisions: 10,
-                          onChanged: (v) =>
-                              setState(() => _vadSensitivity = v),
+                          onChanged: _saving
+                              ? null
+                              : (v) => setState(() => _vadSensitivity = v),
+                          onChangeEnd: _saving
+                              ? null
+                              : (v) => _save('vad_sensitivity', v),
                         ),
                       ),
                       Text('More', style: theme.textTheme.bodySmall),
