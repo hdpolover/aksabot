@@ -51,6 +51,12 @@
 	<string>Aksabot uses Bluetooth to discover, configure, and detect presence of your AI desk companion.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>Aksabot uses Bluetooth to communicate with your AI desk companion.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Aksabot scans your local Wi-Fi network to find and connect to your AI desk companion device.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_aksabot._tcp</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

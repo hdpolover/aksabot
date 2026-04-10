@@ -18,6 +18,7 @@ static const char* K_BRIGHTNESS   = "brightness";
 static const char* K_PRES_ENABLED = "pres_en";
 static const char* K_PRES_RSSI    = "pres_rssi";
 static const char* K_PRES_GRACE   = "pres_grace";
+static const char* K_SETUP_DONE   = "setup_done";
 
 // ── Helpers ────────────────────────────────────────────
 
@@ -158,6 +159,20 @@ uint8_t nvs_store::getPresenceGracePeriodSec() {
 bool nvs_store::setPresenceGracePeriodSec(uint8_t seconds) {
     if (!initialized) return false;
     return prefs.putUChar(K_PRES_GRACE, seconds) > 0;
+}
+
+// ── Setup state ────────────────────────────────────────
+
+bool nvs_store::isFirstBoot() {
+    if (!initialized) return true;
+    return !prefs.getBool(K_SETUP_DONE, false);
+}
+
+bool nvs_store::markSetupComplete() {
+    if (!initialized) return false;
+    bool ok = prefs.putBool(K_SETUP_DONE, true) > 0;
+    if (ok) Serial.println("[NVS] Setup marked complete");
+    return ok;
 }
 
 // ── Factory reset ──────────────────────────────────────

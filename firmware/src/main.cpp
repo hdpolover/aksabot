@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include "config.h"
 #include "state.h"
 #include "nvs_store.h"
@@ -22,6 +23,7 @@
 #include "power_manager.h"
 #include "ble_manager.h"
 #include "boot_screen.h"
+#include "device_server.h"
 
 #define FIRMWARE_VERSION "1.0.0"
 
@@ -500,70 +502,122 @@ void setup() {
 
     delay(2000);  // Let user see the hardware check results
 
-    // ── 5. BLE provisioning gate ───────────────────────────
+    // ── 5. First-boot detection ────────────────────────────
+    bool firstBoot = nvs_store::isFirstBoot();
+    if (firstBoot) {
+        Serial.println("[Main] First boot detected — showing introduction");
+        boot_screen::showFirstBoot();
+    }
+
+    // ── 6. BLE provisioning gate ───────────────────────────
     // Skip if NVS has credentials OR compile-time credentials exist.
     // wifi_manager::init() falls back to credentials.h when NVS is empty.
     bool hasNvsCreds = nvs_store::hasWifiCredentials();
     bool hasCompileCreds = (strlen(WIFI_SSID) > 0);
 
     if (!hasNvsCreds && !hasCompileCreds) {
-        Serial.println("[Main] No WiFi credentials — entering BLE provisioning mode");
-        boot_screen::showProvisioningPrompt();
-        ble_manager::waitForProvisioning(0);  // blocks until creds arrive via BLE
-        boot_screen::showProvisioningStatus("Credentials received!");
-        delay(500);
+        Serial.println("[Main] No WiFi credentials — entering provisioning mode");
+
+        // Build SoftAP name from last 2 MAC bytes for uniqueness
+        char apName[24];
+        uint8_t mac[6];
+        WiFi.macAddress(mac);
+        snprintf(apName, sizeof(apName), "Aksabot-%02X%02X", mac[4], mac[5]);
+
+        wifi_manager::startAP(apName);
+        boot_screen::showProvisioningPrompt(apName);
+
+        // Poll for either BLE or SoftAP HTTP to deliver credentials
+        bool bleConnectedShown = false;
+        while (!ble_manager::isProvisioned() && !wifi_manager::isAPProvisioned()) {
+            uint32_t now = millis();
+            if (!bleConnectedShown && ble_manager::isClientConnected()) {
+                boot_screen::showProvisioningStatus("Phone connected via BLE...");
+                bleConnectedShown = true;
+            }
+            boot_screen::tickProvisioningAnimation(now);
+            wifi_manager::tickAP();
+            delay(100);
+        }
+
+        wifi_manager::stopAP();
+
+        const char* method = ble_manager::isProvisioned() ? "BLE" : "Wi-Fi hotspot";
+        char statusMsg[48];
+        snprintf(statusMsg, sizeof(statusMsg), "Credentials received via %s", method);
+        boot_screen::showProvisioningStatus(statusMsg);
+        Serial.printf("[Main] Provisioned via %s\n", method);
+        delay(600);
     } else if (hasNvsCreds) {
         Serial.println("[Main] Using NVS WiFi credentials");
     } else {
         Serial.println("[Main] Using compile-time WiFi credentials");
     }
 
-    // ── 6. WiFi connect ────────────────────────────────────
+    // ── 7. WiFi connect ────────────────────────────────────
     char ssidBuf[64] = {};
+    const char* ssidDisplay = WIFI_SSID;
     if (nvs_store::getWifiSsid(ssidBuf, sizeof(ssidBuf)) && strlen(ssidBuf) > 0) {
-        boot_screen::showConnecting(ssidBuf);
-    } else {
-        boot_screen::showConnecting(WIFI_SSID);
+        ssidDisplay = ssidBuf;
     }
+    boot_screen::showConnecting(ssidDisplay);
 
     wifi_manager::init();
     Serial.println("[Main] Waiting for Wi-Fi...");
     wifi_manager::waitForConnection(15000);
 
     if (wifi_manager::isConnected()) {
-        boot_screen::showConnected(WiFi.localIP().toString().c_str());
         ble_manager::notifyWifiStatus(2);  // connected
-        boot_screen::showHardwareCheck("WiFi", 1);
+
+        // mDNS: advertise as aksabot.local + _aksabot._tcp service on port 80
+        if (MDNS.begin("aksabot")) {
+            MDNS.addService("aksabot", "tcp", 80);
+            Serial.println("[Main] mDNS: aksabot.local registered");
+        } else {
+            Serial.println("[Main] mDNS: failed to start");
+        }
+
+        // HTTP status server so the app can verify it found the right device
+        if (firstBoot) {
+            device_server::setSetupMode(true);  // open token-accept window for first-boot
+        }
+        device_server::start(FIRMWARE_VERSION);
+
+        if (firstBoot) {
+            // First successful WiFi connection — celebrate and mark done
+            nvs_store::markSetupComplete();
+            boot_screen::showSetupComplete(ssidDisplay);
+        } else {
+            boot_screen::showConnected(WiFi.localIP().toString().c_str());
+        }
+        appState.wifiConnected = true;
     } else {
-        boot_screen::showConnectionFailed("Timeout — will retry");
+        boot_screen::showConnectionFailed("Timeout — will retry in background");
         ble_manager::notifyWifiStatus(3);  // failed
         appState.botState = BotState::OFFLINE;
     }
 
-    // ── 7. WebSocket backend connection ────────────────────
+    // ── 8. Initialize WS client (connects in background via ws task) ──
     ws_client::init(onWsJson, onWsBinary);
-    if (wifi_manager::isConnected()) {
+    if (wifi_manager::isConnected() && nvs_store::hasDeviceToken()) {
+        Serial.println("[Main] Device token found — connecting to backend");
         ws_client::connect();
+    } else if (!nvs_store::hasDeviceToken()) {
+        Serial.println("[Main] No device token — register via Aksabot app to enable AI features");
     }
 
-    // ── 8. Start FreeRTOS tasks ────────────────────────────
+    // ── 9. Start FreeRTOS tasks ────────────────────────────
     xTaskCreatePinnedToCore(audioCaptureLoop, "audio_cap", 24576, nullptr, 5, &audioCaptureTask, 0);
     xTaskCreatePinnedToCore(wsLoop, "ws_poll", 12288, nullptr, 3, &wsTask, 1);
     xTaskCreatePinnedToCore(displayLoop, "display", 8192, nullptr, 3, &displayTask, 1);
 
-    // Wait for WS connection
-    unsigned long wsStart = millis();
-    while (!appState.wsConnected && (millis() - wsStart) < 5000) {
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-
-    // ── 9. Start presence scanning ─────────────────────────
+    // ── 10. Start presence scanning ───────────────────────
     if (nvs_store::getPresenceEnabled()) {
         ble_manager::startPresenceScan();
     }
 
-    // ── 10. Ready — transition to face UI ──────────────────
-    if (appState.wsConnected) {
+    // ── 11. Ready — transition to face UI ─────────────────
+    if (appState.wifiConnected) {
         appState.botState = BotState::IDLE;
     }
     boot_screen::showReady();
@@ -602,6 +656,17 @@ void loop() {
         stuckCheckMs = 0;
     }
 
+    // Serve HTTP status requests + token delivery (used by Flutter app)
+    device_server::tick();
+
+    // Check if device token was received via HTTP → connect to backend
+    if (device_server::consumeNewToken() && wifi_manager::isConnected()) {
+        Serial.println("[Main] New device token received — connecting to backend WS");
+        ws_client::reconnectWithToken();
+        ble_manager::notifyAuthStatus(1);  // 1 = token stored
+        updateStatusBar();
+    }
+
     // Tick presence detector + BLE scanner
     presence_detector::tick(now);
     ble_manager::tickPresenceScan(now);
@@ -613,7 +678,7 @@ void loop() {
     BotState prevState = appState.botState;
     if (!appState.wifiConnected && appState.botState != BotState::OFFLINE) {
         appState.botState = BotState::OFFLINE;
-    } else if (appState.wsConnected && appState.botState == BotState::OFFLINE) {
+    } else if (appState.wifiConnected && appState.botState == BotState::OFFLINE) {
         appState.botState = BotState::IDLE;
     }
 

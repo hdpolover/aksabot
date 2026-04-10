@@ -261,3 +261,41 @@ void ws_client::disconnect() {
         xSemaphoreGive(wsMutex);
     }
 }
+
+void ws_client::reconnectWithToken() {
+    if (!xSemaphoreTake(wsMutex, pdMS_TO_TICKS(3000))) {
+        Serial.println("[WS] reconnectWithToken: mutex timeout");
+        return;
+    }
+
+    // Close any existing connection
+    if (appState.wsConnected || client.available()) {
+        client.close();
+        appState.wsConnected = false;
+    }
+
+    // Re-read backend URL and token from NVS
+    if (!nvs_store::getBackendUrl(wsUrlBuf, sizeof(wsUrlBuf))) {
+        strncpy(wsUrlBuf, BACKEND_WS_URL, sizeof(wsUrlBuf) - 1);
+        wsUrlBuf[sizeof(wsUrlBuf) - 1] = '\0';
+    }
+    if (!nvs_store::getDeviceToken(tokenBuf, sizeof(tokenBuf))) {
+        strncpy(tokenBuf, DEVICE_TOKEN, sizeof(tokenBuf) - 1);
+        tokenBuf[sizeof(tokenBuf) - 1] = '\0';
+    }
+
+    // Update auth header with new token
+    String authHeader = String("DeviceToken ") + tokenBuf;
+    client.addHeader("Authorization", authHeader.c_str());
+
+    // Reset backoff so reconnect happens immediately
+    everAttempted = false;
+    lastConnectAttemptMs = 0;
+    shouldReconnect = true;
+    reconnectDelay = WS_RECONNECT_BASE_MS;
+
+    Serial.printf("[WS] Reconnecting with new token to %s...\n", wsUrlBuf);
+    doConnect();
+
+    xSemaphoreGive(wsMutex);
+}

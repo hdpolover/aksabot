@@ -120,12 +120,41 @@ void boot_screen::showHardwareCheck(const char* component, uint8_t status) {
     }
 }
 
-void boot_screen::showProvisioningPrompt() {
+void boot_screen::showFirstBoot() {
     clearScreen();
 
-    // BLE icon (compact Bluetooth shape)
-    int iconY = 55;
-    int s = 10;
+    // Robot icon — larger than splash, with "arms" to feel friendly
+    int logoY = 42;
+    tft.drawRoundRect(CX - 28, logoY, 56, 42, 7, CYAN);
+    tft.fillCircle(CX - 11, logoY + 14, 5, CYAN);
+    tft.fillCircle(CX + 11, logoY + 14, 5, CYAN);
+    tft.drawLine(CX - 9, logoY + 30, CX + 9, logoY + 30, CYAN);
+    // Antenna
+    tft.drawLine(CX, logoY, CX, logoY - 10, CYAN);
+    tft.fillCircle(CX, logoY - 13, 3, CYAN);
+    // Arms
+    tft.drawLine(CX - 28, logoY + 16, CX - 40, logoY + 26, CYAN);
+    tft.fillCircle(CX - 41, logoY + 27, 3, CYAN);
+    tft.drawLine(CX + 28, logoY + 16, CX + 40, logoY + 26, CYAN);
+    tft.fillCircle(CX + 41, logoY + 27, 3, CYAN);
+
+    drawCentered("Hello! I'm Aksabot", 100, WHITE);
+    drawSmall("Your AI desk companion", 124, CYAN);
+
+    tft.drawFastHLine(30, 148, LCD_WIDTH - 60, DIM);
+
+    drawSmall("Open the Aksabot app on your", 160, DIM);
+    drawSmall("phone to get started.", 178, DIM);
+
+    delay(2500);
+}
+
+void boot_screen::showProvisioningPrompt(const char* apName) {
+    clearScreen();
+
+    // Bluetooth icon
+    int iconY = 40;
+    int s = 9;
     tft.drawLine(CX, iconY, CX + s, iconY + s*2, CYAN);
     tft.drawLine(CX + s, iconY + s*2, CX - s, iconY + s*4, CYAN);
     tft.drawLine(CX - s, iconY + s*4, CX + s, iconY + s*6, CYAN);
@@ -136,18 +165,47 @@ void boot_screen::showProvisioningPrompt() {
     tft.drawLine(CX, iconY + s*4, CX - s, iconY + s*6, CYAN);
     tft.drawLine(CX - s, iconY + s*6, CX, iconY + s*8, CYAN);
 
-    drawCentered("Setup Required", 155, WHITE);
-    drawSmall("Open the Aksabot app", 185, DIM);
-    drawSmall("to connect this device", 205, DIM);
+    drawCentered("Setup Required", 132, WHITE);
 
-    tft.fillCircle(CX, 245, 3, CYAN);
-    drawSmall("Waiting for connection...", 260, DIM);
+    if (apName && strlen(apName) > 0) {
+        // Both BLE and SoftAP available
+        drawSmall("Open the Aksabot app", 155, DIM);
+        drawSmall("— or connect to Wi-Fi —", 173, DIM);
+        char apLine[48];
+        snprintf(apLine, sizeof(apLine), "\"%s\"", apName);
+        drawSmall(apLine, 191, CYAN);
+    } else {
+        // BLE only
+        drawSmall("Open the Aksabot app", 158, DIM);
+        drawSmall("to connect this device", 178, DIM);
+    }
+
+    // Animated dots slot (updated by tickProvisioningAnimation)
+    drawSmall("Waiting...", 225, DIM);
 }
 
 void boot_screen::showProvisioningStatus(const char* status) {
     tft.fillRect(0, 250, LCD_WIDTH, 40, BG);
     tft.fillCircle(CX, 245, 3, GREEN);
     drawSmall(status, 260, GREEN);
+}
+
+void boot_screen::tickProvisioningAnimation(uint32_t nowMs) {
+    static uint32_t lastMs = 0;
+    static uint8_t phase = 0;
+
+    if (nowMs - lastMs < 500) return;
+    lastMs = nowMs;
+    phase = (phase + 1) % 3;
+
+    // Three cycling dots just below the "Waiting..." label to show life
+    int dotY = 245;
+    int spacing = 14;
+    for (int i = 0; i < 3; i++) {
+        // Dim all three then highlight the active one
+        uint16_t col = (i == phase) ? CYAN : DIM;
+        tft.fillCircle(CX + (i - 1) * spacing, dotY, 4, col);
+    }
 }
 
 void boot_screen::showConnecting(const char* ssid) {
@@ -199,4 +257,30 @@ void boot_screen::showReady() {
     drawSmall("Hold screen to talk", 158, DIM);
 
     delay(1500);
+}
+
+void boot_screen::showSetupComplete(const char* ssid) {
+    clearScreen();
+
+    // Circle with checkmark — completion feel
+    int cy = 80;
+    tft.drawCircle(CX, cy + 5, 34, GREEN);
+    tft.drawCircle(CX, cy + 5, 33, GREEN);  // double-stroke
+    for (int i = -1; i <= 1; i++) {
+        tft.drawLine(CX - 16, cy + 5 + i, CX - 5, cy + 20 + i, GREEN);
+        tft.drawLine(CX - 5, cy + 20 + i, CX + 18, cy - 8 + i, GREEN);
+    }
+
+    drawCentered("All Set!", 132, WHITE, 1.2);
+
+    // SSID line — truncate if too long
+    char ssidLine[36];
+    snprintf(ssidLine, sizeof(ssidLine), "\"%s\"", ssid);
+    drawSmall(ssidLine, 162, CYAN);
+    drawSmall("Connected to the internet", 182, DIM);
+
+    tft.drawFastHLine(30, 206, LCD_WIDTH - 60, DIM);
+    drawSmall("Starting Aksabot...", 216, DIM);
+
+    delay(2500);
 }

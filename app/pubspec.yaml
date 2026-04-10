@@ -45,6 +45,9 @@ dependencies:
   connectivity_plus: ^6.1.4
   flutter_local_notifications: ^19.0.0
 
+  # Local network discovery
+  multicast_dns: ^0.3.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

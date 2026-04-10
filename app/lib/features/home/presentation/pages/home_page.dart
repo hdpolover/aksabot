@@ -3,11 +3,17 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/local/local_device.dart';
+import '../../../../core/local/local_device_store.dart';
+import '../../../../core/local/mdns_discovery_service.dart';
 import '../../../devices/domain/entities/device_entity.dart';
 import '../../../devices/presentation/bloc/devices_bloc.dart';
+import '../../../devices/presentation/pages/cloud_register_page.dart';
 
 /// Home tab root. Shows a single-device dashboard when 1 device exists,
 /// a device list when 2+, or an empty state when 0.
+///
+/// Falls back to locally-provisioned devices when the backend is unavailable.
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
@@ -28,11 +34,25 @@ class _HomeView extends StatefulWidget {
 }
 
 class _HomeViewState extends State<_HomeView> {
+  List<LocalDevice>? _localDevices;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLocalDevices();
+  }
+
+  Future<void> _loadLocalDevices() async {
+    final devices = await LocalDeviceStore.getAll();
+    if (mounted) setState(() => _localDevices = devices);
+  }
+
   void _pushAndReload(BuildContext context, String path) {
     final bloc = context.read<DevicesBloc>();
     context.push(path).then((_) {
       if (mounted) {
         bloc.add(const LoadDevices());
+        _loadLocalDevices();
       }
     });
   }
@@ -41,38 +61,15 @@ class _HomeViewState extends State<_HomeView> {
   Widget build(BuildContext context) {
     return BlocBuilder<DevicesBloc, DevicesState>(
       builder: (context, state) {
-        if (state is DevicesLoading) {
+        // While waiting for the bloc AND local devices, show spinner
+        if (state is DevicesLoading && _localDevices == null) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
 
-        if (state is DevicesError) {
-          return Scaffold(
-            body: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.error_outline,
-                      size: 48, color: Theme.of(context).colorScheme.error),
-                  const SizedBox(height: 16),
-                  Text(state.message),
-                  const SizedBox(height: 16),
-                  FilledButton.tonal(
-                    onPressed: () =>
-                        context.read<DevicesBloc>().add(const LoadDevices()),
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        if (state is DevicesLoaded) {
-          if (state.devices.isEmpty) {
-            return _EmptyState(onNavigate: _pushAndReload);
-          }
+        // Backend has devices — show them normally
+        if (state is DevicesLoaded && state.devices.isNotEmpty) {
           if (state.devices.length == 1) {
             return _DeviceDashboard(
               device: state.devices.first,
@@ -85,14 +82,48 @@ class _HomeViewState extends State<_HomeView> {
           );
         }
 
-        return const SizedBox.shrink();
+        // Backend unavailable or empty — show local devices if any
+        final locals = _localDevices ?? [];
+
+        if (locals.isNotEmpty) {
+          if (locals.length == 1) {
+            return _LocalDeviceDashboard(
+              device: locals.first,
+              onAdd: () => _pushAndReload(context, '/devices/add'),
+              onRemove: () async {
+                await LocalDeviceStore.remove(locals.first.id);
+                _loadLocalDevices();
+              },
+              onIpDiscovered: (ip) async {
+                final updated = locals.first.copyWith(localIp: ip);
+                await LocalDeviceStore.save(updated);
+                _loadLocalDevices();
+              },
+              onRegistered: () {
+                context.read<DevicesBloc>().add(const LoadDevices());
+                _loadLocalDevices();
+              },
+            );
+          }
+          return _LocalDeviceList(
+            devices: locals,
+            onAdd: () => _pushAndReload(context, '/devices/add'),
+            onRemove: (id) async {
+              await LocalDeviceStore.remove(id);
+              _loadLocalDevices();
+            },
+          );
+        }
+
+        // Truly empty — no backend, no local devices
+        return _EmptyState(onNavigate: _pushAndReload);
       },
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// Empty state — no devices
+// Empty state
 // ---------------------------------------------------------------------------
 
 class _EmptyState extends StatelessWidget {
@@ -113,10 +144,7 @@ class _EmptyState extends StatelessWidget {
             children: [
               Icon(Icons.smart_toy_rounded, size: 80, color: colors.primary),
               const SizedBox(height: 24),
-              Text(
-                'No devices yet',
-                style: theme.textTheme.headlineSmall,
-              ),
+              Text('No devices yet', style: theme.textTheme.headlineSmall),
               const SizedBox(height: 8),
               Text(
                 'Pair your Aksabot to get started',
@@ -139,7 +167,388 @@ class _EmptyState extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Multi-device list
+// Local device dashboard (single, no backend)
+// ---------------------------------------------------------------------------
+
+enum _DiscoverState { idle, searching, found, notFound }
+
+class _LocalDeviceDashboard extends StatefulWidget {
+  final LocalDevice device;
+  final VoidCallback onAdd;
+  final VoidCallback onRemove;
+  final Future<void> Function(String ip) onIpDiscovered;
+  final VoidCallback onRegistered;
+
+  const _LocalDeviceDashboard({
+    required this.device,
+    required this.onAdd,
+    required this.onRemove,
+    required this.onIpDiscovered,
+    required this.onRegistered,
+  });
+
+  @override
+  State<_LocalDeviceDashboard> createState() => _LocalDeviceDashboardState();
+}
+
+class _LocalDeviceDashboardState extends State<_LocalDeviceDashboard> {
+  _DiscoverState _discoverState = _DiscoverState.idle;
+
+  Future<void> _discoverDevice() async {
+    setState(() => _discoverState = _DiscoverState.searching);
+    final found = await MdnsDiscoveryService().discoverFirst();
+    if (!mounted) return;
+    if (found != null) {
+      setState(() => _discoverState = _DiscoverState.found);
+      await widget.onIpDiscovered(found.ip);
+    } else {
+      setState(() => _discoverState = _DiscoverState.notFound);
+    }
+  }
+
+  Future<void> _connectToBackend() async {
+    final registered = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => CloudRegisterPage(device: widget.device),
+      ),
+    );
+    if (registered == true && mounted) {
+      widget.onRegistered();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final device = widget.device;
+
+    return Scaffold(
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        children: [
+          SizedBox(height: MediaQuery.of(context).padding.top + 16),
+
+          // Header
+          Row(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: colors.primaryContainer,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(Icons.smart_toy_rounded,
+                    size: 32, color: colors.onPrimaryContainer),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      device.name,
+                      style: theme.textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: device.localIp != null
+                                ? Colors.green
+                                : Colors.orange,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          device.localIp != null
+                              ? 'Found on network'
+                              : 'Wi-Fi connected — not synced',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Info card
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Device Info',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                          color: colors.onSurfaceVariant)),
+                  const SizedBox(height: 12),
+                  _InfoRow(
+                    icon: Icons.wifi,
+                    label: 'Network',
+                    value: device.ssid,
+                  ),
+                  const SizedBox(height: 8),
+                  _InfoRow(
+                    icon: Icons.access_time,
+                    label: 'Paired',
+                    value: _formatDate(device.pairedAt),
+                  ),
+                  if (device.localIp != null) ...[
+                    const SizedBox(height: 8),
+                    _InfoRow(
+                      icon: Icons.lan,
+                      label: 'Local IP',
+                      value: device.localIp!,
+                    ),
+                    const SizedBox(height: 8),
+                    _InfoRow(
+                      icon: Icons.public,
+                      label: 'Address',
+                      value: 'aksabot.local',
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Discover on network button (shown when IP not yet known)
+          if (device.localIp == null) ...[
+            _DiscoverButton(
+              state: _discoverState,
+              onTap: _discoverState == _DiscoverState.searching
+                  ? null
+                  : _discoverDevice,
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          // Cloud sync / connect banner
+          _CloudSyncBanner(
+            onConnect: device.localIp != null ? _connectToBackend : null,
+          ),
+          const SizedBox(height: 20),
+
+          // Danger zone
+          OutlinedButton.icon(
+            onPressed: () => _confirmRemove(context),
+            icon: Icon(Icons.delete_outline, color: colors.error),
+            label: Text('Remove Device',
+                style: TextStyle(color: colors.error)),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: colors.error.withValues(alpha: 0.5)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(DateTime dt) {
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+    if (diff.inDays < 1) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
+  Future<void> _confirmRemove(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove device?'),
+        content: Text(
+            'This will remove "${widget.device.name}" from this app. '
+            'The device will stay connected to Wi-Fi.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) widget.onRemove();
+  }
+}
+
+class _DiscoverButton extends StatelessWidget {
+  final _DiscoverState state;
+  final VoidCallback? onTap;
+
+  const _DiscoverButton({required this.state, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+
+    Widget icon;
+    String label;
+    Color? labelColor;
+
+    switch (state) {
+      case _DiscoverState.searching:
+        icon = SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(strokeWidth: 2, color: colors.primary),
+        );
+        label = 'Searching...';
+        labelColor = colors.onSurfaceVariant;
+        break;
+      case _DiscoverState.found:
+        icon = Icon(Icons.check_circle_outline, size: 20, color: Colors.green);
+        label = 'Found on network!';
+        labelColor = Colors.green;
+        break;
+      case _DiscoverState.notFound:
+        icon = Icon(Icons.wifi_find, size: 20, color: colors.error);
+        label = 'Not found — make sure device is on same network';
+        labelColor = colors.error;
+        break;
+      case _DiscoverState.idle:
+        icon = Icon(Icons.wifi_find, size: 20, color: colors.primary);
+        label = 'Find device on network';
+        labelColor = null;
+        break;
+    }
+
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        alignment: Alignment.centerLeft,
+      ),
+      child: Row(
+        children: [
+          icon,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label,
+              style: theme.textTheme.bodyMedium?.copyWith(color: labelColor),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Local device list (multiple, no backend)
+// ---------------------------------------------------------------------------
+
+class _LocalDeviceList extends StatelessWidget {
+  final List<LocalDevice> devices;
+  final VoidCallback onAdd;
+  final void Function(String id) onRemove;
+
+  const _LocalDeviceList({
+    required this.devices,
+    required this.onAdd,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Devices')),
+      floatingActionButton: FloatingActionButton(
+        onPressed: onAdd,
+        child: const Icon(Icons.add),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          const _CloudSyncBanner(),
+          const SizedBox(height: 12),
+          ...devices.map((device) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Card(
+                  clipBehavior: Clip.antiAlias,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: colors.primaryContainer,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(Icons.smart_toy_outlined,
+                              color: colors.onPrimaryContainer),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(device.name,
+                                  style: theme.textTheme.titleMedium),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: const BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Colors.orange,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    device.ssid,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                        color: colors.onSurfaceVariant),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.delete_outline, color: colors.error),
+                          onPressed: () => onRemove(device.id),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Backend device list (backend online)
 // ---------------------------------------------------------------------------
 
 class _DeviceList extends StatelessWidget {
@@ -209,24 +618,23 @@ class _DeviceList extends StatelessWidget {
                                   height: 8,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    color:
-                                        online ? Colors.green : colors.outline,
+                                    color: online
+                                        ? Colors.green
+                                        : colors.outline,
                                   ),
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
                                   online ? 'Online' : 'Offline',
                                   style: theme.textTheme.bodySmall?.copyWith(
-                                    color: colors.onSurfaceVariant,
-                                  ),
+                                      color: colors.onSurfaceVariant),
                                 ),
                               ],
                             ),
                           ],
                         ),
                       ),
-                      Icon(Icons.chevron_right,
-                          color: colors.onSurfaceVariant),
+                      Icon(Icons.chevron_right, color: colors.onSurfaceVariant),
                     ],
                   ),
                 ),
@@ -240,7 +648,7 @@ class _DeviceList extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Single-device dashboard
+// Backend device dashboard (single, backend online)
 // ---------------------------------------------------------------------------
 
 class _DeviceDashboard extends StatelessWidget {
@@ -266,7 +674,6 @@ class _DeviceDashboard extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
           children: [
-            // Safe area top padding
             SizedBox(height: MediaQuery.of(context).padding.top + 16),
 
             // Status header
@@ -305,8 +712,7 @@ class _DeviceDashboard extends StatelessWidget {
                           Text(
                             online ? 'Online' : 'Offline',
                             style: theme.textTheme.bodyMedium?.copyWith(
-                              color: colors.onSurfaceVariant,
-                            ),
+                                color: colors.onSurfaceVariant),
                           ),
                         ],
                       ),
@@ -317,7 +723,7 @@ class _DeviceDashboard extends StatelessWidget {
             ),
             const SizedBox(height: 20),
 
-            // Status cards row
+            // Status cards
             Row(
               children: [
                 Expanded(
@@ -362,10 +768,8 @@ class _DeviceDashboard extends StatelessWidget {
                     _QuickActionTile(
                       icon: action.$1,
                       label: action.$2,
-                      onTap: () => onNavigate(
-                        context,
-                        '/devices/${device.id}/${action.$3}',
-                      ),
+                      onTap: () =>
+                          onNavigate(context, '/devices/${device.id}/${action.$3}'),
                     ),
                     if (action.$3 != 'settings') const Divider(height: 1),
                   ],
@@ -379,30 +783,116 @@ class _DeviceDashboard extends StatelessWidget {
             const SizedBox(height: 8),
             Card(
               clipBehavior: Clip.antiAlias,
-              child: Column(
-                children: [
-                  ListTile(
-                    leading: Icon(Icons.chat_bubble_outline,
-                        color: colors.primary, size: 20),
-                    title: Text(
-                      'No recent conversations',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colors.onSurfaceVariant,
-                      ),
-                    ),
-                    subtitle: Text(
-                      'Conversations will appear here once you start chatting.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: colors.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
+              child: ListTile(
+                leading:
+                    Icon(Icons.chat_bubble_outline, color: colors.primary, size: 20),
+                title: Text(
+                  'No recent conversations',
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: colors.onSurfaceVariant),
+                ),
+                subtitle: Text(
+                  'Conversations will appear here once you start chatting.',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: colors.onSurfaceVariant),
+                ),
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shared widgets
+// ---------------------------------------------------------------------------
+
+class _CloudSyncBanner extends StatelessWidget {
+  /// If provided, shows a "Connect" action button.
+  /// Pass null when the device IP is not yet known.
+  final VoidCallback? onConnect;
+
+  const _CloudSyncBanner({this.onConnect});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final hasAction = onConnect != null;
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(14, 10, hasAction ? 4 : 14, 10),
+      decoration: BoxDecoration(
+        color: hasAction
+            ? colors.primaryContainer.withValues(alpha: 0.55)
+            : colors.secondaryContainer.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            hasAction ? Icons.cloud_queue : Icons.cloud_off,
+            size: 18,
+            color: hasAction
+                ? colors.onPrimaryContainer
+                : colors.onSecondaryContainer,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              hasAction
+                  ? 'Connect to AI cloud to unlock voice features.'
+                  : 'Not synced — find device on network to connect to AI cloud.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: hasAction
+                    ? colors.onPrimaryContainer
+                    : colors.onSecondaryContainer,
+              ),
+            ),
+          ),
+          if (hasAction) ...[
+            TextButton(
+              onPressed: onConnect,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
+              child: const Text('Connect'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _InfoRow({required this.icon, required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: colors.onSurfaceVariant),
+        const SizedBox(width: 8),
+        Text('$label: ',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: colors.onSurfaceVariant)),
+        Expanded(
+          child: Text(value,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(fontWeight: FontWeight.w500)),
+        ),
+      ],
     );
   }
 }
@@ -434,10 +924,8 @@ class _StatusCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(label, style: theme.textTheme.bodySmall),
             const SizedBox(height: 2),
-            Text(
-              value,
-              style: theme.textTheme.titleMedium?.copyWith(color: color),
-            ),
+            Text(value,
+                style: theme.textTheme.titleMedium?.copyWith(color: color)),
           ],
         ),
       ),
