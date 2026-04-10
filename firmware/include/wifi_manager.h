@@ -30,7 +30,8 @@ void stopAP();
 /// Returns true if credentials were received via the SoftAP HTTP endpoint.
 bool isAPProvisioned();
 
-/// Process pending HTTP requests. Call every ~10ms while AP is active.
+/// Process pending HTTP requests. Call periodically (for example,
+/// every ~50–200ms) while AP is active.
 void tickAP();
 
 }  // namespace wifi_manager

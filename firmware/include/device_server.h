@@ -7,7 +7,14 @@ namespace device_server {
 
 /// Start the server on port 80. Call once after Wi-Fi connects.
 /// version: firmware version string (stored internally).
+/// Guards against multiple calls — safe to call after reconnect.
 void start(const char* version);
+
+/// Enable or disable setup mode. While active, POST /token accepts a
+/// device token from the Flutter app after backend registration.
+/// Call setSetupMode(true) on first-boot before calling start(), and
+/// setSetupMode(false) (or it auto-clears) after a token is received.
+void setSetupMode(bool active);
 
 /// Process pending HTTP requests. Call every ~50ms from loop().
 void tick();

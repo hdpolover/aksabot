@@ -277,9 +277,11 @@ void ws_client::reconnectWithToken() {
     // Re-read backend URL and token from NVS
     if (!nvs_store::getBackendUrl(wsUrlBuf, sizeof(wsUrlBuf))) {
         strncpy(wsUrlBuf, BACKEND_WS_URL, sizeof(wsUrlBuf) - 1);
+        wsUrlBuf[sizeof(wsUrlBuf) - 1] = '\0';
     }
     if (!nvs_store::getDeviceToken(tokenBuf, sizeof(tokenBuf))) {
         strncpy(tokenBuf, DEVICE_TOKEN, sizeof(tokenBuf) - 1);
+        tokenBuf[sizeof(tokenBuf) - 1] = '\0';
     }
 
     // Update auth header with new token

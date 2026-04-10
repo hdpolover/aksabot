@@ -98,10 +98,15 @@ void wifi_manager::reconnect(const char* ssid, const char* password) {
 // ── SoftAP provisioning ───────────────────────────────────────
 
 void wifi_manager::startAP(const char* apName) {
+    if (apActive) {
+        Serial.println("[WiFi AP] Already active — ignoring startAP()");
+        return;
+    }
+
     // AP+STA so BLE can coexist and we can switch to STA without re-init
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP(apName, "");  // open network — no password needed for setup
-    WiFi.onEvent(onWiFiEvent);
+    // onWiFiEvent is already registered in init(); no duplicate registration here
 
     Serial.printf("[WiFi] SoftAP '%s' started — IP: %s\n",
                   apName, WiFi.softAPIP().toString().c_str());

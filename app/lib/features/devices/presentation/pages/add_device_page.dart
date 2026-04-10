@@ -528,14 +528,17 @@ class _ProgressItem extends StatelessWidget {
     switch (state) {
       case _ItemState.done:
         leading = const Icon(Icons.check_circle, color: Colors.green, size: 24);
+        break;
       case _ItemState.loading:
         leading = SizedBox(
           width: 24,
           height: 24,
           child: CircularProgressIndicator(strokeWidth: 2, color: colors.primary),
         );
+        break;
       case _ItemState.pending:
         leading = Icon(Icons.circle_outlined, color: colors.outline, size: 24);
+        break;
     }
 
     return Row(

@@ -8,8 +8,18 @@
 static WebServer* server = nullptr;
 static char versionBuf[16] = {};
 static volatile bool tokenJustReceived = false;
+static volatile bool setupModeActive = false;
+
+void device_server::setSetupMode(bool active) {
+    setupModeActive = active;
+}
 
 void device_server::start(const char* version) {
+    if (server) {
+        Serial.println("[DeviceServer] HTTP server already running");
+        return;
+    }
+
     strncpy(versionBuf, version, sizeof(versionBuf) - 1);
     versionBuf[sizeof(versionBuf) - 1] = '\0';
 
@@ -35,8 +45,16 @@ void device_server::start(const char* version) {
         server->send(200, "application/json", out);
     });
 
-    // POST /token — receives device token from Flutter app after backend registration
+    // POST /token — receives device token from Flutter app after backend registration.
+    // Only accepted during setup mode (first-boot / device registration window).
     server->on("/token", HTTP_POST, []() {
+        if (!setupModeActive) {
+            server->sendHeader("Access-Control-Allow-Origin", "*");
+            server->send(403, "application/json", "{\"error\":\"not in setup mode\"}");
+            Serial.println("[DeviceServer] POST /token rejected — not in setup mode");
+            return;
+        }
+
         const String body = server->arg("plain");
         JsonDocument doc;
         if (deserializeJson(doc, body) != DeserializationError::Ok) {
@@ -52,16 +70,11 @@ void device_server::start(const char* version) {
 
         nvs_store::setDeviceToken(token);
 
-        // Optional: backend URL override
-        const char* backendUrl = doc["backendUrl"] | (const char*)nullptr;
-        if (backendUrl && strlen(backendUrl) > 0) {
-            nvs_store::setBackendUrl(backendUrl);
-        }
-
         server->sendHeader("Access-Control-Allow-Origin", "*");
         server->send(200, "application/json", "{\"ok\":true}");
         Serial.println("[DeviceServer] Device token saved via HTTP — will reconnect WS");
         tokenJustReceived = true;
+        setupModeActive = false;  // close the window after one successful delivery
     });
 
     server->onNotFound([]() {

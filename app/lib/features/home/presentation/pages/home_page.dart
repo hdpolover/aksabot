@@ -414,18 +414,22 @@ class _DiscoverButton extends StatelessWidget {
         );
         label = 'Searching...';
         labelColor = colors.onSurfaceVariant;
+        break;
       case _DiscoverState.found:
         icon = Icon(Icons.check_circle_outline, size: 20, color: Colors.green);
         label = 'Found on network!';
         labelColor = Colors.green;
+        break;
       case _DiscoverState.notFound:
         icon = Icon(Icons.wifi_find, size: 20, color: colors.error);
         label = 'Not found — make sure device is on same network';
         labelColor = colors.error;
+        break;
       case _DiscoverState.idle:
         icon = Icon(Icons.wifi_find, size: 20, color: colors.primary);
         label = 'Find device on network';
         labelColor = null;
+        break;
     }
 
     return OutlinedButton(

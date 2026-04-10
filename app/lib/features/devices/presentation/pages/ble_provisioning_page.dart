@@ -265,7 +265,13 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
 
           const SizedBox(height: 12),
           FilledButton.icon(
-            onPressed: _isScanning ? null : _startScan,
+            onPressed: () {
+              if (_isScanning) {
+                FlutterBluePlus.stopScan();
+              } else {
+                _startScan();
+              }
+            },
             icon: Icon(_isScanning ? Icons.stop : Icons.search),
             label: Text(_isScanning ? 'Scanning...' : 'Scan for Devices'),
           ),

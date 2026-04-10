@@ -578,6 +578,9 @@ void setup() {
         }
 
         // HTTP status server so the app can verify it found the right device
+        if (firstBoot) {
+            device_server::setSetupMode(true);  // open token-accept window for first-boot
+        }
         device_server::start(FIRMWARE_VERSION);
 
         if (firstBoot) {
