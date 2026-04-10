@@ -104,15 +104,37 @@ pio device monitor
 
 You should see:
 ```
-[WiFi] Connecting to YourWifiName...
-[WiFi] Connected! IP: 192.168.x.x
+=== Aksabot Firmware ===
+
+[Log] File logging enabled → /logs/debug.log
+[NVS] Initialized — free entries: 498
+[SD] Mounted — Type: SDHC, Size: 7564MB, Used: 0MB
+[Cache] Loaded manifest: 0 entries, 0KB
+[Resilience] 0/7 clips loaded
+[Presence] Init — threshold=-75dBm, grace=45s, window=5
+[Display HW] Init (stub — no TFT connected)
+[Face] Initialized
+[Touch] Initialized (serial simulation active)
+[VAD] Init — energy=0.020, silence_frames=75 (1.5s)
+[Power] Init — dim=30s, sleep=300s
+[WiFi] Using compile-time credentials for 'YourWifiName'
+[WiFi] Connected — IP: 192.168.x.x
 [WS] Connecting to ws://192.168.x.x:4280/ws...
 [WS] Connected
-[Audio] I2S mic initialized
-[Audio] I2S speaker initialized
+
+[Main] Ready! Controls: s=start, e=end, i=interrupt, q=quit, w=wake
 ```
 
 If you see this, the ESP32 is online. Check the Flutter app — the device should show a green dot.
+
+### 2f. Test the audio pipeline
+
+In the serial monitor:
+1. Press `s` → starts recording (face switches to LISTENING)
+2. Speak into the mic
+3. Recording auto-stops after 1.5s of silence (VAD) or press `e` to stop manually
+4. Wait for response — you should hear audio from the speaker
+5. Press `i` during playback to interrupt
 
 ---
 
@@ -235,7 +257,7 @@ The ESP simulator creates a device that shows as online in the app. The WebSocke
 | PSRAM | 8MB (OPI) |
 | USB | USB-C (built-in JTAG) |
 | Audio | I2S INMP441 mic + MAX98357A speaker |
-| Display | TFT (Phase 2) |
+| Display | 2.8" IPS TFT 320x240 with capacitive touch (ST7789 or ILI9341) |
 | Storage | MicroSD via SPI |
 
 ### GPIO pinout
@@ -252,3 +274,60 @@ The ESP simulator creates a device that shows as online in the app. The WebSocke
 | 11 | SPI MOSI |
 | 12 | SPI CLK |
 | 13 | SPI MISO |
+
+---
+
+## Hardware integration checklist
+
+When the ESP32 arrives, work through these in order:
+
+### Priority 1: Basic connectivity
+- [ ] Flash firmware (`pio run --target upload`)
+- [ ] Verify serial output matches expected boot sequence above
+- [ ] Confirm Wi-Fi connects and WebSocket goes online
+- [ ] Test serial touch simulation (s/e/i/q/w)
+- [ ] Test audio: speak → check STT transcript in serial
+- [ ] Test VAD: stop speaking → verify auto-stop after 1.5s silence
+- [ ] Test TTS playback through speaker
+- [ ] Check SD card mount and directory creation
+
+### Priority 2: Display
+- [ ] Identify TFT driver IC (check markings: ST7789 or ILI9341)
+- [ ] Add TFT library to `platformio.ini` (TFT_eSPI or LovyanGFX)
+- [ ] Implement `display_hw::init()` — SPI setup, rotation, clear
+- [ ] Implement `display_hw::renderFace()` — draw eyes + mouth from `FaceState`
+- [ ] Verify face expression transitions (idle → listening → thinking → speaking)
+- [ ] Implement remaining render functions (clock, pomodoro, reminder, status)
+- [ ] Implement `display_hw::setBacklight()` — PWM brightness control
+- [ ] Test power management dimming and sleep
+
+### Priority 3: Touch
+- [ ] Identify capacitive touch IC
+- [ ] Add touch library to `platformio.ini`
+- [ ] Implement SPI reads in `touch::feedRaw()`
+- [ ] Test tap-to-talk hold detection
+- [ ] Test tap-to-interrupt during playback
+- [ ] Test wake from sleep on touch
+- [ ] Test long press (3s) for session end
+
+### Priority 4: BLE provisioning
+- [ ] Implement BLE GATT server (4 services: FFE0-FFE3)
+- [ ] Test with Flutter app: scan → connect → Wi-Fi creds → token write
+- [ ] Verify NVS storage (Wi-Fi reconnects after reboot with stored creds)
+- [ ] Test SoftAP fallback provisioning flow
+
+### Priority 5: BLE presence
+- [ ] Implement BLE scanner for 0xFFE4 UUID
+- [ ] Wire to `presence_detector::feedRssi()`
+- [ ] Test with Flutter app presence advertising
+- [ ] Verify auto-sleep when phone leaves range
+- [ ] Verify auto-wake + greeting when phone returns
+- [ ] Calibrate RSSI threshold for your desk setup
+
+### Priority 6: Polish
+- [ ] Tune VAD sensitivity for your mic (calibrate noise floor)
+- [ ] Test OTA update flow (download + verify, flash when `apply()` is implemented)
+- [ ] Migrate Serial.printf calls to LOG_I/W/E macros
+- [ ] Test resilience audio (add .opus files to `/audio/resilience/` on SD card)
+- [ ] Test recording buffer (disconnect Wi-Fi mid-recording, reconnect, verify resend)
+- [ ] Load test: run for 24 hours, check memory leaks, SD space, cache behavior

@@ -73,7 +73,7 @@ All design docs are in `docs/`. This is the entry point:
 - **ESP32 simulator:** `npm run esp:sim` keeps a device online for testing
 - **All 13 design docs updated** to reflect current state
 - **API keys configured** (GEMINI_API_KEY, GOOGLE_APPLICATION_CREDENTIALS, ELEVENLABS_API_KEY)
-- **Handoff:** `docs/handoffs/handoff-2026-04-10-0400.md`
+- **Handoff:** `docs/handoffs/handoff-2026-04-10-1100.md` (hardware integration ready)
 
 ### What's done — Backend
 - NestJS backend with `core/` + `modules/` structure (7 modules)
