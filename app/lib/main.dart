@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import 'core/ble/ble_presence_service.dart';
 import 'core/di/injection.dart';
+import 'core/notifications/notification_service.dart';
 import 'core/observer/bloc_observer.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
@@ -13,6 +15,12 @@ void main() async {
   await dotenv.load();
   await initDependencies();
   Bloc.observer = AppBlocObserver();
+
+  // Initialize local notifications
+  await sl<NotificationService>().init();
+
+  // Restore BLE presence advertising if previously enabled
+  sl<BlePresenceService>().restoreState();
 
   runApp(const AksabotApp());
 }

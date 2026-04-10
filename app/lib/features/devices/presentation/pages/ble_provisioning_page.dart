@@ -177,11 +177,17 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
     setState(() => _registerStatus = 'writing_token');
 
     // 2. Write device token to ESP32 via BLE
-    // Note: createDevice returns the device but not the token directly.
-    // The token was returned in the API response. We need to access it.
-    // For now we'll read it from the device creation response.
-    // TODO: The createDevice response should include the token for BLE provisioning.
-    // For now, skip token writing (the device is registered, ESP will get token via Wi-Fi setup flow).
+    if (device.deviceToken != null) {
+      try {
+        await _ble.writeDeviceToken(device.deviceToken!);
+      } catch (e) {
+        setState(() {
+          _registerStatus = 'error';
+          _registerError = 'Failed to write token to device: $e';
+        });
+        return;
+      }
+    }
 
     setState(() {
       _registerStatus = 'done';

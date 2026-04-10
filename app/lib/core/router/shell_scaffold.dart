@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../network/network_status_banner.dart';
+
 /// Root scaffold with Material 3 bottom NavigationBar.
 ///
 /// Wraps the [StatefulShellRoute] child and shows 3 tabs:
@@ -13,7 +15,7 @@ class ShellScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: navigationShell,
+      body: NetworkStatusBanner(child: navigationShell),
       bottomNavigationBar: NavigationBar(
         selectedIndex: navigationShell.currentIndex,
         onDestinationSelected: (index) {

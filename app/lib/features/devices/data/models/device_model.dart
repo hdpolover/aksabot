@@ -7,6 +7,7 @@ class DeviceModel extends Device {
     super.lastSeenAt,
     super.settingsJson,
     super.personalityJson,
+    super.deviceToken,
   });
 
   factory DeviceModel.fromJson(Map<String, dynamic> json) {
@@ -18,6 +19,7 @@ class DeviceModel extends Device {
           : null,
       settingsJson: (json['settingsJson'] as Map<String, dynamic>?) ?? {},
       personalityJson: (json['personalityJson'] as Map<String, dynamic>?) ?? {},
+      deviceToken: json['deviceToken'] as String?,
     );
   }
 

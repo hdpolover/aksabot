@@ -1,11 +1,49 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../core/di/injection.dart';
+import '../../../../core/notifications/notification_service.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 
 /// App settings tab: account info, theme, about, sign out.
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  late final NotificationService _notifications;
+  bool _notificationsEnabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _notifications = sl<NotificationService>();
+    _loadNotificationState();
+  }
+
+  Future<void> _loadNotificationState() async {
+    final enabled = await _notifications.loadEnabled();
+    if (mounted) setState(() => _notificationsEnabled = enabled);
+  }
+
+  Future<void> _toggleNotifications(bool enabled) async {
+    if (enabled) {
+      final granted = await _notifications.requestPermission();
+      if (!granted) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Notification permission denied.')),
+        );
+        return;
+      }
+    }
+
+    await _notifications.saveEnabled(enabled);
+    if (mounted) setState(() => _notificationsEnabled = enabled);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -77,15 +115,19 @@ class SettingsPage extends StatelessWidget {
                       ),
                     ),
                     const Divider(height: 1),
-                    ListTile(
-                      leading: const Icon(Icons.notifications_outlined),
+                    SwitchListTile(
+                      secondary: const Icon(Icons.notifications_outlined),
                       title: const Text('Notifications'),
-                      trailing: Switch(
-                        value: false,
-                        onChanged: (_) {
-                          // TODO: implement push notifications
-                        },
+                      subtitle: Text(
+                        _notificationsEnabled
+                            ? 'Reminders and alerts enabled'
+                            : 'Tap to enable notifications',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
                       ),
+                      value: _notificationsEnabled,
+                      onChanged: _toggleNotifications,
                     ),
                   ],
                 ),

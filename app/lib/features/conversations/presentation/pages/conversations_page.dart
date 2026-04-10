@@ -1,77 +1,80 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../domain/entities/conversation_entity.dart';
 import '../../domain/entities/message_entity.dart';
-import '../../domain/repositories/conversations_repository.dart';
+import '../bloc/conversations_bloc.dart';
 import '../../../../core/di/injection.dart';
 
 /// Page displaying a device's conversation history.
 ///
 /// Each conversation can be tapped to expand and show its messages inline.
-class ConversationsPage extends StatefulWidget {
+class ConversationsPage extends StatelessWidget {
   final String deviceId;
 
   const ConversationsPage({super.key, required this.deviceId});
 
   @override
-  State<ConversationsPage> createState() => _ConversationsPageState();
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (_) => sl<ConversationsBloc>()..add(LoadConversations(deviceId)),
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Conversations')),
+        body: BlocBuilder<ConversationsBloc, ConversationsState>(
+          builder: (context, state) {
+            if (state is ConversationsLoading) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (state is ConversationsError) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(state.message, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    const SizedBox(height: 16),
+                    FilledButton.tonal(
+                      onPressed: () => context.read<ConversationsBloc>().add(LoadConversations(deviceId)),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              );
+            }
+            if (state is ConversationsLoaded) {
+              if (state.conversations.isEmpty) {
+                return const Center(child: Text('No conversations yet.'));
+              }
+              return _ConversationsList(
+                conversations: state.conversations,
+                messagesCache: state.messagesCache,
+                deviceId: deviceId,
+              );
+            }
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+    );
+  }
 }
 
-class _ConversationsPageState extends State<ConversationsPage> {
-  late final ConversationsRepository _repository;
+class _ConversationsList extends StatefulWidget {
+  final List<Conversation> conversations;
+  final Map<String, List<Message>> messagesCache;
+  final String deviceId;
 
-  List<Conversation> _conversations = [];
-  bool _isLoading = true;
-  String? _error;
-
-  /// Tracks which conversation is currently expanded.
-  String? _expandedId;
-
-  /// Cached messages per conversation id.
-  final Map<String, List<Message>> _messagesCache = {};
-
-  /// Tracks loading state for individual message fetches.
-  final Set<String> _loadingMessages = {};
+  const _ConversationsList({
+    required this.conversations,
+    required this.messagesCache,
+    required this.deviceId,
+  });
 
   @override
-  void initState() {
-    super.initState();
-    _repository = sl<ConversationsRepository>();
-    _loadConversations();
-  }
+  State<_ConversationsList> createState() => _ConversationsListState();
+}
 
-  Future<void> _loadConversations() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-
-    final result = await _repository.getConversations(widget.deviceId);
-    result.fold(
-      (failure) => setState(() {
-        _error = failure.message;
-        _isLoading = false;
-      }),
-      (conversations) => setState(() {
-        _conversations = conversations;
-        _isLoading = false;
-      }),
-    );
-  }
-
-  Future<void> _loadMessages(String conversationId) async {
-    if (_messagesCache.containsKey(conversationId)) return;
-
-    setState(() => _loadingMessages.add(conversationId));
-
-    final result = await _repository.getMessages(conversationId);
-    result.fold(
-      (_) => null, // Silently fail — the user can tap again.
-      (messages) => _messagesCache[conversationId] = messages,
-    );
-
-    setState(() => _loadingMessages.remove(conversationId));
-  }
+class _ConversationsListState extends State<_ConversationsList> {
+  String? _expandedId;
 
   void _toggleExpanded(String conversationId) {
     setState(() {
@@ -79,58 +82,26 @@ class _ConversationsPageState extends State<ConversationsPage> {
         _expandedId = null;
       } else {
         _expandedId = conversationId;
-        _loadMessages(conversationId);
+        context.read<ConversationsBloc>().add(LoadMessages(conversationId));
       }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Conversations')),
-      body: _buildBody(),
-    );
-  }
-
-  Widget _buildBody() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-            const SizedBox(height: 16),
-            FilledButton.tonal(
-              onPressed: _loadConversations,
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (_conversations.isEmpty) {
-      return const Center(
-        child: Text('No conversations yet.'),
-      );
-    }
-
     return RefreshIndicator(
-      onRefresh: _loadConversations,
+      onRefresh: () async {
+        context.read<ConversationsBloc>().add(LoadConversations(widget.deviceId));
+      },
       child: ListView.builder(
-        itemCount: _conversations.length,
+        itemCount: widget.conversations.length,
         itemBuilder: (context, index) {
-          final conversation = _conversations[index];
+          final conversation = widget.conversations[index];
           final isExpanded = _expandedId == conversation.id;
           return _ConversationTile(
             conversation: conversation,
             isExpanded: isExpanded,
-            isLoadingMessages: _loadingMessages.contains(conversation.id),
-            messages: _messagesCache[conversation.id],
+            messages: widget.messagesCache[conversation.id],
             onTap: () => _toggleExpanded(conversation.id),
           );
         },
@@ -142,14 +113,12 @@ class _ConversationsPageState extends State<ConversationsPage> {
 class _ConversationTile extends StatelessWidget {
   final Conversation conversation;
   final bool isExpanded;
-  final bool isLoadingMessages;
   final List<Message>? messages;
   final VoidCallback onTap;
 
   const _ConversationTile({
     required this.conversation,
     required this.isExpanded,
-    required this.isLoadingMessages,
     required this.messages,
     required this.onTap,
   });
@@ -158,9 +127,7 @@ class _ConversationTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final duration = conversation.duration;
-    final durationText = duration != null
-        ? _formatDuration(duration)
-        : 'Ongoing';
+    final durationText = duration != null ? _formatDuration(duration) : 'Ongoing';
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -190,15 +157,15 @@ class _ConversationTile extends StatelessWidget {
   }
 
   Widget _buildMessages(BuildContext context) {
-    if (isLoadingMessages) {
+    final msgs = messages;
+    if (msgs == null) {
       return const Padding(
         padding: EdgeInsets.all(16),
         child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
       );
     }
 
-    final msgs = messages;
-    if (msgs == null || msgs.isEmpty) {
+    if (msgs.isEmpty) {
       return const Padding(
         padding: EdgeInsets.all(16),
         child: Text('No messages.'),

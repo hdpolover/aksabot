@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// Presence detection settings — planned UI.
+import '../../../../core/ble/ble_presence_service.dart';
+import '../../../../core/di/injection.dart';
+
+/// Presence detection settings — wired to BLE presence advertising service.
 class PresenceSettingsPage extends StatefulWidget {
   final String deviceId;
   const PresenceSettingsPage({super.key, required this.deviceId});
@@ -10,33 +13,131 @@ class PresenceSettingsPage extends StatefulWidget {
 }
 
 class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
-  bool _enabled = true;
+  late final BlePresenceService _presence;
+
+  bool _enabled = false;
+  bool _isLoading = true;
+  bool _isSupported = true;
   double _rssiThreshold = -75;
   String _gracePeriod = '45';
   String _silentWake = '5';
+
+  @override
+  void initState() {
+    super.initState();
+    _presence = sl<BlePresenceService>();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final supported = await _presence.isSupported;
+    final enabled = await _presence.loadEnabled();
+    final rssi = await _presence.loadRssiThreshold();
+    final grace = await _presence.loadGracePeriod();
+    final silent = await _presence.loadSilentWakeMinutes();
+
+    // Check actual advertising state
+    await _presence.checkAdvertisingState();
+
+    if (!mounted) return;
+    setState(() {
+      _isSupported = supported;
+      _enabled = enabled && supported;
+      _rssiThreshold = rssi;
+      _gracePeriod = grace.toString();
+      _silentWake = silent.toString();
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _togglePresence(bool enabled) async {
+    setState(() => _enabled = enabled);
+
+    if (enabled) {
+      final started = await _presence.startAdvertising();
+      if (started) {
+        await _presence.saveEnabled(true);
+      } else {
+        await _presence.saveEnabled(false);
+        if (!mounted) return;
+        setState(() => _enabled = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to start BLE advertising. Check Bluetooth permissions.')),
+        );
+      }
+    } else {
+      await _presence.stopAdvertising();
+      await _presence.saveEnabled(false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
 
+    if (_isLoading) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Presence Detection')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text('Presence Detection')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (!_isSupported) ...[
+            Card(
+              color: colors.errorContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber, color: colors.onErrorContainer),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'BLE peripheral mode is not supported on this device.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colors.onErrorContainer,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
           // Enable toggle
           Card(
             clipBehavior: Clip.antiAlias,
             child: SwitchListTile(
               secondary: Icon(Icons.bluetooth_searching, color: colors.primary),
               title: const Text('Enable presence'),
-              subtitle: const Text(
-                'When your phone is nearby, Aksa wakes up and greets you. '
-                'When you leave, Aksa goes to sleep.',
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'When your phone is nearby, Aksa wakes up and greets you. '
+                    'When you leave, Aksa goes to sleep.',
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _enabled && _presence.isAdvertising
+                        ? 'Advertising...'
+                        : 'Not advertising',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: _enabled ? Colors.green : colors.outline,
+                    ),
+                  ),
+                ],
               ),
               value: _enabled,
-              onChanged: (v) => setState(() => _enabled = v),
+              onChanged: _isSupported ? _togglePresence : null,
             ),
           ),
           const SizedBox(height: 24),
@@ -63,26 +164,23 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                     divisions: 6,
                     label: '${_rssiThreshold.round()} dBm',
                     onChanged: _enabled
-                        ? (v) => setState(() => _rssiThreshold = v)
+                        ? (v) {
+                            setState(() => _rssiThreshold = v);
+                            _presence.saveRssiThreshold(v);
+                          }
                         : null,
                   ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      Icon(Icons.signal_cellular_alt,
-                          size: 16, color: colors.onSurfaceVariant),
+                      Icon(Icons.info_outline, size: 16, color: colors.onSurfaceVariant),
                       const SizedBox(width: 8),
-                      Text(
-                        'Current RSSI: -- dBm',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.onSurfaceVariant,
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        'BLE not connected',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.outline,
+                      Expanded(
+                        child: Text(
+                          'RSSI threshold for the ESP32. Values closer to 0 = shorter range.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
                         ),
                       ),
                     ],
@@ -105,6 +203,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                             ? (v) {
                                 if (v != null) {
                                   setState(() => _gracePeriod = v);
+                                  _presence.saveGracePeriod(int.parse(v));
                                 }
                               }
                             : null,
@@ -148,6 +247,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                             ? (v) {
                                 if (v != null) {
                                   setState(() => _silentWake = v);
+                                  _presence.saveSilentWakeMinutes(int.parse(v));
                                 }
                               }
                             : null,

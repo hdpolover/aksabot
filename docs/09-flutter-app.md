@@ -149,7 +149,15 @@ The presence settings screen also shows a live RSSI indicator so the user can ca
 
 ## State management
 
-Recommended approach: Riverpod or Bloc for state management.
+Uses flutter_bloc for all state management. All BLoCs are registered as factories in GetIt DI.
+
+| BLoC | Responsibility |
+|------|---------------|
+| AuthBloc | Login, register, logout, token management |
+| DevicesBloc | Device CRUD, settings, personality |
+| ConversationsBloc | Load conversations + expand to load messages (cached) |
+| MemoriesBloc | Load/filter/edit/delete memories |
+| SchedulerBloc | Reminders config, pomodoro start/stop, focus mode |
 
 Key state:
 - Auth state (logged in/out, tokens)
@@ -157,6 +165,7 @@ Key state:
 - Current device (selected device context)
 - BLE connection state (scanning, connected, provisioning step)
 - BLE presence advertising state (advertising/stopped)
+- Network connectivity (online/offline banner)
 
 ---
 
@@ -228,6 +237,25 @@ Centralized HTTP client with:
 - Error handling and mapping to app-level exceptions
 
 ---
+
+## Network status
+
+The app uses `connectivity_plus` to monitor network state. A `NetworkStatusBanner` widget wraps the main shell scaffold and shows a red "No internet connection" banner when the device is offline. The banner animates in/out smoothly.
+
+## Notifications
+
+Local notifications are handled via `flutter_local_notifications` with three notification channels:
+- **reminders** — Health reminders (stand up, hydration, eye break, etc.)
+- **pomodoro** — Pomodoro focus/break phase transitions
+- **device_alerts** — Device online/offline state changes
+
+Notification permissions are requested when the user enables notifications in Settings. The preference is persisted via SharedPreferences.
+
+**Note:** Server-pushed notifications via FCM are not yet implemented. The backend needs FCM token storage and push payload endpoints first.
+
+## Multi-device activity
+
+The Activity tab resolves the user's devices on load. When multiple devices are registered, a dropdown picker appears in the AppBar allowing the user to switch between devices. Both the Conversations and Memories views re-key themselves when the selected device changes, ensuring fresh BLoC instances load the correct data.
 
 ## Phase 4 deliverables (weeks 9-11)
 

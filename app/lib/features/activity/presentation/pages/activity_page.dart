@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../conversations/domain/entities/conversation_entity.dart';
 import '../../../conversations/domain/entities/message_entity.dart';
-import '../../../conversations/domain/repositories/conversations_repository.dart';
+import '../../../conversations/presentation/bloc/conversations_bloc.dart';
+import '../../../devices/domain/entities/device_entity.dart';
 import '../../../devices/domain/repositories/devices_repository.dart';
 import '../../../memories/domain/entities/memory_entity.dart';
-import '../../../memories/domain/repositories/memories_repository.dart';
+import '../../../memories/presentation/bloc/memories_bloc.dart';
 import '../../../../core/di/injection.dart';
 
 /// Activity tab with segmented toggle between Conversations and Memories.
 ///
-/// If the user has multiple devices, this shows data across all devices.
-/// For now, it requires a device selection — we default to the first device
-/// from the devices repository.
+/// Shows a device picker when the user has multiple devices.
 class ActivityPage extends StatefulWidget {
   const ActivityPage({super.key});
 
@@ -22,141 +22,28 @@ class ActivityPage extends StatefulWidget {
 
 class _ActivityPageState extends State<ActivityPage> {
   int _selectedSegment = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Activity'),
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: SegmentedButton<int>(
-              segments: const [
-                ButtonSegment(
-                  value: 0,
-                  label: Text('Conversations'),
-                  icon: Icon(Icons.chat_bubble_outline),
-                ),
-                ButtonSegment(
-                  value: 1,
-                  label: Text('Memories'),
-                  icon: Icon(Icons.psychology),
-                ),
-              ],
-              selected: {_selectedSegment},
-              onSelectionChanged: (selection) {
-                setState(() => _selectedSegment = selection.first);
-              },
-              style: SegmentedButton.styleFrom(
-                selectedForegroundColor: theme.colorScheme.onPrimary,
-                selectedBackgroundColor: theme.colorScheme.primary,
-              ),
-            ),
-          ),
-          Expanded(
-            child: _selectedSegment == 0
-                ? const _ConversationsView()
-                : const _MemoriesView(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Conversations view (inlined from ConversationsPage logic)
-// ---------------------------------------------------------------------------
-
-class _ConversationsView extends StatefulWidget {
-  const _ConversationsView();
-
-  @override
-  State<_ConversationsView> createState() => _ConversationsViewState();
-}
-
-class _ConversationsViewState extends State<_ConversationsView> {
-  late final ConversationsRepository _repository;
-
-  List<Conversation> _conversations = [];
-  bool _isLoading = true;
-  String? _error;
-  String? _expandedId;
-  final Map<String, List<Message>> _messagesCache = {};
-  final Set<String> _loadingMessages = {};
-
-  // TODO: when multi-device support is added, let the user pick a device.
-  // For now we attempt to load conversations for the first device via the
-  // devices repository, but Activity is accessible even without a device.
-  String? _deviceId;
+  List<Device> _devices = [];
+  Device? _selectedDevice;
+  bool _resolving = true;
 
   @override
   void initState() {
     super.initState();
-    _repository = sl<ConversationsRepository>();
-    _resolveDeviceAndLoad();
+    _loadDevices();
   }
 
-  Future<void> _resolveDeviceAndLoad() async {
-    // Resolve the first device to load its conversations.
-    final devicesResult = await sl<DevicesRepository>().getDevices();
-    devicesResult.fold(
-      (_) => setState(() => _isLoading = false),
+  Future<void> _loadDevices() async {
+    final result = await sl<DevicesRepository>().getDevices();
+    result.fold(
+      (_) => setState(() => _resolving = false),
       (devices) {
-        if (devices.isNotEmpty) {
-          _deviceId = devices.first.id;
-          _loadConversations();
-        } else {
-          setState(() => _isLoading = false);
-        }
+        setState(() {
+          _devices = devices;
+          _selectedDevice = devices.isNotEmpty ? devices.first : null;
+          _resolving = false;
+        });
       },
     );
-  }
-
-  Future<void> _loadConversations() async {
-    if (_deviceId == null) return;
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-    final result = await _repository.getConversations(_deviceId!);
-    result.fold(
-      (failure) => setState(() {
-        _error = failure.message;
-        _isLoading = false;
-      }),
-      (conversations) => setState(() {
-        _conversations = conversations;
-        _isLoading = false;
-      }),
-    );
-  }
-
-  Future<void> _loadMessages(String conversationId) async {
-    if (_messagesCache.containsKey(conversationId)) return;
-    setState(() => _loadingMessages.add(conversationId));
-    final result = await _repository.getMessages(conversationId);
-    result.fold(
-      (_) => null,
-      (messages) => _messagesCache[conversationId] = messages,
-    );
-    setState(() => _loadingMessages.remove(conversationId));
-  }
-
-  void _toggleExpanded(String conversationId) {
-    setState(() {
-      if (_expandedId == conversationId) {
-        _expandedId = null;
-      } else {
-        _expandedId = conversationId;
-        _loadMessages(conversationId);
-      }
-    });
   }
 
   @override
@@ -164,18 +51,62 @@ class _ConversationsViewState extends State<_ConversationsView> {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
 
-    if (_deviceId == null) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Activity'),
+        actions: [
+          if (_devices.length > 1)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _selectedDevice?.id,
+                  icon: Icon(Icons.smart_toy_outlined, color: colors.onSurface),
+                  items: _devices.map((d) {
+                    return DropdownMenuItem(
+                      value: d.id,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.smart_toy_outlined, size: 16, color: colors.primary),
+                          const SizedBox(width: 8),
+                          Text(d.name),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (deviceId) {
+                    if (deviceId == null) return;
+                    final device = _devices.firstWhere((d) => d.id == deviceId);
+                    setState(() => _selectedDevice = device);
+                  },
+                ),
+              ),
+            ),
+        ],
+      ),
+      body: _buildBody(theme),
+    );
+  }
+
+  Widget _buildBody(ThemeData theme) {
+    if (_resolving) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final colors = theme.colorScheme;
+
+    if (_selectedDevice == null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.chat_bubble_outline,
-                  size: 48, color: colors.onSurfaceVariant),
+              Icon(Icons.smart_toy_outlined, size: 48, color: colors.onSurfaceVariant),
               const SizedBox(height: 16),
               Text(
-                'View conversations from your device dashboard',
+                'Add a device to see activity',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: colors.onSurfaceVariant,
@@ -187,48 +118,151 @@ class _ConversationsViewState extends State<_ConversationsView> {
       );
     }
 
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_error!, style: TextStyle(color: colors.error)),
-            const SizedBox(height: 16),
-            FilledButton.tonal(
-              onPressed: _loadConversations,
-              child: const Text('Retry'),
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(
+                value: 0,
+                label: Text('Conversations'),
+                icon: Icon(Icons.chat_bubble_outline),
+              ),
+              ButtonSegment(
+                value: 1,
+                label: Text('Memories'),
+                icon: Icon(Icons.psychology),
+              ),
+            ],
+            selected: {_selectedSegment},
+            onSelectionChanged: (selection) {
+              setState(() => _selectedSegment = selection.first);
+            },
+            style: SegmentedButton.styleFrom(
+              selectedForegroundColor: colors.onPrimary,
+              selectedBackgroundColor: colors.primary,
             ),
-          ],
+          ),
         ),
-      );
-    }
-
-    if (_conversations.isEmpty) {
-      return Center(
-        child: Text(
-          'No conversations yet.',
-          style: theme.textTheme.bodyMedium
-              ?.copyWith(color: colors.onSurfaceVariant),
+        Expanded(
+          child: _selectedSegment == 0
+              ? _ConversationsView(
+                  key: ValueKey('conv_${_selectedDevice!.id}'),
+                  deviceId: _selectedDevice!.id,
+                )
+              : _MemoriesView(
+                  key: ValueKey('mem_${_selectedDevice!.id}'),
+                  deviceId: _selectedDevice!.id,
+                ),
         ),
-      );
-    }
+      ],
+    );
+  }
+}
 
+// ---------------------------------------------------------------------------
+// Conversations view (uses ConversationsBloc)
+// ---------------------------------------------------------------------------
+
+class _ConversationsView extends StatelessWidget {
+  final String deviceId;
+
+  const _ConversationsView({super.key, required this.deviceId});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return BlocProvider(
+      create: (_) => sl<ConversationsBloc>()..add(LoadConversations(deviceId)),
+      child: BlocBuilder<ConversationsBloc, ConversationsState>(
+        builder: (context, state) {
+          if (state is ConversationsLoading) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (state is ConversationsError) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(state.message, style: TextStyle(color: colors.error)),
+                  const SizedBox(height: 16),
+                  FilledButton.tonal(
+                    onPressed: () => context.read<ConversationsBloc>().add(LoadConversations(deviceId)),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            );
+          }
+          if (state is ConversationsLoaded) {
+            if (state.conversations.isEmpty) {
+              return Center(
+                child: Text(
+                  'No conversations yet.',
+                  style: theme.textTheme.bodyMedium?.copyWith(color: colors.onSurfaceVariant),
+                ),
+              );
+            }
+            return _ConversationsList(
+              conversations: state.conversations,
+              messagesCache: state.messagesCache,
+              deviceId: deviceId,
+            );
+          }
+          return const SizedBox.shrink();
+        },
+      ),
+    );
+  }
+}
+
+class _ConversationsList extends StatefulWidget {
+  final List<Conversation> conversations;
+  final Map<String, List<Message>> messagesCache;
+  final String deviceId;
+
+  const _ConversationsList({
+    required this.conversations,
+    required this.messagesCache,
+    required this.deviceId,
+  });
+
+  @override
+  State<_ConversationsList> createState() => _ConversationsListState();
+}
+
+class _ConversationsListState extends State<_ConversationsList> {
+  String? _expandedId;
+
+  void _toggleExpanded(String conversationId) {
+    setState(() {
+      if (_expandedId == conversationId) {
+        _expandedId = null;
+      } else {
+        _expandedId = conversationId;
+        context.read<ConversationsBloc>().add(LoadMessages(conversationId));
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return RefreshIndicator(
-      onRefresh: _loadConversations,
+      onRefresh: () async {
+        context.read<ConversationsBloc>().add(LoadConversations(widget.deviceId));
+      },
       child: ListView.builder(
-        itemCount: _conversations.length,
+        itemCount: widget.conversations.length,
         itemBuilder: (context, index) {
-          final conversation = _conversations[index];
+          final conversation = widget.conversations[index];
           final isExpanded = _expandedId == conversation.id;
           return _ConversationTile(
             conversation: conversation,
             isExpanded: isExpanded,
-            isLoadingMessages: _loadingMessages.contains(conversation.id),
-            messages: _messagesCache[conversation.id],
+            messages: widget.messagesCache[conversation.id],
             onTap: () => _toggleExpanded(conversation.id),
           );
         },
@@ -240,14 +274,12 @@ class _ConversationsViewState extends State<_ConversationsView> {
 class _ConversationTile extends StatelessWidget {
   final Conversation conversation;
   final bool isExpanded;
-  final bool isLoadingMessages;
   final List<Message>? messages;
   final VoidCallback onTap;
 
   const _ConversationTile({
     required this.conversation,
     required this.isExpanded,
-    required this.isLoadingMessages,
     required this.messages,
     required this.onTap,
   });
@@ -256,9 +288,7 @@ class _ConversationTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final duration = conversation.duration;
-    final durationText = duration != null
-        ? _formatDuration(duration)
-        : 'Ongoing';
+    final durationText = duration != null ? _formatDuration(duration) : 'Ongoing';
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -288,15 +318,14 @@ class _ConversationTile extends StatelessWidget {
   }
 
   Widget _buildMessages(BuildContext context) {
-    if (isLoadingMessages) {
+    final msgs = messages;
+    if (msgs == null) {
       return const Padding(
         padding: EdgeInsets.all(16),
         child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
       );
     }
-
-    final msgs = messages;
-    if (msgs == null || msgs.isEmpty) {
+    if (msgs.isEmpty) {
       return const Padding(
         padding: EdgeInsets.all(16),
         child: Text('No messages.'),
@@ -367,8 +396,7 @@ class _MessageBubble extends StatelessWidget {
           children: [
             Text(
               isUser ? 'You' : 'Aksa',
-              style: theme.textTheme.labelSmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
+              style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 2),
             Text(message.content),
@@ -380,220 +408,93 @@ class _MessageBubble extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Memories view (inlined from MemoriesPage logic)
+// Memories view (uses MemoriesBloc)
 // ---------------------------------------------------------------------------
 
-class _MemoriesView extends StatefulWidget {
-  const _MemoriesView();
+class _MemoriesView extends StatelessWidget {
+  final String deviceId;
 
-  @override
-  State<_MemoriesView> createState() => _MemoriesViewState();
-}
-
-class _MemoriesViewState extends State<_MemoriesView> {
-  late final MemoriesRepository _repository;
-
-  List<Memory> _memories = [];
-  bool _isLoading = true;
-  String? _error;
-  String? _selectedCategory;
-
-  // Same device resolution issue as conversations.
-  String? _deviceId;
-
-  @override
-  void initState() {
-    super.initState();
-    _repository = sl<MemoriesRepository>();
-    _resolveDeviceAndLoad();
-  }
-
-  Future<void> _resolveDeviceAndLoad() async {
-    final devicesResult = await sl<DevicesRepository>().getDevices();
-    devicesResult.fold(
-      (_) => setState(() => _isLoading = false),
-      (devices) {
-        if (devices.isNotEmpty) {
-          _deviceId = devices.first.id;
-          _loadMemories();
-        } else {
-          setState(() => _isLoading = false);
-        }
-      },
-    );
-  }
-
-  Future<void> _loadMemories() async {
-    if (_deviceId == null) return;
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-    final result = await _repository.getMemories(
-      _deviceId!,
-      category: _selectedCategory,
-    );
-    result.fold(
-      (failure) => setState(() {
-        _error = failure.message;
-        _isLoading = false;
-      }),
-      (memories) => setState(() {
-        _memories = memories;
-        _isLoading = false;
-      }),
-    );
-  }
-
-  Set<String> get _categories => _memories.map((m) => m.category).toSet();
-
-  Map<String, List<Memory>> get _grouped {
-    final map = <String, List<Memory>>{};
-    for (final memory in _memories) {
-      map.putIfAbsent(memory.category, () => []).add(memory);
-    }
-    return map;
-  }
-
-  Future<void> _deleteMemory(Memory memory) async {
-    final result = await _repository.deleteMemory(memory.id);
-    result.fold(
-      (failure) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to delete: ${failure.message}')),
-        );
-      },
-      (_) {
-        setState(() => _memories.remove(memory));
-        if (!mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Memory deleted')));
-      },
-    );
-  }
-
-  Future<void> _editMemory(Memory memory) async {
-    final factController = TextEditingController(text: memory.fact);
-    final categoryController = TextEditingController(text: memory.category);
-
-    final shouldSave = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Memory'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: factController,
-              decoration: const InputDecoration(labelText: 'Fact'),
-              maxLines: 3,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: categoryController,
-              decoration: const InputDecoration(labelText: 'Category'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-
-    if (shouldSave != true) return;
-
-    final result = await _repository.updateMemory(
-      memory.id,
-      fact: factController.text.trim() != memory.fact
-          ? factController.text.trim()
-          : null,
-      category: categoryController.text.trim() != memory.category
-          ? categoryController.text.trim()
-          : null,
-    );
-
-    result.fold(
-      (failure) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update: ${failure.message}')),
-        );
-      },
-      (_) => _loadMemories(),
-    );
-  }
+  const _MemoriesView({super.key, required this.deviceId});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
 
-    if (_deviceId == null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.psychology, size: 48, color: colors.onSurfaceVariant),
-              const SizedBox(height: 16),
-              Text(
-                'View memories from your device dashboard',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
+    return BlocProvider(
+      create: (_) => sl<MemoriesBloc>()..add(LoadMemories(deviceId)),
+      child: BlocBuilder<MemoriesBloc, MemoriesState>(
+        builder: (context, state) {
+          if (state is MemoriesLoading) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (state is MemoriesError) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(state.message, style: TextStyle(color: colors.error)),
+                  const SizedBox(height: 16),
+                  FilledButton.tonal(
+                    onPressed: () => context.read<MemoriesBloc>().add(LoadMemories(deviceId)),
+                    child: const Text('Retry'),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-      );
-    }
+            );
+          }
+          if (state is MemoriesLoaded) {
+            if (state.memories.isEmpty) {
+              return Center(
+                child: Text(
+                  'No memories yet.',
+                  style: theme.textTheme.bodyMedium?.copyWith(color: colors.onSurfaceVariant),
+                ),
+              );
+            }
+            return _MemoriesContent(
+              memories: state.memories,
+              selectedCategory: state.selectedCategory,
+              deviceId: deviceId,
+            );
+          }
+          return const SizedBox.shrink();
+        },
+      ),
+    );
+  }
+}
 
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+class _MemoriesContent extends StatelessWidget {
+  final List<Memory> memories;
+  final String? selectedCategory;
+  final String deviceId;
 
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_error!, style: TextStyle(color: colors.error)),
-            const SizedBox(height: 16),
-            FilledButton.tonal(
-              onPressed: _loadMemories,
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-    }
+  const _MemoriesContent({
+    required this.memories,
+    required this.selectedCategory,
+    required this.deviceId,
+  });
 
-    if (_memories.isEmpty) {
-      return Center(
-        child: Text(
-          'No memories yet.',
-          style:
-              theme.textTheme.bodyMedium?.copyWith(color: colors.onSurfaceVariant),
-        ),
-      );
-    }
+  Set<String> get _categories => memories.map((m) => m.category).toSet();
 
+  Map<String, List<Memory>> get _grouped {
+    final map = <String, List<Memory>>{};
+    for (final memory in memories) {
+      map.putIfAbsent(memory.category, () => []).add(memory);
+    }
+    return map;
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final grouped = _grouped;
     final sortedCategories = grouped.keys.toList()..sort();
 
     return RefreshIndicator(
-      onRefresh: _loadMemories,
+      onRefresh: () async {
+        context.read<MemoriesBloc>().add(LoadMemories(deviceId, category: selectedCategory));
+      },
       child: Column(
         children: [
           SingleChildScrollView(
@@ -603,22 +504,18 @@ class _MemoriesViewState extends State<_MemoriesView> {
               children: [
                 FilterChip(
                   label: const Text('All'),
-                  selected: _selectedCategory == null,
-                  onSelected: (_) {
-                    setState(() => _selectedCategory = null);
-                    _loadMemories();
-                  },
+                  selected: selectedCategory == null,
+                  onSelected: (_) => context.read<MemoriesBloc>().add(LoadMemories(deviceId)),
                 ),
                 const SizedBox(width: 8),
                 ..._categories.map((cat) => Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: FilterChip(
                         label: Text(cat),
-                        selected: _selectedCategory == cat,
+                        selected: selectedCategory == cat,
                         onSelected: (_) {
-                          setState(() => _selectedCategory =
-                              _selectedCategory == cat ? null : cat);
-                          _loadMemories();
+                          final newCat = selectedCategory == cat ? null : cat;
+                          context.read<MemoriesBloc>().add(LoadMemories(deviceId, category: newCat));
                         },
                       ),
                     )),
@@ -634,8 +531,6 @@ class _MemoriesViewState extends State<_MemoriesView> {
                 return _CategorySection(
                   category: category,
                   memories: items,
-                  onDelete: _deleteMemory,
-                  onEdit: _editMemory,
                 );
               },
             ),
@@ -649,14 +544,10 @@ class _MemoriesViewState extends State<_MemoriesView> {
 class _CategorySection extends StatelessWidget {
   final String category;
   final List<Memory> memories;
-  final ValueChanged<Memory> onDelete;
-  final ValueChanged<Memory> onEdit;
 
   const _CategorySection({
     required this.category,
     required this.memories,
-    required this.onDelete,
-    required this.onEdit,
   });
 
   @override
@@ -703,14 +594,13 @@ class _CategorySection extends StatelessWidget {
                 ],
               ),
             ),
-            onDismissed: (_) => onDelete(memory),
+            onDismissed: (_) =>
+                context.read<MemoriesBloc>().add(DeleteMemory(memory.id)),
             child: ListTile(
-              onTap: () => onEdit(memory),
               title: Text(memory.fact),
               subtitle: Text(
                 'Confidence: ${(memory.confidence * 100).toStringAsFixed(0)}%',
               ),
-              trailing: const Icon(Icons.edit_outlined, size: 18),
             ),
           ),
         ),

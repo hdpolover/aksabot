@@ -1,122 +1,77 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../domain/entities/pomodoro_entity.dart';
-import '../../domain/repositories/scheduler_repository.dart';
+import '../bloc/scheduler_bloc.dart';
 import '../../../../core/di/injection.dart';
 
 /// Page showing the current Pomodoro status with start/stop controls.
-class PomodoroPage extends StatefulWidget {
+class PomodoroPage extends StatelessWidget {
   final String deviceId;
 
   const PomodoroPage({super.key, required this.deviceId});
 
   @override
-  State<PomodoroPage> createState() => _PomodoroPageState();
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (_) => sl<SchedulerBloc>()..add(LoadPomodoroStatus(deviceId)),
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Pomodoro')),
+        body: BlocConsumer<SchedulerBloc, SchedulerState>(
+          listener: (context, state) {
+            if (state is SchedulerError) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(state.message)),
+              );
+            }
+          },
+          builder: (context, state) {
+            if (state is SchedulerLoading) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (state is SchedulerError) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(state.message, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    const SizedBox(height: 16),
+                    FilledButton.tonal(
+                      onPressed: () => context.read<SchedulerBloc>().add(LoadPomodoroStatus(deviceId)),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              );
+            }
+            if (state is PomodoroStatusLoaded) {
+              return _PomodoroContent(
+                status: state.status,
+                isActing: state.isActing,
+                deviceId: deviceId,
+              );
+            }
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+    );
+  }
 }
 
-class _PomodoroPageState extends State<PomodoroPage> {
-  late final SchedulerRepository _repository;
+class _PomodoroContent extends StatelessWidget {
+  final PomodoroStatus status;
+  final bool isActing;
+  final String deviceId;
 
-  PomodoroStatus? _status;
-  bool _isLoading = true;
-  bool _isActing = false;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _repository = sl<SchedulerRepository>();
-    _loadStatus();
-  }
-
-  Future<void> _loadStatus() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-
-    final result = await _repository.getPomodoroStatus(widget.deviceId);
-    result.fold(
-      (failure) => setState(() {
-        _error = failure.message;
-        _isLoading = false;
-      }),
-      (status) => setState(() {
-        _status = status;
-        _isLoading = false;
-      }),
-    );
-  }
-
-  Future<void> _start() async {
-    setState(() => _isActing = true);
-
-    final result = await _repository.startPomodoro(widget.deviceId);
-    result.fold(
-      (failure) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to start: ${failure.message}')),
-        );
-      },
-      (status) => setState(() => _status = status),
-    );
-
-    setState(() => _isActing = false);
-  }
-
-  Future<void> _stop() async {
-    setState(() => _isActing = true);
-
-    final result = await _repository.stopPomodoro(widget.deviceId);
-    result.fold(
-      (failure) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to stop: ${failure.message}')),
-        );
-      },
-      (_) => setState(() => _status = const PomodoroStatus(active: false)),
-    );
-
-    setState(() => _isActing = false);
-  }
+  const _PomodoroContent({
+    required this.status,
+    required this.isActing,
+    required this.deviceId,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Pomodoro')),
-      body: _buildBody(),
-    );
-  }
-
-  Widget _buildBody() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.tonal(
-              onPressed: _loadStatus,
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final status = _status;
-    if (status == null) return const SizedBox.shrink();
-
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final isActive = status.active;
@@ -125,7 +80,9 @@ class _PomodoroPageState extends State<PomodoroPage> {
         : colors.outline;
 
     return RefreshIndicator(
-      onRefresh: _loadStatus,
+      onRefresh: () async {
+        context.read<SchedulerBloc>().add(LoadPomodoroStatus(deviceId));
+      },
       child: ListView(
         padding: const EdgeInsets.all(24),
         children: [
@@ -188,7 +145,7 @@ class _PomodoroPageState extends State<PomodoroPage> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: _isActing ? null : () {},
+                    onPressed: isActing ? null : () {},
                     icon: const Icon(Icons.skip_next),
                     label: const Text('Skip'),
                   ),
@@ -196,9 +153,11 @@ class _PomodoroPageState extends State<PomodoroPage> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: _isActing ? null : _stop,
+                    onPressed: isActing
+                        ? null
+                        : () => context.read<SchedulerBloc>().add(StopPomodoro(deviceId)),
                     icon: const Icon(Icons.stop),
-                    label: Text(_isActing ? 'Stopping...' : 'Stop'),
+                    label: Text(isActing ? 'Stopping...' : 'Stop'),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: colors.error,
                       side: BorderSide(color: colors.error),
@@ -209,9 +168,11 @@ class _PomodoroPageState extends State<PomodoroPage> {
             )
           else
             FilledButton.icon(
-              onPressed: _isActing ? null : _start,
+              onPressed: isActing
+                  ? null
+                  : () => context.read<SchedulerBloc>().add(StartPomodoro(deviceId)),
               icon: const Icon(Icons.play_arrow),
-              label: Text(_isActing ? 'Starting...' : 'Start Pomodoro'),
+              label: Text(isActing ? 'Starting...' : 'Start Pomodoro'),
               style: FilledButton.styleFrom(
                 minimumSize: const Size(double.infinity, 48),
               ),
@@ -264,8 +225,7 @@ class _PomodoroPageState extends State<PomodoroPage> {
           // Daily stats
           Row(
             children: [
-              Icon(Icons.emoji_events_outlined,
-                  size: 16, color: colors.onSurfaceVariant),
+              Icon(Icons.emoji_events_outlined, size: 16, color: colors.onSurfaceVariant),
               const SizedBox(width: 8),
               Text(
                 'Today: 0 focus sessions',

@@ -19,12 +19,16 @@ class DevicesRemoteDatasource {
     return DeviceModel.fromJson(data as Map<String, dynamic>);
   }
 
-  /// Returns the device (without deviceToken — token is only shown once).
+  /// Returns the device with deviceToken (shown only once, for provisioning).
   Future<DeviceModel> createDevice({String? name}) async {
     final data = await _client.post('/devices', data: {
       if (name != null) 'name': name, // ignore: use_null_aware_elements
     });
     final deviceJson = data['device'] as Map<String, dynamic>;
+    final deviceToken = data['deviceToken'] as String?;
+    if (deviceToken != null) {
+      deviceJson['deviceToken'] = deviceToken;
+    }
     return DeviceModel.fromJson(deviceJson);
   }
 

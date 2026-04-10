@@ -167,18 +167,10 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
 
     if (device == null) return;
 
-    // We need the device token from the creation response.
-    // The current createDevice returns just the Device model without the token.
-    // For the SoftAP flow, we also need to get the token.
-    // TODO: Update createDevice to return the token for provisioning flows.
-    // For now, we'll use a workaround — the backend returns { device, deviceToken }
-    // but our datasource only returns device. Let's proceed without sending the token
-    // to the ESP32 for now (it will be addressed when firmware is ready).
-
     _updateProvisionStep(0, _StepState.done);
     _updateProvisionStep(1, _StepState.loading);
 
-    // Step 2: Send Wi-Fi credentials to ESP32 via SoftAP HTTP
+    // Step 2: Send Wi-Fi credentials + device token to ESP32 via SoftAP HTTP
     try {
       final dio = Dio(BaseOptions(
         baseUrl: _espBaseUrl,
@@ -190,6 +182,7 @@ class _WifiSetupPageState extends State<_WifiSetupPage> {
         'ssid': ssid,
         'password': password,
         'deviceId': device.id,
+        if (device.deviceToken != null) 'deviceToken': device.deviceToken,
       });
 
       _updateProvisionStep(1, _StepState.done);

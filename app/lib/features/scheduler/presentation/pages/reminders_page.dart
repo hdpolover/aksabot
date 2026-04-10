@@ -1,75 +1,68 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../domain/entities/reminder_config_entity.dart';
-import '../../domain/repositories/scheduler_repository.dart';
+import '../bloc/scheduler_bloc.dart';
 import '../../../../core/di/injection.dart';
 
 /// Page for toggling and configuring reminder intervals per type.
-class RemindersPage extends StatefulWidget {
+class RemindersPage extends StatelessWidget {
   final String deviceId;
 
   const RemindersPage({super.key, required this.deviceId});
 
   @override
-  State<RemindersPage> createState() => _RemindersPageState();
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (_) => sl<SchedulerBloc>()..add(LoadReminderConfig(deviceId)),
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Reminders')),
+        body: BlocBuilder<SchedulerBloc, SchedulerState>(
+          builder: (context, state) {
+            if (state is SchedulerLoading) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (state is SchedulerError) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(state.message, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    const SizedBox(height: 16),
+                    FilledButton.tonal(
+                      onPressed: () => context.read<SchedulerBloc>().add(LoadReminderConfig(deviceId)),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              );
+            }
+            if (state is ReminderConfigLoaded) {
+              return _RemindersContent(
+                config: state.config,
+                isSaving: state.isSaving,
+                deviceId: deviceId,
+              );
+            }
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+    );
+  }
 }
 
-class _RemindersPageState extends State<RemindersPage> {
-  late final SchedulerRepository _repository;
+class _RemindersContent extends StatelessWidget {
+  final ReminderConfig config;
+  final bool isSaving;
+  final String deviceId;
 
-  ReminderConfig? _config;
-  bool _isLoading = true;
-  String? _error;
-  bool _isSaving = false;
+  const _RemindersContent({
+    required this.config,
+    required this.isSaving,
+    required this.deviceId,
+  });
 
-  @override
-  void initState() {
-    super.initState();
-    _repository = sl<SchedulerRepository>();
-    _loadConfig();
-  }
-
-  Future<void> _loadConfig() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-
-    final result = await _repository.getReminderConfig(widget.deviceId);
-    result.fold(
-      (failure) => setState(() {
-        _error = failure.message;
-        _isLoading = false;
-      }),
-      (config) => setState(() {
-        _config = config;
-        _isLoading = false;
-      }),
-    );
-  }
-
-  Future<void> _updateConfig(Map<String, dynamic> patch) async {
-    setState(() => _isSaving = true);
-
-    final result = await _repository.updateReminderConfig(
-      widget.deviceId,
-      patch,
-    );
-
-    result.fold(
-      (failure) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save: ${failure.message}')),
-        );
-      },
-      (config) => setState(() => _config = config),
-    );
-
-    setState(() => _isSaving = false);
-  }
-
-  /// Builds the JSON key name from the display label.
   String _jsonKey(String label) {
     switch (label) {
       case 'Stand Up':
@@ -87,64 +80,32 @@ class _RemindersPageState extends State<RemindersPage> {
     }
   }
 
-  void _onToggle(String label, bool enabled) {
+  void _onToggle(BuildContext context, String label, bool enabled) {
     final key = _jsonKey(label);
-    final entry = _config!.entries.firstWhere((e) => e.key == label);
-    _updateConfig({
+    final entry = config.entries.firstWhere((e) => e.key == label);
+    context.read<SchedulerBloc>().add(UpdateReminderConfig(deviceId, {
       key: {
         'enabled': enabled,
         'intervalMinutes': entry.value.intervalMinutes,
       },
-    });
+    }));
   }
 
-  void _onIntervalChanged(String label, int minutes) {
+  void _onIntervalChanged(BuildContext context, String label, int minutes) {
     final key = _jsonKey(label);
-    final entry = _config!.entries.firstWhere((e) => e.key == label);
-    _updateConfig({
+    final entry = config.entries.firstWhere((e) => e.key == label);
+    context.read<SchedulerBloc>().add(UpdateReminderConfig(deviceId, {
       key: {
         'enabled': entry.value.enabled,
         'intervalMinutes': minutes,
       },
-    });
+    }));
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Reminders')),
-      body: _buildBody(),
-    );
-  }
+    final theme = Theme.of(context);
 
-  Widget _buildBody() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.tonal(
-              onPressed: _loadConfig,
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final config = _config;
-    if (config == null) return const SizedBox.shrink();
-
-    // Separate health vs daily reminders
     const healthKeys = ['Stand Up', 'Hydration', 'Eye Break', 'Stretch', 'Posture'];
     final healthEntries = config.entries
         .where((e) => healthKeys.contains(e.key))
@@ -159,7 +120,7 @@ class _RemindersPageState extends State<RemindersPage> {
           padding: const EdgeInsets.all(16),
           children: [
             // Work Hours card
-            Text('Work Hours', style: Theme.of(context).textTheme.titleMedium),
+            Text('Work Hours', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             Card(
               child: Padding(
@@ -173,21 +134,21 @@ class _RemindersPageState extends State<RemindersPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Start',
-                                  style: Theme.of(context).textTheme.bodySmall),
+                              Text('Start', style: theme.textTheme.bodySmall),
                               const SizedBox(height: 4),
                               FilledButton.tonal(
                                 onPressed: () async {
                                   final time = await showTimePicker(
                                     context: context,
-                                    initialTime:
-                                        const TimeOfDay(hour: 8, minute: 0),
+                                    initialTime: const TimeOfDay(hour: 8, minute: 0),
                                   );
-                                  if (time != null) {
-                                    _updateConfig({
-                                      'workHoursStart':
-                                          '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
-                                    });
+                                  if (time != null && context.mounted) {
+                                    context.read<SchedulerBloc>().add(
+                                      UpdateReminderConfig(deviceId, {
+                                        'workHoursStart':
+                                            '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
+                                      }),
+                                    );
                                   }
                                 },
                                 child: const Text('08:00'),
@@ -200,21 +161,21 @@ class _RemindersPageState extends State<RemindersPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('End',
-                                  style: Theme.of(context).textTheme.bodySmall),
+                              Text('End', style: theme.textTheme.bodySmall),
                               const SizedBox(height: 4),
                               FilledButton.tonal(
                                 onPressed: () async {
                                   final time = await showTimePicker(
                                     context: context,
-                                    initialTime:
-                                        const TimeOfDay(hour: 18, minute: 0),
+                                    initialTime: const TimeOfDay(hour: 18, minute: 0),
                                   );
-                                  if (time != null) {
-                                    _updateConfig({
-                                      'workHoursEnd':
-                                          '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
-                                    });
+                                  if (time != null && context.mounted) {
+                                    context.read<SchedulerBloc>().add(
+                                      UpdateReminderConfig(deviceId, {
+                                        'workHoursEnd':
+                                            '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
+                                      }),
+                                    );
                                   }
                                 },
                                 child: const Text('18:00'),
@@ -227,11 +188,9 @@ class _RemindersPageState extends State<RemindersPage> {
                     const SizedBox(height: 8),
                     Text(
                       'Reminders only fire during work hours.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant,
-                          ),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -240,30 +199,30 @@ class _RemindersPageState extends State<RemindersPage> {
             const SizedBox(height: 24),
 
             // Health section
-            Text('Health', style: Theme.of(context).textTheme.titleMedium),
+            Text('Health', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             ...healthEntries.map((entry) {
               return _ReminderTile(
                 label: entry.key,
                 item: entry.value,
-                onToggle: (enabled) => _onToggle(entry.key, enabled),
+                onToggle: (enabled) => _onToggle(context, entry.key, enabled),
                 onIntervalChanged: (minutes) =>
-                    _onIntervalChanged(entry.key, minutes),
+                    _onIntervalChanged(context, entry.key, minutes),
               );
             }),
             const SizedBox(height: 24),
 
             // Daily section
-            Text('Daily', style: Theme.of(context).textTheme.titleMedium),
+            Text('Daily', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             if (dailyEntries.isNotEmpty)
               ...dailyEntries.map((entry) {
                 return _ReminderTile(
                   label: entry.key,
                   item: entry.value,
-                  onToggle: (enabled) => _onToggle(entry.key, enabled),
+                  onToggle: (enabled) => _onToggle(context, entry.key, enabled),
                   onIntervalChanged: (minutes) =>
-                      _onIntervalChanged(entry.key, minutes),
+                      _onIntervalChanged(context, entry.key, minutes),
                 );
               })
             else
@@ -298,7 +257,7 @@ class _RemindersPageState extends State<RemindersPage> {
               ),
           ],
         ),
-        if (_isSaving)
+        if (isSaving)
           const Positioned(
             top: 0,
             left: 0,
@@ -395,7 +354,6 @@ class _ReminderTile extends StatelessWidget {
                 ],
               ),
             ),
-            // Interval picker
             DropdownButton<int>(
               value: _intervalOptions.contains(item.intervalMinutes)
                   ? item.intervalMinutes

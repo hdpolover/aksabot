@@ -41,7 +41,9 @@ dependencies:
 
   # BLE (provisioning + presence)
   flutter_blue_plus: ^1.35.0
-  # flutter_ble_peripheral: ^0.1.2  # Enable when presence detection is needed
+  flutter_ble_peripheral: ^2.1.0
+  connectivity_plus: ^6.1.4
+  flutter_local_notifications: ^19.0.0
 
 dev_dependencies:
   flutter_test:

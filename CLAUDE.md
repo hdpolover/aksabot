@@ -67,7 +67,7 @@ All design docs are in `docs/`. This is the entry point:
 ## Current status
 
 - **Backend: COMPLETE** (8 modules, 92 tests, E2E verified with ElevenLabs Ziggy voice)
-- **Flutter app: Phase A+B+C COMPLETE** (22 pages, BLE provisioning, backend-wired, zero analysis issues)
+- **Flutter app: Phase A+B+C+D COMPLETE** (22 pages, 5 BLoCs, BLE provisioning + presence, network banners, notifications, zero analysis issues)
 - **ESP32 firmware: SCAFFOLDED** (all modules written, blocked on hardware)
 - **ESP32 simulator:** `npm run esp:sim` keeps a device online for testing
 - **All 13 design docs updated** to reflect current state
@@ -96,27 +96,31 @@ All design docs are in `docs/`. This is the entry point:
 - 22 pages, zero analysis issues, FVM 3.41.6
 - 3-tab bottom nav (Home, Activity, Settings) via StatefulShellRoute
 - Device dashboard (0/1/multi-device states), quick actions, recent conversations
-- Activity tab: segmented conversations + memories (auto-resolves first device)
-- Settings tab: account card, theme, sign out
+- Activity tab: segmented conversations + memories with multi-device picker
+- Settings tab: account card, theme, notifications toggle, sign out
 - All core screens wired to backend: auth, devices, conversations, memories, reminders, pomodoro, focus mode, stats, response pool
-- **Add Device flow**: Wi-Fi (manual token claim) + Bluetooth (5-step BLE provisioning wizard)
-- **BLE provisioning**: scan → connect → Wi-Fi creds → register + token → name → done
-- **BLE service layer**: `core/ble/` with GATT constants + provisioning service (`flutter_blue_plus`)
+- **5 BLoCs**: AuthBloc, DevicesBloc, ConversationsBloc, MemoriesBloc, SchedulerBloc (all registered in GetIt DI)
+- **Add Device flow**: Wi-Fi (sends deviceToken to ESP32) + Bluetooth (5-step BLE provisioning with token write)
+- **BLE provisioning**: scan → connect → Wi-Fi creds → register + write token via BLE → name → done
+- **BLE presence detection**: `flutter_ble_peripheral` advertising 0xFFE4, settings UI with RSSI threshold/grace period, auto-restore on app startup
+- **BLE service layer**: `core/ble/` with GATT constants + provisioning service + presence service
+- **Network status banner**: `connectivity_plus` monitors connectivity, red banner slides in when offline
+- **Local notifications**: `flutter_local_notifications` with 3 channels (reminders, pomodoro, device_alerts)
 - 9 planned UI screens for future features (display, voice, OTA, diagnostics, integrations, motion, mobility)
 - UI/UX proposal: `docs/app-ui-ux-proposal.md`
-- Platform BLE permissions configured (iOS Info.plist + Android AndroidManifest.xml)
+- Platform BLE permissions configured (iOS Info.plist + Android AndroidManifest.xml + UIBackgroundModes for BLE)
 
 ### What's done — Firmware
 - ESP32 firmware scaffolded: Wi-Fi, WebSocket client, I2S audio, Opus codec, MicroSD, main loop
 - Serial-based touch simulation for testing without hardware
 
 ### What's next
-1. Test BLE provisioning with real ESP32 hardware
-2. Phase D: Presence detection (flutter_ble_peripheral, background advertising)
-3. Network status banners (connectivity_plus)
-4. ESP32 firmware flash + test when hardware arrives
-5. Phase 2: Display + face animations (firmware, hardware-dependent)
-6. Phase 5: Polish (VAD, OTA, power management)
+1. Test BLE provisioning + presence detection with real ESP32 hardware
+2. ESP32 firmware flash + test when hardware arrives
+3. ESP32 BLE presence scanning logic (3-state machine: PRESENT → LEAVING → AWAY)
+4. Phase 2: Display + face animations (firmware, hardware-dependent)
+5. Phase 5: Polish (VAD, OTA, power management)
+6. FCM push notifications (backend + app integration)
 
 ## Backend structure
 
