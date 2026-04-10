@@ -46,6 +46,7 @@ All design docs are in `docs/`. This is the entry point:
 | `11-future-extensions.md` | Expressive servos, desk mobility, camera, backend integrations |
 | `12-features.md` | All bot capabilities — reactive, proactive, reminders, pomodoro, presence, response pool |
 | `13-first-setup.md` | First-time setup — backend, firmware flash, app, pairing, troubleshooting |
+| `14-remaining-features.md` | Remaining features buildable without hardware — roadmap and checklist |
 
 ## Database tables
 
@@ -66,61 +67,80 @@ All design docs are in `docs/`. This is the entry point:
 
 ## Current status
 
-- **Backend: COMPLETE** (8 modules, 92 tests, E2E verified with ElevenLabs Ziggy voice)
-- **Flutter app: Phase A+B+C+D COMPLETE** (22 pages, 5 BLoCs, BLE provisioning + presence, network banners, notifications, zero analysis issues)
-- **ESP32 firmware: SCAFFOLDED** (all modules written, blocked on hardware)
+- **Backend: COMPLETE** (7 modules, 215 unit tests + 45 E2E tests, WS rate limiting, conversation search, forgot password)
+- **Flutter app: Phase A+B+C+D COMPLETE** (24 pages, 5 BLoCs, 60 tests, BLE provisioning + presence, network banners, notifications, forgot password, zero analysis issues)
+- **ESP32 firmware: 18 MODULES** (4,049 lines — NVS, presence, TTS cache, recording buffer, resilience audio, face, display, touch, VAD, OTA, debug logging, power management — TFT rendering stubbed, blocked on hardware)
 - **ESP32 simulator:** `npm run esp:sim` keeps a device online for testing
 - **All 13 design docs updated** to reflect current state
 - **API keys configured** (GEMINI_API_KEY, GOOGLE_APPLICATION_CREDENTIALS, ELEVENLABS_API_KEY)
 - **Handoff:** `docs/handoffs/handoff-2026-04-10-0400.md`
 
 ### What's done — Backend
-- NestJS backend with `core/` + `modules/` structure (8 modules)
+- NestJS backend with `core/` + `modules/` structure (7 modules)
 - Docker-compose (PostgreSQL 16 on port 5489, Redis 7 on port 6312, NestJS on port 4280)
 - All 6 TypeORM entities + migration applied
-- Auth (JWT + device token), Devices CRUD + personality management
+- Auth (JWT + device token + forgot/reset password), Devices CRUD + personality management
 - AI pipeline: ports & adapters (5 interfaces, 5 adapters incl. Redis TTS cache), streaming orchestrator with cache hints
-- WebSocket gateway: full audio lifecycle, STT streaming, interruption, session management, proactive events
+- WebSocket gateway: full audio lifecycle, STT streaming, interruption, session management, proactive events, per-device rate limiting (100 chunks/sec)
 - Memory system: extraction via Gemini, confidence decay (daily cron), boost on access, CRUD
 - Scheduler: per-device timers, response pool (LRU + batch generation), reminders, pomodoro state machine
 - Proactive features: morning briefing, end-of-day wind-down, idle nudge, focus mode
-- Rate limiting: Redis-backed (auth 5/min, API 60/min)
+- Rate limiting: Redis-backed (auth 5/min, API 60/min, WS audio 100/sec)
 - Redis TTS cache with SHA-256 keying
-- 92 unit tests across 10 test files
+- Conversation search: `?q=` full-text search via ILIKE join on messages
+- 215 unit tests across 13 test files + 45 E2E tests (all controllers, services, gateway tested)
 - WebSocket test script (`npm run ws:sim`) to simulate ESP32
 - ESP32 simulator (`npm run esp:sim`) — creates device, connects via WebSocket, stays online
 - `POST /devices/claim` — link existing device by token (for Wi-Fi manual flow)
 - `GET /devices/:id/stats` — conversation/memory/pool counts
 
-### What's done — Flutter App (Phase A+B+C)
-- 22 pages, zero analysis issues, FVM 3.41.6
+### What's done — Flutter App (Phase A+B+C+D)
+- 24 pages, 60 BLoC tests, zero analysis issues, FVM 3.41.6
 - 3-tab bottom nav (Home, Activity, Settings) via StatefulShellRoute
 - Device dashboard (0/1/multi-device states), quick actions, recent conversations
 - Activity tab: segmented conversations + memories with multi-device picker
 - Settings tab: account card, theme, notifications toggle, sign out
 - All core screens wired to backend: auth, devices, conversations, memories, reminders, pomodoro, focus mode, stats, response pool
-- **5 BLoCs**: AuthBloc, DevicesBloc, ConversationsBloc, MemoriesBloc, SchedulerBloc (all registered in GetIt DI)
+- **5 BLoCs**: AuthBloc, DevicesBloc, ConversationsBloc, MemoriesBloc, SchedulerBloc (all registered in GetIt DI, all tested)
 - **Add Device flow**: Wi-Fi (sends deviceToken to ESP32) + Bluetooth (5-step BLE provisioning with token write)
 - **BLE provisioning**: scan → connect → Wi-Fi creds → register + write token via BLE → name → done
 - **BLE presence detection**: `flutter_ble_peripheral` advertising 0xFFE4, settings UI with RSSI threshold/grace period, auto-restore on app startup
 - **BLE service layer**: `core/ble/` with GATT constants + provisioning service + presence service
 - **Network status banner**: `connectivity_plus` monitors connectivity, red banner slides in when offline
 - **Local notifications**: `flutter_local_notifications` with 3 channels (reminders, pomodoro, device_alerts)
-- 9 planned UI screens for future features (display, voice, OTA, diagnostics, integrations, motion, mobility)
+- **Forgot password**: two-step flow (email → 6-digit code + new password), wired to backend
+- **Diagnostics page**: real API health checks, device stats from backend
+- **Integrations page**: Weather toggle persisted to device settings
+- **Voice & Audio page**: all settings persisted to device settings via PATCH API
+- 6 planned UI screens for future features (display, OTA, motion, mobility — hardware-dependent)
 - UI/UX proposal: `docs/app-ui-ux-proposal.md`
 - Platform BLE permissions configured (iOS Info.plist + Android AndroidManifest.xml + UIBackgroundModes for BLE)
 
 ### What's done — Firmware
-- ESP32 firmware scaffolded: Wi-Fi, WebSocket client, I2S audio, Opus codec, MicroSD, main loop
-- Serial-based touch simulation for testing without hardware
+- **18 source modules** (18 .cpp, 19 .h, 4,049 lines): Wi-Fi, WebSocket, I2S audio, Opus codec, MicroSD, NVS, TTS cache, presence detector, recording buffer, resilience audio, face animation, display manager, touch driver, VAD, OTA updates, debug logging, power management
+- **NVS wrapper**: persistent Wi-Fi creds, device token, volume/brightness/presence settings — replaces hardcoded config.h values. Wi-Fi and WebSocket fall back to compile-time constants when NVS is empty.
+- **BLE presence state machine**: 3-state (PRESENT/LEAVING/AWAY) with RSSI rolling average, configurable grace period, hysteresis. Sends `presence:arrived`/`presence:departed` events to backend. Auto sleep/wake display on state changes.
+- **TTS cache manager**: SHA256-keyed Opus audio cache on SD, manifest.json persistence, LRU eviction (100MB cap). Audio accumulation during playback, cache-on-response:end with cacheKey parsing.
+- **Recording buffer**: WebSocket disconnect resilience — audio capture loop auto-switches to SD buffering, resends on reconnect via `audio:start{buffered:true}` + binary frames.
+- **Resilience audio**: loads fallback Opus clips from `/audio/resilience/` into PSRAM on startup (offline, error, stt_fail, boot, thinking, sleep, wake).
+- **Face animation**: 10 expressions (idle, listening, thinking, speaking, confused, sleeping, offline, encouraging, calm, focused), blink timer (3-8s random), mouth amplitude sync, breathing cycle, thinking dots, smooth transitions.
+- **Display manager**: 6 modes (face, clock, pomodoro, reminder, countdown, status), auto-return timer, status bar, transcript overlay. TFT rendering stubbed in `display_hw` namespace — swap for real ST7789/ILI9341 when hardware arrives.
+- **Touch driver**: event abstraction (tap, hold_start, hold_end, long_press, wake), debounce, hold duration tracking. Serial simulation for Phase 1. Touch events → BotState transitions + display mode changes.
+- **VAD (Voice Activity Detection)**: RMS energy + zero-crossing rate analysis, adaptive noise floor, configurable silence threshold (default 1.5s). Wired into audio capture loop — auto-stops recording on end-of-speech.
+- **OTA updates**: HTTP download to SD, SHA-256 verification, staged flash (actual esp_ota_begin is a hardware TODO). Handles `ota:start` WebSocket event.
+- **Debug logging**: rolling log to `/logs/debug.log`, module tags, severity levels (D/I/W/E), 1MB rotation. LOG_I/LOG_W/LOG_E macros.
+- **Power management**: ACTIVE → DIM → SLEEP state machine with configurable idle timeouts. Records interactions, auto-dims/sleeps, wakes on touch/presence.
+- FreeRTOS 3-task architecture: audio capture (Core 0), WebSocket polling (Core 1), display rendering at 30fps (Core 1)
+- BotState changes auto-sync face expression; proactive events auto-switch display modes; audio amplitude feeds mouth animation
 
-### What's next
-1. Test BLE provisioning + presence detection with real ESP32 hardware
-2. ESP32 firmware flash + test when hardware arrives
-3. ESP32 BLE presence scanning logic (3-state machine: PRESENT → LEAVING → AWAY)
-4. Phase 2: Display + face animations (firmware, hardware-dependent)
-5. Phase 5: Polish (VAD, OTA, power management)
-6. FCM push notifications (backend + app integration)
+### What's next (all hardware-dependent)
+1. Test firmware on real ESP32 hardware when it arrives
+2. Implement TFT rendering in `display_hw` namespace (ST7789/ILI9341 SPI driver)
+3. Implement capacitive touch IC reading in touch::feedRaw()
+4. BLE GATT server for provisioning (write Wi-Fi creds + device token to NVS via BLE)
+5. Wire BLE scanner to presence_detector::feedRssi()
+6. Wire esp_ota_begin/write/end in ota_update::apply()
+7. FCM push notifications (backend + app integration)
 
 ## Backend structure
 

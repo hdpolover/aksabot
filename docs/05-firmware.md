@@ -324,6 +324,35 @@ ESP32-S3 has dual cores -- audio tasks run on core 0, everything else on core 1 
 
 ---
 
+## Implementation status
+
+| Module | File | Status |
+|--------|------|--------|
+| Audio I/O (I2S) | `audio_io.cpp/.h` | Complete — mic input + speaker output |
+| Opus codec | `opus_codec.cpp/.h` | Complete — encode/decode with VOIP mode |
+| WebSocket client | `ws_client.cpp/.h` | Complete — auto-reconnect, NVS token/URL |
+| Wi-Fi manager | `wifi_manager.cpp/.h` | Complete — NVS credentials with compile-time fallback |
+| SD storage | `sd_storage.cpp/.h` | Complete — mount, directory creation, free space |
+| **NVS store** | `nvs_store.cpp/.h` | **Complete** — Wi-Fi, token, volume, brightness, presence settings |
+| **Presence detector** | `presence_detector.cpp/.h` | **Complete** — 3-state machine, RSSI rolling avg, grace period, callbacks |
+| **TTS cache** | `tts_cache.cpp/.h` | **Complete** — SHA256 lookup, manifest, LRU eviction, 100MB cap |
+| **Recording buffer** | `recording_buffer.cpp/.h` | **Complete** — SD buffering on WS drop, frame-level resend |
+| **Resilience audio** | `resilience_audio.cpp/.h` | **Complete** — PSRAM-loaded fallback clips |
+| **Face animation** | `face.cpp/.h` | **Scaffolded** — 10 expressions, blink timer, mouth amplitude sync, transitions |
+| **Display manager** | `display.cpp/.h` | **Scaffolded** — 6 modes (face/clock/pomodoro/reminder/countdown/status), auto-return, status bar, transcript overlay. TFT rendering is stubbed in `display_hw` namespace. |
+| **Touch driver** | `touch.cpp/.h` | **Scaffolded** — event abstraction (tap/hold/release/long_press/wake), debounce, serial simulation. Hardware touch IC reading is a TODO. |
+| State machine | `state.h` | Complete — BotState + PresenceState enums |
+| Config | `config.h` | Complete — pins, Opus, timings |
+| Main loop | `main.cpp` | Complete — FreeRTOS 3-task (audio/ws/display), all modules wired, BotState→face sync, proactive event→display mode, touch→interaction |
+| **VAD** | `vad.cpp/.h` | **Complete** — RMS energy + ZCR, adaptive noise floor, auto-stop on 1.5s silence |
+| **OTA updates** | `ota_update.cpp/.h` | **Complete** — HTTP download, SHA-256 verify, staged flash (esp_ota_begin is hardware TODO) |
+| **Debug logging** | `debug_log.cpp/.h` | **Complete** — rolling file, module tags, severity levels, 1MB rotation |
+| **Power management** | `power_manager.cpp/.h` | **Complete** — ACTIVE→DIM→SLEEP state machine, idle timeouts, interaction tracking |
+| BLE GATT server | — | Not started (hardware-dependent) |
+| BLE scanner | — | Not started (presence_detector ready to receive feedRssi calls) |
+
+---
+
 ## Phase 1 deliverables (weeks 1-3)
 
 1. PlatformIO project setup with ESP-IDF
@@ -344,13 +373,13 @@ ESP32-S3 has dual cores -- audio tasks run on core 0, everything else on core 1 
 5. Transcript display mode
 6. Sleep/wake on touch
 7. Offline face expression
-8. Resilience audio files loaded and playable from SD card (offline, error, boot)
-9. Recording buffer to SD card on WebSocket disconnect
+8. ~~Resilience audio files loaded and playable from SD card~~ — **DONE** (resilience_audio module)
+9. ~~Recording buffer to SD card on WebSocket disconnect~~ — **DONE** (recording_buffer module)
 
 ## Phase 5 deliverables (weeks 12-14)
 
-1. Local TTS cache: save/lookup/play cached audio from SD card
-2. Cache manifest management (LRU eviction, size limits)
+1. ~~Local TTS cache: save/lookup/play cached audio from SD card~~ — **DONE** (tts_cache module)
+2. ~~Cache manifest management (LRU eviction, size limits)~~ — **DONE** (tts_cache module)
 3. OTA firmware staging via SD card
 4. Debug logging to SD card (dev builds)
 

@@ -38,14 +38,14 @@ A physical AI desk companion powered by ESP32-S3 with voice interaction, a touch
 | Phase | Duration | Key milestone | Status | Details |
 |-------|----------|---------------|--------|---------|
 | 1. Audio pipeline + auth | Weeks 1-3 | End-to-end voice conversation with auth | **COMPLETE** | [04-audio-pipeline.md](04-audio-pipeline.md), [02-auth.md](02-auth.md) |
-| 2. Display + interaction | Weeks 4-5 | Animated face with touch-to-talk and transcript | Blocked (hardware) | [05-firmware.md](05-firmware.md) |
+| 2. Display + interaction | Weeks 4-5 | Animated face with touch-to-talk and transcript | **SCAFFOLDED** (logic done, TFT rendering stubbed, blocked on hardware) | [05-firmware.md](05-firmware.md) |
 | 3. Memory + personality | Weeks 6-8 | Bot remembers across sessions | **COMPLETE** | [07-memory-service.md](07-memory-service.md) |
-| 4. Flutter app | Weeks 9-11 | Mobile setup, provisioning, and management | Not started | [09-flutter-app.md](09-flutter-app.md) |
-| 5. Polish + reliability | Weeks 12-14 | Finished desk product | Not started | [10-risks-and-scope.md](10-risks-and-scope.md) |
+| 4. Flutter app | Weeks 9-11 | Mobile setup, provisioning, and management | **COMPLETE** (Phase A+B+C+D: 23 pages, 5 BLoCs, BLE, network, notifications) | [09-flutter-app.md](09-flutter-app.md) |
+| 5. Polish + reliability | Weeks 12-14 | Finished desk product | In progress (firmware resilience modules done, VAD/OTA pending) | [10-risks-and-scope.md](10-risks-and-scope.md) |
 
 Total estimated timeline: **14 weeks** for a fully functional prototype. Phases can overlap -- backend memory work (Phase 3) can start while display work (Phase 2) is in progress.
 
-**Current status (April 2026):** Backend fully implemented including Phases 1 and 3. Audio pipeline verified end-to-end (STT → LLM → TTS → Opus). ESP32 firmware scaffolded but blocked on hardware. Proactive system (scheduler, reminders, pomodoro, response pool) complete. 92 unit tests passing.
+**Current status (April 2026):** Backend fully implemented (7 modules, 215 unit tests + 45 E2E tests, WS rate limiting, conversation search, forgot password). Flutter app complete (24 pages, 5 BLoCs, 60 tests, BLE, network banners, notifications, forgot password). ESP32 firmware at 18 modules (4,049 lines) — all software-only features implemented including VAD, OTA verification, debug logging, power management. Only hardware-dependent items remain: TFT rendering, touch IC, BLE GATT server, BLE scanner.
 
 ---
 
