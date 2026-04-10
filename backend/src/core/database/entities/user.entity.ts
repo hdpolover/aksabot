@@ -22,6 +22,12 @@ export class User {
   @Column({ length: 100 })
   name: string;
 
+  @Column({ name: 'reset_code', nullable: true, type: 'varchar', length: 6 })
+  resetCode: string | null;
+
+  @Column({ name: 'reset_code_expires_at', nullable: true, type: 'timestamptz' })
+  resetCodeExpiresAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

@@ -19,8 +19,33 @@ export class ConversationsService {
     userId: string,
     page = 1,
     limit = 20,
+    q?: string,
   ) {
     await this.assertDeviceOwnership(deviceId, userId);
+
+    if (q) {
+      // When a search term is provided, join messages and filter by content
+      // using ILIKE for case-insensitive partial matching.
+      const qb = this.conversationsRepo
+        .createQueryBuilder('conversation')
+        .innerJoin(
+          'conversation.messages',
+          'message',
+          'message.content ILIKE :pattern',
+          { pattern: `%${q}%` },
+        )
+        .where('conversation.deviceId = :deviceId', { deviceId })
+        .orderBy('conversation.startedAt', 'DESC')
+        .skip((page - 1) * limit)
+        .take(limit);
+
+      const [conversations, total] = await qb.getManyAndCount();
+
+      return {
+        data: conversations,
+        meta: { page, limit, total, q },
+      };
+    }
 
     const [conversations, total] = await this.conversationsRepo.findAndCount({
       where: { deviceId },

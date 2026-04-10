@@ -6,6 +6,7 @@ import {
 } from '@nestjs/websockets';
 import type { IncomingMessage } from 'http';
 import type WebSocket from 'ws';
+import type Redis from 'ioredis';
 import { AuthService } from '../auth/auth.service';
 import { AiService } from '../ai/ai.service';
 import { MemoriesService } from '../memories/memories.service';
@@ -14,6 +15,7 @@ import { ProactiveService } from '../scheduler/proactive.service';
 import { SessionManager } from './session.manager';
 import { ConversationPersistence } from './conversation.persistence';
 import type { SttResult } from '../ai/interfaces';
+import { REDIS_CLIENT } from '../../core/cache/redis.provider';
 
 interface WsMessage {
   event: string;
@@ -29,6 +31,8 @@ export class AudioGateway
   private socketToDevice = new Map<WebSocket, string>();
   private deviceToSocket = new Map<string, WebSocket>();
 
+  private static readonly AUDIO_RATE_LIMIT = 100; // chunks per second per device
+
   constructor(
     private readonly authService: AuthService,
     private readonly aiService: AiService,
@@ -39,6 +43,7 @@ export class AudioGateway
     private readonly proactive: ProactiveService,
     private readonly sessions: SessionManager,
     private readonly persistence: ConversationPersistence,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   onModuleInit() {
@@ -212,16 +217,48 @@ export class AudioGateway
     this.sendToDevice(deviceId, 'state:update', { state: 'listening' });
   }
 
+  private async isAudioRateLimited(deviceId: string): Promise<boolean> {
+    const key = `ws:rate:${deviceId}`;
+    const count = await this.redis.incr(key);
+    if (count === 1) {
+      // Set TTL only on the first increment so it expires after 1 second
+      await this.redis.pexpire(key, 1000);
+    }
+    return count > AudioGateway.AUDIO_RATE_LIMIT;
+  }
+
   private onAudioChunk(deviceId: string, opusData: Buffer) {
     const session = this.sessions.get(deviceId);
     if (!session?.sttStream) return;
 
-    try {
-      const pcm = this.aiService.decodeAudio(opusData);
-      session.sttStream.write(pcm);
-    } catch (err: any) {
-      this.logger.error(`Decode error for ${deviceId}: ${err.message}`);
-    }
+    // Rate limit check — async but non-blocking: we fire-and-forget with a
+    // callback pattern so the hot path stays synchronous for the common case.
+    this.isAudioRateLimited(deviceId)
+      .then((limited) => {
+        if (limited) {
+          this.logger.warn(
+            `audio:chunk rate limit exceeded for device ${deviceId} — chunk dropped`,
+          );
+          return;
+        }
+        try {
+          const pcm = this.aiService.decodeAudio(opusData);
+          session.sttStream!.write(pcm);
+        } catch (err: any) {
+          this.logger.error(`Decode error for ${deviceId}: ${err.message}`);
+        }
+      })
+      .catch((err: any) => {
+        // Redis failure is non-fatal — let the chunk through rather than
+        // silently dropping audio when the cache layer is unavailable.
+        this.logger.warn(`Rate limit Redis error for ${deviceId}: ${err.message} — chunk passed`);
+        try {
+          const pcm = this.aiService.decodeAudio(opusData);
+          session.sttStream?.write(pcm);
+        } catch (decodeErr: any) {
+          this.logger.error(`Decode error for ${deviceId}: ${decodeErr.message}`);
+        }
+      });
   }
 
   private onAudioEnd(deviceId: string) {

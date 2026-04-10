@@ -24,12 +24,14 @@ export class ConversationsController {
     @CurrentUser() user: RequestUser,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('q') q?: string,
   ) {
     return this.conversationsService.findByDevice(
       deviceId,
       user.userId,
       page ? parseInt(page) : 1,
       limit ? parseInt(limit) : 20,
+      q?.trim() || undefined,
     );
   }
 

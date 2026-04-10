@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   UnauthorizedException,
@@ -8,10 +9,10 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomInt } from 'crypto';
 import { User } from '../../core/database/entities';
 import { Device } from '../../core/database/entities';
-import { RegisterDto, LoginDto } from './dto';
+import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto } from './dto';
 
 export interface TokenPair {
   accessToken: string;
@@ -104,6 +105,51 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
     return { id: user.id, email: user.email, name: user.name };
+  }
+
+  async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
+    const user = await this.usersRepo.findOne({ where: { email: dto.email } });
+
+    // Always return the same message to avoid email enumeration
+    const genericMessage = 'If the email exists, a reset code has been sent';
+
+    if (!user) {
+      return { message: genericMessage };
+    }
+
+    // Generate a cryptographically-random 6-digit code
+    const code = String(randomInt(100000, 999999));
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    user.resetCode = code;
+    user.resetCodeExpiresAt = expiresAt;
+    await this.usersRepo.save(user);
+
+    // TODO: send code via email. For now, log to console for development.
+    console.log(`[ForgotPassword] Reset code for ${dto.email}: ${code} (expires ${expiresAt.toISOString()})`);
+
+    return { message: genericMessage };
+  }
+
+  async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
+    const user = await this.usersRepo.findOne({ where: { email: dto.email } });
+
+    if (
+      !user ||
+      !user.resetCode ||
+      !user.resetCodeExpiresAt ||
+      user.resetCode !== dto.code ||
+      user.resetCodeExpiresAt < new Date()
+    ) {
+      throw new BadRequestException('Invalid or expired reset code');
+    }
+
+    user.passwordHash = await bcrypt.hash(dto.newPassword, 12);
+    user.resetCode = null;
+    user.resetCodeExpiresAt = null;
+    await this.usersRepo.save(user);
+
+    return { message: 'Password reset successfully' };
   }
 
   async validateDeviceToken(
