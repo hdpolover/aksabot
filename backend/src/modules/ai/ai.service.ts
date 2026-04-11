@@ -27,22 +27,47 @@ export type PipelineEvent =
   | { type: 'audio'; data: Buffer; cacheKey?: string; emotion?: string }
   | { type: 'done'; fullText: string; cacheKeys: CacheEntry[] };
 
-// Parse "[emotion]" tag from anywhere in the sentence (start, end, or inline)
-const EMOTION_TAGS = new Set([
-  'happy', 'sad', 'excited', 'calm', 'confused', 'focused',
-  'sarcastic', 'sympathetic', 'neutral',
-]);
+// Known emotion tags → ESP32 expression mapping
+const EMOTION_MAP: Record<string, string> = {
+  happy: 'happy',
+  sad: 'sad',
+  excited: 'excited',
+  calm: 'calm',
+  confused: 'confused',
+  focused: 'focused',
+  sarcastic: 'sarcastic',
+  sympathetic: 'sympathetic',
+  neutral: 'neutral',
+  // Common LLM variants
+  playful: 'excited',
+  annoyed: 'sarcastic',
+  curious: 'confused',
+  amused: 'happy',
+  grateful: 'happy',
+  concerned: 'sympathetic',
+  confident: 'excited',
+  thoughtful: 'focused',
+  surprised: 'excited',
+  warm: 'calm',
+  teasing: 'sarcastic',
+};
 
 function extractEmotion(sentence: string): { text: string; emotion?: string } {
-  // Match [word] anywhere — greedy, finds the first valid emotion tag
-  const allTags = [...sentence.matchAll(/\[(\w+)\]/g)];
+  // Match [word] anywhere — case-insensitive, handles spaces inside brackets
+  const allTags = [...sentence.matchAll(/\[\s*(\w+)\s*\]/gi)];
+  let emotion: string | undefined;
+
   for (const m of allTags) {
-    if (EMOTION_TAGS.has(m[1])) {
-      const cleaned = sentence.replace(m[0], '').replace(/\s{2,}/g, ' ').trim();
-      return { text: cleaned, emotion: m[1] };
+    const tag = m[1].toLowerCase();
+    if (tag in EMOTION_MAP) {
+      emotion = EMOTION_MAP[tag];
+      break;
     }
   }
-  return { text: sentence };
+
+  // Strip ALL bracket tags from the text (even unrecognized ones)
+  const cleaned = sentence.replace(/\[\s*\w+\s*\]/g, '').replace(/\s{2,}/g, ' ').trim();
+  return { text: cleaned, emotion };
 }
 
 // Per-emotion TTS voice adjustments (speed + stability modulation)
