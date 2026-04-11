@@ -31,6 +31,12 @@ credentials/
 # Test audio fixtures
 test/fixtures/audio/
 
+# Debug audio output
+backend/debug-audio/
+
+# Test firmware binaries
+firmwares/
+
 # Test simulator state
 .ws-simulator-state.json
 

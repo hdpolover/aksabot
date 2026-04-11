@@ -44,6 +44,27 @@ static uint8_t* cacheAccumBuf = nullptr;
 static size_t cacheAccumLen = 0;
 static const size_t CACHE_ACCUM_MAX = 256 * 1024;
 
+// ── Audio playback queue (WS task → audio task) ───────
+// WS binary callback decodes Opus and enqueues PCM frames here.
+// Audio capture task dequeues and writes to speaker with portMAX_DELAY.
+struct PlaybackFrame {
+    int16_t samples[OPUS_FRAME_SAMPLES];  // 320 mono samples (20ms)
+    int count;                             // actual sample count
+};
+static const size_t PLAYBACK_QUEUE_SIZE = 50;  // ~1s buffer at 20ms/frame
+static QueueHandle_t playbackQueue = nullptr;
+static volatile bool playbackActive = false;  // true while audio task should drain queue
+static volatile bool playbackDone = false;    // set by response:end to signal no more frames
+
+// ── Echo mode (hold-to-record, release-to-playback) ───
+// Records raw stereo I2S frames to PSRAM (same as audio-pipeline test firmware).
+// Plays back raw stereo directly — no mono conversion, no quality loss.
+static const int ECHO_MAX_FRAMES = 500;  // 500 * 320 stereo samples = 10s @ 16kHz
+static int16_t** echoFrames = nullptr;   // each frame = OPUS_FRAME_SAMPLES * 2 int16 (stereo)
+static int echoFrameCount = 0;
+static volatile bool echoRecording = false;
+static volatile bool echoPlaying = false;
+
 // ── BotState → face expression mapping ─────────────────
 
 static void syncFaceToState() {
@@ -107,6 +128,9 @@ static void onWsJson(const char* event, const char* data) {
         appState.botState = BotState::SPEAKING;
         syncFaceToState();
         cacheAccumLen = 0;
+        playbackDone = false;
+        playbackActive = true;
+        audio_io::flushSpeaker();  // Clear stale DMA data
         Serial.println("[Main] Response start — playing audio");
     }
     else if (strcmp(event, "response:text") == 0) {
@@ -124,9 +148,10 @@ static void onWsJson(const char* event, const char* data) {
             }
         }
         cacheAccumLen = 0;
-        appState.botState = BotState::IDLE;
-        syncFaceToState();
-        Serial.println("[Main] Response end");
+        // Signal the audio task to drain remaining frames, then go idle.
+        // Don't set IDLE here — the audio task does it after the queue is empty.
+        playbackDone = true;
+        Serial.println("[Main] Response end — draining remaining audio");
     }
     else if (strcmp(event, "error") == 0) {
         Serial.printf("[Main] Error: %s\n", data);
@@ -209,19 +234,25 @@ static void onWsJson(const char* event, const char* data) {
 }
 
 static void onWsBinary(const uint8_t* data, size_t len) {
+    // Decode Opus → PCM, then enqueue for the audio task to play.
+    // This keeps the WS poll task non-blocking so it can process JSON events.
     int samples = opus_codec::decode(data, len, playbackBuffer, OPUS_FRAME_SAMPLES);
-    if (samples > 0) {
-        audio_io::writeSpeaker(playbackBuffer, samples);
+    if (samples > 0 && playbackQueue) {
+        PlaybackFrame frame;
+        frame.count = min(samples, (int)OPUS_FRAME_SAMPLES);
+        memcpy(frame.samples, playbackBuffer, frame.count * sizeof(int16_t));
 
-        // Feed audio amplitude to face for mouth animation
-        int32_t sum = 0;
-        for (int i = 0; i < samples; i++) {
-            sum += abs(playbackBuffer[i]);
+        // Non-blocking enqueue — drop frame if queue full (better than blocking WS)
+        if (xQueueSend(playbackQueue, &frame, 0) != pdTRUE) {
+            static uint32_t lastDropLog = 0;
+            if (millis() - lastDropLog > 1000) {
+                Serial.println("[Main] Playback queue full — dropping frame");
+                lastDropLog = millis();
+            }
         }
-        float amplitude = (float)sum / (samples * 32768.0f);
-        face::feedAudioAmplitude(amplitude);
     }
 
+    // Accumulate raw Opus for TTS cache
     if (cacheAccumBuf && (cacheAccumLen + len) <= CACHE_ACCUM_MAX) {
         memcpy(cacheAccumBuf + cacheAccumLen, data, len);
         cacheAccumLen += len;
@@ -246,44 +277,61 @@ static void onTouchEvent(touch::Event event) {
     switch (event) {
         case touch::Event::HOLD_START:
             if (appState.botState == BotState::IDLE) {
+                appState.botState = BotState::LISTENING;
+                syncFaceToState();
                 if (appState.wsConnected) {
-                    // Connected — start recording
-                    appState.botState = BotState::LISTENING;
-                    syncFaceToState();
                     ws_client::sendEvent("audio:start");
-                    Serial.println("[Main] Recording started");
+                    Serial.println("[Main] Recording started (backend)");
                 } else {
-                    // Not connected — show listening face briefly, then confused
-                    face::setExpression(face::Expression::LISTENING, 100);
-                    Serial.println("[Main] Hold detected but offline");
+                    // Echo mode — allocate buffer on first use, record raw stereo
+                    if (!echoFrames) {
+                        echoFrames = (int16_t**)ps_malloc(ECHO_MAX_FRAMES * sizeof(int16_t*));
+                        if (echoFrames) {
+                            for (int i = 0; i < ECHO_MAX_FRAMES; i++) {
+                                echoFrames[i] = (int16_t*)ps_malloc(OPUS_FRAME_SAMPLES * 2 * sizeof(int16_t));
+                            }
+                        }
+                        Serial.printf("[Main] Echo buffer allocated — PSRAM free: %u\n", ESP.getFreePsram());
+                    }
+                    echoFrameCount = 0;
+                    echoRecording = true;
+                    Serial.println("[Main] Recording started (echo mode)");
                 }
             }
             break;
 
         case touch::Event::HOLD_END:
             if (appState.botState == BotState::LISTENING) {
-                // Was recording — send to backend
-                appState.botState = BotState::THINKING;
-                syncFaceToState();
-                ws_client::sendEvent("audio:end");
+                echoRecording = false;
                 audio_io::stopMic();
-                Serial.println("[Main] Recording stopped, waiting for response...");
-            } else if (!appState.wsConnected) {
-                // Wasn't actually recording — show offline feedback
-                face::setExpression(face::Expression::CONFUSED, 200);
-                scheduleFaceRevert(1500);
-                Serial.println("[Main] Not connected — can't send audio");
+                if (appState.wsConnected) {
+                    appState.botState = BotState::THINKING;
+                    syncFaceToState();
+                    ws_client::sendEvent("audio:end");
+                    Serial.println("[Main] Recording stopped, waiting for response...");
+                } else {
+                    // Echo mode — play back recorded audio
+                    appState.botState = BotState::SPEAKING;
+                    syncFaceToState();
+                    echoPlaying = true;
+                    Serial.printf("[Main] Echo playback — %d frames (%.1fs)\n",
+                                  echoFrameCount, echoFrameCount * 0.02f);
+                }
             }
             break;
 
         case touch::Event::TAP:
             if (appState.botState == BotState::SPEAKING) {
-                // Interrupt playback
+                // Interrupt playback — stop audio task and flush queue
+                playbackActive = false;
+                playbackDone = false;
+                xQueueReset(playbackQueue);
                 appState.interrupted = true;
                 appState.botState = BotState::IDLE;
                 syncFaceToState();
                 ws_client::sendEvent("audio:interrupt");
                 audio_io::stopSpeaker();
+                face::feedAudioAmplitude(0);
                 Serial.println("[Main] Interrupted");
             }
             else if (display::getMode() == display::Mode::REMINDER) {
@@ -331,11 +379,77 @@ static bool audioInitialized = false;
 static void audioCaptureLoop(void* param) {
     bool stackLogged = false;
     for (;;) {
-        // Skip if audio I/O not initialized (ES8311 codec not set up yet)
         if (!audioInitialized) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
+
+        // ── Backend audio playback — drain queue with blocking I2S writes ──
+        if (playbackActive && playbackQueue) {
+            PlaybackFrame frame;
+            // Wait up to 100ms for a frame — gives WS time to enqueue more
+            if (xQueueReceive(playbackQueue, &frame, pdMS_TO_TICKS(100)) == pdTRUE) {
+                audio_io::writeSpeaker(frame.samples, frame.count);
+
+                // Feed amplitude to face for mouth animation
+                int32_t sum = 0;
+                for (int i = 0; i < frame.count; i++) {
+                    sum += abs(frame.samples[i]);
+                }
+                face::feedAudioAmplitude((float)sum / (frame.count * 32768.0f));
+            } else if (playbackDone) {
+                // Queue empty and no more frames coming — finish playback
+                playbackActive = false;
+                playbackDone = false;
+                face::feedAudioAmplitude(0);
+                appState.botState = BotState::IDLE;
+                syncFaceToState();
+                Serial.println("[Main] Playback complete");
+            }
+            continue;
+        }
+
+        // ── Echo playback — raw stereo, same as audio-pipeline test firmware ──
+        if (echoPlaying && appState.botState == BotState::SPEAKING) {
+            Serial.printf("[Echo] Playing %d frames (%.1fs)\n",
+                          echoFrameCount, echoFrameCount * 0.02f);
+            audio_io::flushSpeaker();
+
+            for (int i = 0; i < echoFrameCount && echoPlaying; i++) {
+                // Write raw stereo directly — no mono conversion
+                audio_io::writeRawStereo(echoFrames[i], OPUS_FRAME_SAMPLES);
+
+                // Feed amplitude to face (extract left channel for RMS)
+                int32_t sum = 0;
+                for (int s = 0; s < OPUS_FRAME_SAMPLES; s++) {
+                    sum += abs(echoFrames[i][s * 2]);  // left channel only
+                }
+                face::feedAudioAmplitude((float)sum / (OPUS_FRAME_SAMPLES * 32768.0f));
+            }
+
+            // Flush silence to push out DMA buffer
+            int16_t silence[OPUS_FRAME_SAMPLES * 2] = {};
+            for (int i = 0; i < 3; i++) {
+                audio_io::writeRawStereo(silence, OPUS_FRAME_SAMPLES);
+            }
+
+            echoPlaying = false;
+            face::feedAudioAmplitude(0);
+            appState.botState = BotState::IDLE;
+            syncFaceToState();
+            Serial.println("[Echo] Playback done");
+            continue;
+        }
+
+        // ── Echo recording — raw stereo to PSRAM ──
+        if (echoRecording && appState.botState == BotState::LISTENING) {
+            if (echoFrameCount < ECHO_MAX_FRAMES && echoFrames) {
+                size_t read = audio_io::readRawStereo(echoFrames[echoFrameCount], OPUS_FRAME_SAMPLES);
+                if (read > 0) echoFrameCount++;
+            }
+            continue;  // skip the normal capture path below
+        }
+
         if (appState.botState != BotState::LISTENING) {
             if (recording_buffer::isBuffering()) {
                 recording_buffer::stopBuffering();
@@ -345,8 +459,6 @@ static void audioCaptureLoop(void* param) {
             continue;
         }
 
-        // One-time sync: wait for poll task to see LISTENING and exit.
-        // client.poll() is non-blocking so this completes in <10ms.
         if (!stackLogged) {
             vTaskDelay(pdMS_TO_TICKS(60));
         }
@@ -356,37 +468,26 @@ static void audioCaptureLoop(void* param) {
 
         // VAD: check for end-of-speech (auto-stop recording)
         vad::Result vadResult = vad::analyze(pcmBuffer, samplesRead);
-        if (vadResult == vad::Result::END_OF_SPEECH) {
+        if (vadResult == vad::Result::END_OF_SPEECH && appState.wsConnected) {
             appState.botState = BotState::THINKING;
             syncFaceToState();
             ws_client::sendEvent("audio:end");
             audio_io::stopMic();
             vad::reset();
-            Serial.println("[Main] VAD: end-of-speech detected, stopping recording");
+            Serial.println("[Main] VAD: end-of-speech, stopping");
             continue;
         }
 
-        int opusBytes = opus_codec::encode(pcmBuffer, opusBuffer, OPUS_MAX_FRAME_BYTES);
-
-        // Log stack watermark once per recording session
         if (!stackLogged) {
             UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
             Serial.printf("[Audio] Stack watermark: %u bytes free\n", hwm * 4);
             stackLogged = true;
         }
 
-        if (opusBytes > 0) {
-            if (appState.wsConnected) {
-                if (recording_buffer::isBuffering()) {
-                    recording_buffer::stopBuffering();
-                }
-                ws_client::sendBinary(opusBuffer, opusBytes);
-            } else {
-                if (!recording_buffer::isBuffering()) {
-                    recording_buffer::startBuffering();
-                }
-                recording_buffer::writeFrame(opusBuffer, opusBytes);
-            }
+        // Backend mode — encode and send via WebSocket
+        int opusBytes = opus_codec::encode(pcmBuffer, opusBuffer, OPUS_MAX_FRAME_BYTES);
+        if (opusBytes > 0 && appState.wsConnected) {
+            ws_client::sendBinary(opusBuffer, opusBytes);
         }
     }
 }
@@ -428,7 +529,10 @@ void setup() {
     pcmBuffer = (int16_t*)ps_malloc(OPUS_FRAME_SAMPLES * 2 * sizeof(int16_t));
     opusBuffer = (uint8_t*)ps_malloc(OPUS_MAX_FRAME_BYTES);
     playbackBuffer = (int16_t*)ps_malloc(OPUS_FRAME_SAMPLES * sizeof(int16_t));
+    playbackQueue = xQueueCreate(PLAYBACK_QUEUE_SIZE, sizeof(PlaybackFrame));
     cacheAccumBuf = (uint8_t*)ps_malloc(CACHE_ACCUM_MAX);
+    // Echo buffer allocated lazily on first use (saves ~640KB PSRAM at boot)
+
     if (!pcmBuffer || !opusBuffer || !playbackBuffer) {
         Serial.println("[Main] FATAL: Failed to allocate PSRAM buffers");
         while (true) { delay(1000); }
@@ -439,7 +543,24 @@ void setup() {
     bool firstBoot = nvs_store::isFirstBoot();
     bool hasNvsCreds = nvs_store::hasWifiCredentials();
     bool hasCompileCreds = (strlen(WIFI_SSID) > 0);
-    bool isConfigured = (hasNvsCreds || hasCompileCreds) && !firstBoot;
+    bool isConfigured = hasNvsCreds || hasCompileCreds;
+
+    // ── 2b. Start WiFi early (needs internal SRAM before other subsystems grab it)
+    if (isConfigured) {
+        // Debug: scan to see what networks are visible
+        WiFi.mode(WIFI_STA);
+        Serial.println("[Main] Scanning WiFi networks...");
+        int n = WiFi.scanNetworks();
+        for (int i = 0; i < n; i++) {
+            Serial.printf("[WiFi Scan] %s (%d dBm)\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+        }
+        WiFi.scanDelete();
+        if (n == 0) Serial.println("[WiFi Scan] No networks found!");
+        Serial.printf("[Main] Target SSID: '%s'\n", WIFI_SSID);
+
+        wifi_manager::init();
+        Serial.println("[Main] WiFi started early (background connect)");
+    }
 
     // ── 3. Display init + splash ───────────────────────────
     display::init();
@@ -508,7 +629,15 @@ void setup() {
 
     vad::init();
     ota_update::init();
-    power_manager::init();
+
+    // Load brightness from NVS and pass to power manager
+    {
+        power_manager::Config pwrCfg;
+        uint8_t savedBrightness = nvs_store::getBrightness();
+        pwrCfg.activeBrightness = savedBrightness;
+        display::setBrightness(savedBrightness);
+        power_manager::init(pwrCfg);
+    }
 
     if (showPOST) delay(1500);  // Let user see POST results
 
@@ -527,112 +656,117 @@ void setup() {
         boot_screen::showFirstBoot();
     }
 
-    // ── 8. WiFi provisioning gate ──────────────────────────
-    // Enters provisioning if: BIOS "Setup WiFi" selected, first boot, or no credentials.
-    if (enterSetupFromBios || (!hasNvsCreds && !hasCompileCreds)) {
-        Serial.println("[Main] No WiFi credentials — starting AP provisioning");
+    // ── 8. Provisioning gate ──────────────────────────────
+    // If no credentials: start BLE + AP for provisioning.
+    // BLE is started here (before WiFi) so the Flutter app can discover the device.
+    // If already configured: BLE is deferred to after WiFi connect (step 10b).
+    bool needsProvisioning = enterSetupFromBios || (!hasNvsCreds && !hasCompileCreds);
+    bool provisionedViaBle = false;
 
-        // Generate AP name from MAC suffix
-        char apName[24];
-        uint8_t mac[6];
-        WiFi.macAddress(mac);
-        snprintf(apName, sizeof(apName), "Aksabot-%02X%02X", mac[4], mac[5]);
+    if (needsProvisioning) {
+        // Start BLE for provisioning — Flutter app scans for 0xFFE0 service.
+        // WiFi AP is NOT started here because BLE + WiFi crash on ESP32-S3.
+        // Users provision via the Aksabot app (BLE) exclusively.
+        ble_manager::init();
+        Serial.println("[Main] BLE started — waiting for provisioning via app");
 
-        wifi_manager::startAP(apName);
-        boot_screen::showProvisioningPrompt(apName);
+        boot_screen::showProvisioningPrompt(nullptr);  // BLE only, no AP name
 
-        // Poll until credentials arrive via HTTP
-        while (!wifi_manager::isAPProvisioned()) {
+        // Poll until credentials arrive via BLE
+        while (!ble_manager::isProvisioned()) {
             boot_screen::tickProvisioningAnimation(millis());
-            wifi_manager::tickAP();
             delay(100);
         }
 
-        wifi_manager::stopAP();
-        boot_screen::showProvisioningStatus("Credentials received!");
-        Serial.println("[Main] Provisioned via WiFi hotspot");
+        provisionedViaBle = true;
+        boot_screen::showProvisioningStatus("Credentials received via Bluetooth!");
+        Serial.println("[Main] Provisioned via BLE");
         delay(600);
+
+        // Stop BLE advertising before WiFi starts (coexistence)
+        ble_manager::stopAdvertising();
     } else if (hasNvsCreds) {
         Serial.println("[Main] Using NVS WiFi credentials");
     } else {
         Serial.println("[Main] Using compile-time WiFi credentials");
     }
 
-    // ── 9. WiFi connect ────────────────────────────────────
-    char ssidBuf[64] = {};
-    const char* ssidDisplay = WIFI_SSID;
-    if (nvs_store::getWifiSsid(ssidBuf, sizeof(ssidBuf)) && strlen(ssidBuf) > 0) {
-        ssidDisplay = ssidBuf;
-    }
-    boot_screen::showConnecting(ssidDisplay);
+    // ── 10. Start face UI immediately ───────────────────────
+    // For configured devices, show the face FIRST — WiFi connects in background.
+    appState.botState = isConfigured ? BotState::IDLE : BotState::OFFLINE;
+    syncFaceToState();
+    updateStatusBar();
 
-    wifi_manager::init();
+    // Init WS client early (creates internal state) — but don't connect yet
+    ws_client::init(onWsJson, onWsBinary);
+
+    xTaskCreatePinnedToCore(displayLoop, "display", 8192, nullptr, 3, &displayTask, 1);
+    xTaskCreatePinnedToCore(audioCaptureLoop, "audio_cap", 24576, nullptr, 5, &audioCaptureTask, 0);
+    xTaskCreatePinnedToCore(wsLoop, "ws_poll", 12288, nullptr, 3, &wsTask, 1);
+    Serial.println("[Main] Face UI active — FreeRTOS tasks started");
+
+    // ── 11. WiFi connect (background for configured devices) ─
+    if (!isConfigured && !provisionedViaBle) {
+        wifi_manager::init();  // Only if not already started early
+    }
+
+    if (needsProvisioning) {
+        // First boot — show connecting screen since user is watching
+        char ssidBuf[64] = {};
+        const char* ssidDisplay = WIFI_SSID;
+        if (nvs_store::getWifiSsid(ssidBuf, sizeof(ssidBuf)) && strlen(ssidBuf) > 0) {
+            ssidDisplay = ssidBuf;
+        }
+        boot_screen::showConnecting(ssidDisplay);
+    }
+
     Serial.println("[Main] Waiting for Wi-Fi...");
     wifi_manager::waitForConnection(15000);
 
     if (wifi_manager::isConnected()) {
-        // ── 7b. BLE init (after WiFi to avoid radio coexistence issues) ──
-        ble_manager::init();
-        ble_manager::notifyWifiStatus(2);  // connected
-        Serial.println("[Main] BLE initialized after WiFi");
+        Serial.println("[Main] WiFi connected");
+        appState.wifiConnected = true;
+        appState.botState = BotState::IDLE;
+        syncFaceToState();
+        updateStatusBar();
 
-        // mDNS: advertise as aksabot.local + _aksabot._tcp service on port 80
         if (MDNS.begin("aksabot")) {
             MDNS.addService("aksabot", "tcp", 80);
-            Serial.println("[Main] mDNS: aksabot.local registered");
-        } else {
-            Serial.println("[Main] mDNS: failed to start");
         }
 
-        // HTTP status server so the app can verify it found the right device
         if (firstBoot) {
-            device_server::setSetupMode(true);  // open token-accept window for first-boot
+            device_server::setSetupMode(true);
+            nvs_store::markSetupComplete();
         }
         device_server::start(FIRMWARE_VERSION);
-
-        if (firstBoot) {
-            // First successful WiFi connection — celebrate and mark done
-            nvs_store::markSetupComplete();
-            boot_screen::showSetupComplete(ssidDisplay);
-        } else {
-            boot_screen::showConnected(WiFi.localIP().toString().c_str());
-        }
-        appState.wifiConnected = true;
     } else {
-        boot_screen::showConnectionFailed("Timeout — will retry in background");
-        ble_manager::init();  // init BLE even if WiFi failed (for re-provisioning)
+        Serial.println("[Main] WiFi failed — offline mode");
         appState.botState = BotState::OFFLINE;
+        syncFaceToState();
+        updateStatusBar();
     }
 
-    // ── 10. Initialize WS client (connects in background via ws task) ──
-    ws_client::init(onWsJson, onWsBinary);
-    if (wifi_manager::isConnected() && nvs_store::hasDeviceToken()) {
+    // ── 12. WebSocket connect ──────────────────────────────
+    bool hasToken = nvs_store::hasDeviceToken() || (strlen(DEVICE_TOKEN) > 0);
+    if (wifi_manager::isConnected() && hasToken) {
         Serial.println("[Main] Device token found — connecting to backend");
         ws_client::connect();
-    } else if (!nvs_store::hasDeviceToken()) {
+    } else if (!hasToken) {
         Serial.println("[Main] No device token — register via Aksabot app to enable AI features");
     }
 
-    // ── 11. Start FreeRTOS tasks ────────────────────────────
-    xTaskCreatePinnedToCore(audioCaptureLoop, "audio_cap", 24576, nullptr, 5, &audioCaptureTask, 0);
-    xTaskCreatePinnedToCore(wsLoop, "ws_poll", 12288, nullptr, 3, &wsTask, 1);
-    xTaskCreatePinnedToCore(displayLoop, "display", 8192, nullptr, 3, &displayTask, 1);
-
-    // ── 12. Start presence scanning ───────────────────────
+    // ── 13. BLE presence scanning ──────────────────────────
+    // NimBLE passive scanning coexists with WiFi on ESP32-S3.
+    // If BLE was already inited for provisioning, initScanOnly() is a no-op.
     if (nvs_store::getPresenceEnabled()) {
+        ble_manager::initScanOnly();
         ble_manager::startPresenceScan();
+        Serial.println("[Main] BLE presence scanning started");
+    } else {
+        Serial.println("[Main] BLE presence scanning disabled (enable in app settings)");
     }
 
-    // ── 13. Ready — transition to face UI ─────────────────
-    if (appState.wifiConnected) {
-        appState.botState = BotState::IDLE;
-    }
-    boot_screen::showReady();
-
-    // Face UI takes over from here (via displayLoop task)
-    syncFaceToState();
-    updateStatusBar();
-    Serial.println("\n[Main] Ready! Hold screen to talk.\n");
+    Serial.println("\n[Main] Boot complete.\n");
 }
 
 void loop() {
@@ -681,9 +815,25 @@ void loop() {
     // Tick power management
     power_manager::tick(now);
 
-    // Sync connectivity state
+    // Sync connectivity state — check actual WiFi, not just our flag
+    bool wifiNow = wifi_manager::isConnected();
+    if (wifiNow && !appState.wifiConnected) {
+        // WiFi just connected (maybe after boot timeout)
+        appState.wifiConnected = true;
+        updateStatusBar();
+        // Try WS connect if we have a token
+        bool hasToken = nvs_store::hasDeviceToken() || (strlen(DEVICE_TOKEN) > 0);
+        if (hasToken && !appState.wsConnected) {
+            ws_client::connect();
+            Serial.println("[Main] WiFi recovered — connecting WS");
+        }
+    } else if (!wifiNow && appState.wifiConnected) {
+        appState.wifiConnected = false;
+    }
+
     BotState prevState = appState.botState;
-    if (!appState.wifiConnected && appState.botState != BotState::OFFLINE) {
+    if (!appState.wifiConnected && appState.botState != BotState::OFFLINE &&
+        appState.botState != BotState::LISTENING && appState.botState != BotState::SPEAKING) {
         appState.botState = BotState::OFFLINE;
     } else if (appState.wifiConnected && appState.botState == BotState::OFFLINE) {
         appState.botState = BotState::IDLE;

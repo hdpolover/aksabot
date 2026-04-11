@@ -279,7 +279,7 @@ void boot_screen::showConnected(const char* ip) {
     snprintf(ipStr, sizeof(ipStr), "IP: %s", ip);
     drawSmall(ipStr, 208, DIM);
 
-    delay(1500);
+    delay(500);
 }
 
 void boot_screen::showConnectionFailed(const char* reason) {

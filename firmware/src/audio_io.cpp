@@ -110,7 +110,7 @@ size_t audio_io::writeSpeaker(const int16_t* buffer, size_t numSamples) {
     esp_err_t err = i2s_channel_write(
         tx_handle, stereoBuf,
         numSamples * 2 * sizeof(int16_t),
-        &bytesWritten, 100
+        &bytesWritten, portMAX_DELAY
     );
     free(stereoBuf);
 
@@ -124,6 +124,28 @@ void audio_io::stopMic() {
 
 void audio_io::stopSpeaker() {
     // Flush TX DMA by cycling disable/enable
+    if (tx_handle) {
+        i2s_channel_disable(tx_handle);
+        i2s_channel_enable(tx_handle);
+    }
+}
+
+size_t audio_io::readRawStereo(int16_t* buffer, size_t maxSamples) {
+    size_t bytesToRead = maxSamples * 2 * sizeof(int16_t);
+    size_t bytesRead = 0;
+    esp_err_t err = i2s_channel_read(rx_handle, buffer, bytesToRead, &bytesRead, 100);
+    if (err != ESP_OK) return 0;
+    return bytesRead / (2 * sizeof(int16_t));
+}
+
+size_t audio_io::writeRawStereo(const int16_t* buffer, size_t numSamples) {
+    size_t bytesToWrite = numSamples * 2 * sizeof(int16_t);
+    size_t bytesWritten = 0;
+    i2s_channel_write(tx_handle, buffer, bytesToWrite, &bytesWritten, portMAX_DELAY);
+    return bytesWritten / (2 * sizeof(int16_t));
+}
+
+void audio_io::flushSpeaker() {
     if (tx_handle) {
         i2s_channel_disable(tx_handle);
         i2s_channel_enable(tx_handle);

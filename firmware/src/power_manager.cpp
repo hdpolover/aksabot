@@ -29,9 +29,11 @@ void power_manager::recordInteraction() {
         currentState = PowerState::ACTIVE;
 
         if (prev == PowerState::SLEEPING) {
-            display::wake();
+            display::wake();  // wake() handles fade-in
+        } else {
+            // DIM → ACTIVE: fade back to full brightness
+            display::fadeBrightness(cfg.activeBrightness, 250);
         }
-        display::setBrightness(cfg.activeBrightness);
 
         Serial.printf("[Power] Wake → ACTIVE (was %s)\n",
             prev == PowerState::DIM ? "DIM" : "SLEEPING");
@@ -51,11 +53,11 @@ void power_manager::tick(uint32_t nowMs) {
         case PowerState::ACTIVE:
             if (idleSec >= cfg.sleepTimeoutSec) {
                 currentState = PowerState::SLEEPING;
-                display::sleep();
+                display::sleep();  // sleep() handles fade-out
                 Serial.println("[Power] ACTIVE → SLEEPING");
             } else if (idleSec >= cfg.dimTimeoutSec) {
                 currentState = PowerState::DIM;
-                display::setBrightness(cfg.dimBrightness);
+                display::fadeBrightness(cfg.dimBrightness, 500);
                 Serial.println("[Power] ACTIVE → DIM");
             }
             break;
@@ -63,7 +65,7 @@ void power_manager::tick(uint32_t nowMs) {
         case PowerState::DIM:
             if (idleSec >= cfg.sleepTimeoutSec) {
                 currentState = PowerState::SLEEPING;
-                display::sleep();
+                display::sleep();  // sleep() handles fade-out
                 Serial.println("[Power] DIM → SLEEPING");
             }
             break;
@@ -84,15 +86,14 @@ void power_manager::setState(PowerState state) {
     currentState = state;
     switch (state) {
         case PowerState::ACTIVE:
-            display::wake();
-            display::setBrightness(cfg.activeBrightness);
+            display::wake();  // wake() handles fade-in to userBrightness
             lastInteractionMs = millis();
             break;
         case PowerState::DIM:
-            display::setBrightness(cfg.dimBrightness);
+            display::fadeBrightness(cfg.dimBrightness, 500);
             break;
         case PowerState::SLEEPING:
-            display::sleep();
+            display::sleep();  // sleep() handles fade-out
             break;
     }
 }
@@ -100,9 +101,9 @@ void power_manager::setState(PowerState state) {
 void power_manager::updateConfig(const Config& config) {
     cfg = config;
     if (currentState == PowerState::ACTIVE) {
-        display::setBrightness(cfg.activeBrightness);
+        display::fadeBrightness(cfg.activeBrightness, 200);
     } else if (currentState == PowerState::DIM) {
-        display::setBrightness(cfg.dimBrightness);
+        display::fadeBrightness(cfg.dimBrightness, 200);
     }
 }
 

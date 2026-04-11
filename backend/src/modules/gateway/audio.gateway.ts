@@ -5,6 +5,8 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import type { IncomingMessage } from 'http';
+import { writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
 import type WebSocket from 'ws';
 import type Redis from 'ioredis';
 import { AuthService } from '../auth/auth.service';
@@ -30,8 +32,12 @@ export class AudioGateway
 
   private socketToDevice = new Map<WebSocket, string>();
   private deviceToSocket = new Map<string, WebSocket>();
+  private lastPong = new Map<string, number>(); // deviceId → timestamp of last pong
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   private static readonly AUDIO_RATE_LIMIT = 100; // chunks per second per device
+  private static readonly HEARTBEAT_INTERVAL_MS = 10_000; // ping every 10s
+  private static readonly HEARTBEAT_TIMEOUT_MS = 20_000;  // dead if no pong in 20s
 
   constructor(
     private readonly authService: AuthService,
@@ -52,6 +58,9 @@ export class AudioGateway
       this.sendToDevice(deviceId, event, data);
     this.scheduler.setSendToDevice(sender);
     this.proactive.setSendToDevice(sender);
+
+    // Server-side heartbeat: ping all devices every 10s, close dead ones after 20s
+    this.heartbeatTimer = setInterval(() => this.heartbeat(), AudioGateway.HEARTBEAT_INTERVAL_MS);
   }
 
   // ── Connection lifecycle ──────────────────────────────────────
@@ -91,6 +100,17 @@ export class AudioGateway
       this.handleMessage(client, device.id, raw, isBinary);
     });
 
+    // Respond to device pings (device → server keepalive)
+    client.on('ping', (data: Buffer) => {
+      client.pong(data);
+    });
+
+    // Track server → device pong responses for dead connection detection
+    client.on('pong', () => {
+      this.lastPong.set(device.id, Date.now());
+    });
+    this.lastPong.set(device.id, Date.now());
+
     this.logger.log(`Device ${device.id} (${device.name}) connected`);
 
     // Async setup (non-blocking)
@@ -98,6 +118,13 @@ export class AudioGateway
     this.scheduler.startDeviceSchedule(device.id).catch((err) =>
       this.logger.warn(`Scheduler start failed: ${err.message}`),
     );
+
+    // Greeting: wait 2s for device to settle, then send TTS greeting
+    setTimeout(() => {
+      this.sendConnectionGreeting(device.id).catch((err) =>
+        this.logger.warn(`Connection greeting failed: ${err.message}`),
+      );
+    }, 2000);
   }
 
   handleDisconnect(client: WebSocket) {
@@ -114,7 +141,95 @@ export class AudioGateway
     this.sessions.remove(deviceId);
     this.socketToDevice.delete(client);
     this.deviceToSocket.delete(deviceId);
+    this.lastPong.delete(deviceId);
     this.logger.log(`Device ${deviceId} disconnected`);
+  }
+
+  // ── Connection greeting (TTS audio on first connect of the day) ──
+
+  private async sendConnectionGreeting(deviceId: string) {
+    // Check if device is still connected (may have disconnected during the delay)
+    const socket = this.deviceToSocket.get(deviceId);
+    if (!socket || socket.readyState !== 1) return;
+
+    const session = this.sessions.get(deviceId);
+    if (!session || session.state !== 'idle') return;
+
+    const greetingText = await this.proactive.checkGreeting(deviceId);
+    if (!greetingText) return;
+
+    this.logger.log(`Sending greeting to ${deviceId}: "${greetingText.slice(0, 60)}..."`);
+
+    // Split greeting into sentences — each sentence becomes a separate TTS + binary
+    // frame, matching the conversation pipeline. Large single frames crash the ESP32.
+    const sentences = this.splitSentences(greetingText);
+
+    // Debug: save audio files so we can verify TTS output
+    const debugDir = join(process.cwd(), 'debug-audio');
+    try { mkdirSync(debugDir, { recursive: true }); } catch {}
+    const ts = Date.now();
+
+    this.sendToDevice(deviceId, 'response:start', { type: 'greeting' });
+    this.logger.log(`Sent response:start to ${deviceId}`);
+
+    let sentenceIdx = 0;
+    for (const sentence of sentences) {
+      // Re-check connection before each synthesis (TTS can take seconds)
+      const sock = this.deviceToSocket.get(deviceId);
+      if (!sock || sock.readyState !== 1) {
+        this.logger.warn(`Device ${deviceId} disconnected during greeting TTS`);
+        return;
+      }
+
+      const { opusAudio, pcmAudio } = await this.aiService.synthesizeWithCache(sentence);
+
+      // Save debug files
+      if (pcmAudio.length > 0) {
+        const wavBuf = this.pcmToWav(pcmAudio, 16000, 1, 16);
+        writeFileSync(join(debugDir, `greeting-${ts}-s${sentenceIdx}.wav`), wavBuf);
+        this.logger.debug(`Saved WAV: greeting-${ts}-s${sentenceIdx}.wav (${wavBuf.length} bytes)`);
+      }
+      writeFileSync(join(debugDir, `greeting-${ts}-s${sentenceIdx}.opus`), opusAudio);
+      this.logger.debug(`Saved Opus: greeting-${ts}-s${sentenceIdx}.opus (${opusAudio.length} bytes)`);
+
+      this.sendToDevice(deviceId, 'response:text', { text: sentence, isFinal: false });
+      const framesSent = this.sendFramedOpusToDevice(deviceId, opusAudio);
+      this.logger.log(`Sent sentence ${sentenceIdx} to ${deviceId}: "${sentence.slice(0, 40)}..." (${framesSent} opus frames, ${opusAudio.length} bytes)`);
+      sentenceIdx++;
+    }
+
+    this.sendToDevice(deviceId, 'response:end', {
+      fullText: greetingText,
+      cacheKeys: [],
+    });
+    this.logger.log(`Sent response:end to ${deviceId} — greeting complete`);
+  }
+
+  /** Split text into sentences for per-sentence TTS (matches processTranscript behavior). */
+  private splitSentences(text: string): string[] {
+    const parts = text.split(/(?<=[.!?])\s+/);
+    return parts.map((s) => s.trim()).filter((s) => s.length > 0);
+  }
+
+  /** Convert raw PCM buffer to WAV for debug playback. */
+  private pcmToWav(pcm: Buffer, sampleRate: number, channels: number, bitsPerSample: number): Buffer {
+    const byteRate = sampleRate * channels * (bitsPerSample / 8);
+    const blockAlign = channels * (bitsPerSample / 8);
+    const header = Buffer.alloc(44);
+    header.write('RIFF', 0);
+    header.writeUInt32LE(36 + pcm.length, 4);
+    header.write('WAVE', 8);
+    header.write('fmt ', 12);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20); // PCM
+    header.writeUInt16LE(channels, 22);
+    header.writeUInt32LE(sampleRate, 24);
+    header.writeUInt32LE(byteRate, 28);
+    header.writeUInt16LE(blockAlign, 32);
+    header.writeUInt16LE(bitsPerSample, 34);
+    header.write('data', 36);
+    header.writeUInt32LE(pcm.length, 40);
+    return Buffer.concat([header, pcm]);
   }
 
   // ── Message routing ───────────────────────────────────────────
@@ -173,18 +288,6 @@ export class AudioGateway
       this.sendToDevice(deviceId, 'session:start', {
         sessionId: conversation.id,
       });
-
-      // Check for greeting (first interaction of the day, time-aware).
-      // Fire-and-forget: don't block STT stream creation.
-      // The greeting is sent as a separate event — won't interfere with audio.
-      this.proactive.checkGreeting(deviceId).then((briefing) => {
-        if (briefing && session.state !== 'listening') {
-          this.sendToDevice(deviceId, 'proactive:briefing', {
-            type: 'morning',
-            text: briefing,
-          });
-        }
-      }).catch(() => {});
     }
 
     session.interrupted = false;
@@ -391,7 +494,7 @@ export class AudioGateway
           this.sendToDevice(deviceId, 'state:update', { state: 'speaking' });
           started = true;
         }
-        this.sendBinaryToDevice(deviceId, event.data);
+        this.sendFramedOpusToDevice(deviceId, event.data);
       } else if (event.type === 'done') {
         fullResponseText = event.fullText;
         cacheKeys = event.cacheKeys;
@@ -436,6 +539,27 @@ export class AudioGateway
       );
   }
 
+  // ── Server-side heartbeat ─────────────────────────────────
+
+  private heartbeat() {
+    const now = Date.now();
+
+    for (const [deviceId, socket] of this.deviceToSocket.entries()) {
+      const lastSeen = this.lastPong.get(deviceId) ?? 0;
+
+      if (now - lastSeen > AudioGateway.HEARTBEAT_TIMEOUT_MS) {
+        this.logger.warn(`Device ${deviceId} missed heartbeat — closing dead connection`);
+        socket.terminate(); // Hard close — triggers handleDisconnect
+        continue;
+      }
+
+      // Send ping (ws library handles pong automatically on client side)
+      if (socket.readyState === 1) {
+        socket.ping();
+      }
+    }
+  }
+
   // ── Transport helpers ─────────────────────────────────────────
 
   sendToDevice(deviceId: string, event: string, data: any) {
@@ -448,6 +572,36 @@ export class AudioGateway
     const socket = this.deviceToSocket.get(deviceId);
     if (!socket || socket.readyState !== 1) return;
     socket.send(data);
+  }
+
+  /**
+   * Send length-prefixed Opus frames as individual WebSocket binary messages.
+   * Backend Opus codec produces: [2-byte BE length][opus frame][2-byte BE length][opus frame]...
+   * ESP32 firmware expects one raw Opus frame per WS binary message.
+   */
+  private sendFramedOpusToDevice(deviceId: string, framedOpus: Buffer): number {
+    const socket = this.deviceToSocket.get(deviceId);
+    if (!socket || socket.readyState !== 1) return 0;
+
+    let offset = 0;
+    let frameCount = 0;
+
+    while (offset + 2 <= framedOpus.length) {
+      const frameLen = framedOpus.readUInt16BE(offset);
+      offset += 2;
+
+      if (offset + frameLen > framedOpus.length) {
+        this.logger.warn(`Framed opus truncated at offset ${offset}, expected ${frameLen} bytes`);
+        break;
+      }
+
+      const frame = framedOpus.subarray(offset, offset + frameLen);
+      socket.send(frame);
+      offset += frameLen;
+      frameCount++;
+    }
+
+    return frameCount;
   }
 
   private sendJson(client: WebSocket, event: string, data: any) {

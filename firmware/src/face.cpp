@@ -1,6 +1,8 @@
 #include "face.h"
 #include <Arduino.h>
 #include <cstdlib>
+#include <cmath>
+#include <esp_random.h>
 
 // ── Internal state ─────────────────────────────────────
 static face::FaceState state;
@@ -9,65 +11,64 @@ static face::Expression targetExpr = face::Expression::IDLE;
 // Blink timing
 static uint32_t nextBlinkMs = 0;
 static uint32_t blinkStartMs = 0;
-static const uint16_t BLINK_DURATION_MS = 150;
-static const uint16_t BLINK_MIN_INTERVAL_MS = 3000;
-static const uint16_t BLINK_MAX_INTERVAL_MS = 8000;
-static bool isBlinking = false;
+static const uint16_t BLINK_DURATION_MS = 120;
 
 // Transition
 static uint32_t transitionStartMs = 0;
 static uint16_t transitionDurationMs = 200;
-static face::Expression transitionFromExpr = face::Expression::IDLE;
 
-// Thinking animation
-static uint32_t lastThinkingDotMs = 0;
-static const uint16_t THINKING_DOT_INTERVAL_MS = 400;
+// Thinking
+static uint32_t lastDotTickMs = 0;
 
-// Breathing (sleeping)
-static const uint16_t BREATH_CYCLE_MS = 4000;  // Full in-out cycle
+// Pupil drift targets
+static float driftTX = 0, driftTY = 0;
+static uint32_t nextDriftSwitch = 0;
+
+// Idle fidget
+static uint32_t nextFidgetMs = 0;
+
+// Sad teardrop
+static uint32_t lastTearSpawnMs = 0;
 
 // Speaking
 static float currentAmplitude = 0.0f;
-static float smoothedAmplitude = 0.0f;
 
 // ── Helpers ────────────────────────────────────────────
 
-static void scheduleNextBlink(uint32_t nowMs) {
-    uint16_t interval = BLINK_MIN_INTERVAL_MS +
-        (rand() % (BLINK_MAX_INTERVAL_MS - BLINK_MIN_INTERVAL_MS));
-    nextBlinkMs = nowMs + interval;
-}
+static float flerp(float a, float b, float t) { return a + (b - a) * t; }
 
-static bool shouldBlink(face::Expression expr) {
-    // Blink in all "awake" states — including OFFLINE so the face never
-    // looks completely frozen when the device has no internet connection.
-    return expr == face::Expression::IDLE ||
-           expr == face::Expression::ENCOURAGING ||
-           expr == face::Expression::CALM ||
-           expr == face::Expression::FOCUSED ||
-           expr == face::Expression::SPEAKING ||
-           expr == face::Expression::OFFLINE;
+static bool canBlink(face::Expression e) {
+    return e == face::Expression::IDLE ||
+           e == face::Expression::SPEAKING ||
+           e == face::Expression::ENCOURAGING ||
+           e == face::Expression::CALM ||
+           e == face::Expression::FOCUSED ||
+           e == face::Expression::HAPPY ||
+           e == face::Expression::OFFLINE;
 }
 
 // ── Public API ─────────────────────────────────────────
 
 void face::init() {
+    memset(&state, 0, sizeof(state));
     state.expression = Expression::IDLE;
     state.eyesOpen = true;
-    state.mouthOpenness = 0.0f;
-    state.breathPhase = 0.0f;
-    state.thinkingDotCount = 0;
-    state.transitionActive = false;
-    state.transitionProgress = 0.0f;
-
+    state.blinkScale = 1.0f;
     targetExpr = Expression::IDLE;
-    scheduleNextBlink(millis());
+
+    uint32_t now = millis();
+    nextBlinkMs = now + 2000;
+    nextDriftSwitch = now + 1000;
+    nextFidgetMs = now + 5000;
+    lastTearSpawnMs = now;
 
     Serial.println("[Face] Initialized");
 }
 
 void face::tick(uint32_t nowMs) {
-    // ── Transition handling ─────────────────────────
+    const float dt = 0.016f;  // ~60fps
+
+    // ── Transition ─────────────────────────────────
     if (state.transitionActive) {
         uint32_t elapsed = nowMs - transitionStartMs;
         if (elapsed >= transitionDurationMs) {
@@ -79,70 +80,110 @@ void face::tick(uint32_t nowMs) {
         }
     }
 
-    face::Expression activeExpr = state.transitionActive ? targetExpr : state.expression;
+    face::Expression active = state.transitionActive ? targetExpr : state.expression;
 
-    // ── Blink handling ──────────────────────────────
-    if (shouldBlink(activeExpr)) {
-        if (isBlinking) {
-            if ((nowMs - blinkStartMs) >= BLINK_DURATION_MS) {
-                isBlinking = false;
-                state.eyesOpen = true;
-                scheduleNextBlink(nowMs);
-            }
-        } else if (nowMs >= nextBlinkMs) {
-            isBlinking = true;
-            blinkStartMs = nowMs;
-            state.eyesOpen = false;
-        } else {
+    // ── Blink ──────────────────────────────────────
+    if (state.blinking) {
+        float bt = (float)(nowMs - blinkStartMs) / (float)BLINK_DURATION_MS;
+        if (bt >= 1.0f) {
+            state.blinking = false;
+            state.blinkScale = 1.0f;
             state.eyesOpen = true;
+            nextBlinkMs = nowMs + 3000 + (esp_random() % 5000);
+        } else {
+            // Close → hold → open
+            if (bt < 0.4f)       state.blinkScale = 1.0f - bt / 0.4f;
+            else if (bt < 0.6f)  state.blinkScale = 0.0f;
+            else                 state.blinkScale = (bt - 0.6f) / 0.4f;
+            state.eyesOpen = (state.blinkScale > 0.05f);
         }
-    } else if (activeExpr == face::Expression::SLEEPING) {
+    } else if (canBlink(active) && nowMs >= nextBlinkMs) {
+        state.blinking = true;
+        blinkStartMs = nowMs;
+    } else if (active == Expression::SLEEPING) {
         state.eyesOpen = false;
+        state.blinkScale = 0.0f;
     } else {
         state.eyesOpen = true;
+        state.blinkScale = 1.0f;
     }
 
-    // ── Expression-specific animations ──────────────
-
-    switch (activeExpr) {
-        case Expression::THINKING:
-            // Cycling dots: 0 → 1 → 2 → 3 → 0...
-            if ((nowMs - lastThinkingDotMs) >= THINKING_DOT_INTERVAL_MS) {
-                state.thinkingDotCount = (state.thinkingDotCount + 1) % 4;
-                lastThinkingDotMs = nowMs;
-            }
-            state.mouthOpenness = 0.0f;
-            break;
-
-        case Expression::SPEAKING:
-            // Smooth the amplitude for natural mouth movement
-            smoothedAmplitude += (currentAmplitude - smoothedAmplitude) * 0.3f;
-            state.mouthOpenness = smoothedAmplitude;
-            break;
-
-        case Expression::SLEEPING:
-            // Breathing cycle: sine wave 0→1→0
-            {
-                uint32_t phase = nowMs % BREATH_CYCLE_MS;
-                float t = (float)phase / BREATH_CYCLE_MS;
-                // Sine approximation for smooth breathing
-                state.breathPhase = 0.5f + 0.5f * sinf(t * 2.0f * 3.14159f);
-            }
-            state.mouthOpenness = 0.0f;
-            break;
-
-        default:
-            state.mouthOpenness = 0.0f;
-            state.thinkingDotCount = 0;
-            state.breathPhase = 0.0f;
-            break;
+    // ── Pupil drift ────────────────────────────────
+    if (active == Expression::IDLE || active == Expression::CALM || active == Expression::SPEAKING) {
+        state.driftX = flerp(state.driftX, driftTX, 0.03f);
+        state.driftY = flerp(state.driftY, driftTY, 0.03f);
+        if (nowMs >= nextDriftSwitch) {
+            driftTX = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 16.0f;
+            driftTY = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 14.0f;
+            nextDriftSwitch = nowMs + 2500 + (esp_random() % 3000);
+        }
+    } else {
+        state.driftX = flerp(state.driftX, 0, 0.1f);
+        state.driftY = flerp(state.driftY, 0, 0.1f);
     }
+
+    // ── Thinking dots ──────────────────────────────
+    if (active == Expression::THINKING && (nowMs - lastDotTickMs) >= 400) {
+        state.thinkDots = (state.thinkDots + 1) % 4;
+        lastDotTickMs = nowMs;
+    }
+    state.thinkingDotCount = state.thinkDots;  // legacy alias
+
+    // ── Breathing (sleeping) ───────────────────────
+    if (active == Expression::SLEEPING) {
+        state.breathPhase += dt / 4.0f;
+        if (state.breathPhase > 1.0f) state.breathPhase -= 1.0f;
+    }
+
+    // ── Mouth amplitude smoothing ──────────────────
+    state.mouthAmp = flerp(state.mouthAmp, (active == Expression::SPEAKING) ? currentAmplitude : 0, 0.25f);
+    state.mouthOpenness = state.mouthAmp;  // legacy alias
+
+    // ── Listening pulse ────────────────────────────
+    if (active == Expression::LISTENING) state.listenPhase += dt * 4.0f;
+
+    // ── Idle fidget ────────────────────────────────
+    if (active == Expression::IDLE) {
+        state.fidgetX = flerp(state.fidgetX, 0, 0.05f);
+        state.fidgetY = flerp(state.fidgetY, 0, 0.05f);
+        if (nowMs >= nextFidgetMs) {
+            state.fidgetX = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 3.0f;
+            state.fidgetY = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 2.0f;
+            nextFidgetMs = nowMs + 10000 + (esp_random() % 10000);
+        }
+    } else {
+        state.fidgetX = flerp(state.fidgetX, 0, 0.1f);
+        state.fidgetY = flerp(state.fidgetY, 0, 0.1f);
+    }
+
+    // ── Happy bounce ───────────────────────────────
+    if (active == Expression::HAPPY)
+        state.bounceY = sinf(nowMs / 300.0f) * 4.0f;
+    else
+        state.bounceY = flerp(state.bounceY, 0, 0.1f);
+
+    // ── Sad teardrop ───────────────────────────────
+    if (active == Expression::SAD) {
+        if (state.tearActive) {
+            state.tearY += 1.5f;
+            if (state.tearY > 60) state.tearActive = false;
+        } else if (nowMs - lastTearSpawnMs > 3000 + (esp_random() % 2000)) {
+            state.tearActive = true;
+            state.tearY = 10;
+            state.tearSide = (esp_random() % 2) ? -1 : 1;
+            lastTearSpawnMs = nowMs;
+        }
+    } else {
+        state.tearActive = false;
+    }
+
+    // ── Glow pulse ─────────────────────────────────
+    state.glowPhase += dt * 1.5f;
+    if (state.glowPhase > 6.2832f) state.glowPhase -= 6.2832f;
 }
 
 void face::setExpression(Expression expr, uint16_t transitionMs) {
     if (expr == targetExpr && !state.transitionActive) return;
-
-    transitionFromExpr = state.expression;
     targetExpr = expr;
 
     if (transitionMs == 0) {
@@ -155,8 +196,11 @@ void face::setExpression(Expression expr, uint16_t transitionMs) {
         transitionDurationMs = transitionMs;
     }
 
-    Serial.printf("[Face] Expression → %u (transition %ums)\n",
-        (uint8_t)expr, transitionMs);
+    // Reset expression-specific state
+    state.thinkDots = 0;
+    lastDotTickMs = millis();
+    state.tearActive = false;
+    state.bounceY = 0;
 }
 
 face::Expression face::getExpression() {

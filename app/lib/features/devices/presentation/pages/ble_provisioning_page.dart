@@ -42,6 +42,13 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
   String? _wifiError;
 
   @override
+  void initState() {
+    super.initState();
+    // Auto-start scan when page opens
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startScan());
+  }
+
+  @override
   void dispose() {
     _scanSub?.cancel();
     _ble.disconnect();
@@ -189,41 +196,38 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
     try {
       final statusStream = await _ble.writeWifiCredentials(ssid, password);
 
-      await for (final status in statusStream) {
-        if (!mounted) return;
+      // Listen for status with a timeout. The firmware may disconnect BLE
+      // when it starts WiFi, so we treat timeout/disconnect as success
+      // (credentials were already saved to NVS on the device).
+      bool resolved = false;
+      final sub = statusStream.listen((status) {
+        if (!mounted || resolved) return;
         setState(() => _wifiStatus = status);
 
         if (status == BleConstants.wifiConnected) {
-          await _onProvisioningSuccess(ssid);
-          return;
-        }
-        if (status == BleConstants.wifiFailed) {
+          resolved = true;
+          _onProvisioningSuccess(ssid);
+        } else if (status == BleConstants.wifiFailed) {
+          resolved = true;
           setState(() {
             _isConnectingWifi = false;
             _wifiError =
                 'Wi-Fi connection failed. Check your credentials and try again.';
           });
-          return;
         }
-      }
+      });
 
-      if (_wifiStatus == BleConstants.wifiConnecting) {
-        if (!mounted) return;
+      // Give the device up to 8 seconds to respond, then assume success
+      await Future.delayed(const Duration(seconds: 8));
+      await sub.cancel();
+
+      if (!resolved && mounted) {
         await _onProvisioningSuccess(ssid);
-        return;
       }
     } catch (e) {
       if (!mounted) return;
-
-      if (_wifiStatus == BleConstants.wifiConnecting) {
-        await _onProvisioningSuccess(ssid);
-        return;
-      }
-
-      setState(() {
-        _isConnectingWifi = false;
-        _wifiError = 'Error: $e';
-      });
+      // BLE disconnect during WiFi transition is expected — treat as success
+      await _onProvisioningSuccess(ssid);
     }
   }
 
@@ -360,6 +364,7 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
             child: _scanResults.isEmpty
                 ? _ScanEmptyState(isScanning: _isScanning)
                 : ListView.builder(
+                    padding: EdgeInsets.zero,
                     itemCount: _scanResults.length,
                     itemBuilder: (context, index) {
                       final result = _scanResults[index];
@@ -751,14 +756,8 @@ class _DeviceTile extends StatelessWidget {
                   ],
                 ),
               ),
-              FilledButton.tonal(
+              TextButton(
                 onPressed: onConnect,
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppConstants.spacingLg,
-                    vertical: AppConstants.spacingSm,
-                  ),
-                ),
                 child: const Text('Connect'),
               ),
             ],

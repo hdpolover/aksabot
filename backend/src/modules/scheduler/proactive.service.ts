@@ -184,7 +184,8 @@ export class ProactiveService {
   // ── Cleanup on device disconnect ──────────────────────
 
   clearDevice(deviceId: string) {
-    this.lastGreetingDate.delete(deviceId);
+    // Keep lastGreetingDate — daily dedup must survive disconnect/reconnect cycles.
+    // Only cleared at midnight via the date check in checkGreeting().
     this.lastActivity.delete(deviceId);
   }
 }

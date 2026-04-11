@@ -1,5 +1,6 @@
 #include "ble_manager.h"
 #include "nvs_store.h"
+#include "display.h"
 #include "wifi_manager.h"
 #include "state.h"
 #include "presence_detector.h"
@@ -59,6 +60,7 @@ static NimBLECharacteristic* pUptime       = nullptr;
 static SemaphoreHandle_t provisionedSem = nullptr;
 static volatile bool clientConnected = false;
 static volatile bool provisioned = false;
+static bool bleInitialized = false;
 
 // Pending credentials (written by BLE callbacks)
 static char pendingSsid[64] = {};
@@ -174,6 +176,7 @@ class BrightnessCallback : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pChar, NimBLEConnInfo& connInfo) override {
         uint8_t brt = pChar->getValue<uint8_t>();
         nvs_store::setBrightness(brt);
+        display::fadeBrightness(brt, 200);
         Serial.printf("[BLE] Brightness set: %d\n", brt);
     }
 
@@ -203,6 +206,7 @@ void ble_manager::init() {
     NimBLEDevice::init("Aksabot");
     NimBLEDevice::setMTU(185);
     NimBLEDevice::setPower(6);  // +6dBm for good range
+    bleInitialized = true;
 
     pServer = NimBLEDevice::createServer();
     pServer->setCallbacks(new ServerCallbacks());
@@ -301,6 +305,20 @@ void ble_manager::init() {
     pAdvertising->start();
 
     Serial.println("[BLE] GATT server started, advertising 0xFFE0");
+}
+
+void ble_manager::initScanOnly() {
+    if (bleInitialized) return;  // Already inited (e.g., from provisioning)
+
+    NimBLEDevice::init("Aksabot");
+    NimBLEDevice::setPower(6);
+    bleInitialized = true;
+
+    Serial.println("[BLE] Initialized (scan-only mode)");
+}
+
+bool ble_manager::isInitialized() {
+    return bleInitialized;
 }
 
 bool ble_manager::waitForProvisioning(uint32_t timeoutMs) {

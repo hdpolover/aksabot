@@ -20,17 +20,56 @@ enum class Expression : uint8_t {
     ENCOURAGING,    // Cheerful eyes, upward expression (reminders)
     CALM,           // Soft eyes, relaxed (eye break, focus)
     FOCUSED,        // Determined eyes, slight squint (pomodoro focus)
+    HAPPY,          // Wide grin, bouncing
+    SAD,            // Frown, teardrops
+    COUNT
 };
 
 /// Animation frame data readable by the display driver.
 struct FaceState {
     Expression expression;
-    bool eyesOpen;              // false during blink or sleeping
-    float mouthOpenness;        // 0.0-1.0, driven by audio amplitude
-    float breathPhase;          // 0.0-1.0 cycle for sleeping animation
-    uint8_t thinkingDotCount;   // 0-3 for loading dots animation
-    bool transitionActive;      // true during expression change blend
-    float transitionProgress;   // 0.0-1.0 during transition
+
+    // Blink
+    bool  eyesOpen;
+    bool  blinking;
+    float blinkScale;           // 1.0 = open, 0.0 = closed
+
+    // Mouth
+    float mouthAmp;             // 0.0-1.0, smoothed audio amplitude
+
+    // Sleeping
+    float breathPhase;          // 0.0-1.0 cycle
+
+    // Thinking
+    uint8_t thinkDots;          // 0-3 cycling dots
+
+    // Pupil drift
+    float driftX, driftY;
+
+    // Idle fidget
+    float fidgetX, fidgetY;
+
+    // Listening pulse
+    float listenPhase;
+
+    // Happy bounce
+    float bounceY;
+
+    // Sad teardrop
+    bool  tearActive;
+    float tearY;
+    int8_t tearSide;            // -1 = left eye, +1 = right eye
+
+    // Glow pulse
+    float glowPhase;
+
+    // Transition
+    bool  transitionActive;
+    float transitionProgress;
+
+    // Legacy compat
+    uint8_t thinkingDotCount;   // alias for thinkDots
+    float mouthOpenness;        // alias for mouthAmp
 };
 
 /// Initialize the face system.

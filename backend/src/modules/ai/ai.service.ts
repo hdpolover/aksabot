@@ -63,10 +63,10 @@ export class AiService {
   /**
    * Synthesize TTS with Redis cache. Returns Opus-encoded audio.
    */
-  private async synthesizeWithCache(
+  async synthesizeWithCache(
     sentence: string,
     language?: string,
-  ): Promise<{ opusAudio: Buffer; cacheKey: string }> {
+  ): Promise<{ opusAudio: Buffer; pcmAudio: Buffer; cacheKey: string }> {
     const cacheKey = this.ttsCacheKey(sentence, language);
 
     // Check cache
@@ -74,7 +74,7 @@ export class AiService {
       const cached = await this.ttsCache.get(cacheKey);
       if (cached) {
         this.logger.debug(`TTS cache hit: ${cacheKey}`);
-        return { opusAudio: cached, cacheKey };
+        return { opusAudio: cached, pcmAudio: Buffer.alloc(0), cacheKey };
       }
     }
 
@@ -89,7 +89,7 @@ export class AiService {
       );
     }
 
-    return { opusAudio, cacheKey };
+    return { opusAudio, pcmAudio, cacheKey };
   }
 
   /**

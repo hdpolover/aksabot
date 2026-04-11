@@ -33,11 +33,11 @@ static const uint32_t MIN_CONNECT_INTERVAL_MS = 5000;
 static bool shouldReconnect = true;
 
 // Keepalive
-static const uint32_t PING_INTERVAL_MS = 20000;
+static const uint32_t PING_INTERVAL_MS = 10000;   // ping server every 10s
 static uint32_t lastPingMs = 0;
 static uint32_t lastPongMs = 0;
 static bool pingSent = false;
-static const uint32_t PONG_TIMEOUT_MS = 30000;
+static const uint32_t PONG_TIMEOUT_MS = 20000;    // close if no pong in 20s
 
 // Resolved from NVS or compile-time fallback
 static char wsUrlBuf[256];

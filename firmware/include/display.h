@@ -90,13 +90,20 @@ void setTranscriptText(const char* speaker, const char* text);
 /// Set display brightness (0-100). 0 = off (sleep).
 void setBrightness(uint8_t brightness);
 
+/// Smoothly fade display brightness to target over durationMs.
+/// Non-blocking — runs inside tick(). Subsequent calls override the active fade.
+void fadeBrightness(uint8_t target, uint16_t durationMs = 300);
+
+/// Returns true if a fade transition is currently in progress.
+bool isFading();
+
 /// Check if display is currently off (sleeping).
 bool isSleeping();
 
-/// Turn display off (sleep).
+/// Turn display off (sleep) with fade-out.
 void sleep();
 
-/// Turn display on (wake).
+/// Turn display on (wake) with fade-in.
 void wake();
 
 }  // namespace display

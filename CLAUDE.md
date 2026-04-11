@@ -47,6 +47,8 @@ All design docs are in `docs/`. This is the entry point:
 | `12-features.md` | All bot capabilities — reactive, proactive, reminders, pomodoro, presence, response pool |
 | `13-first-setup.md` | First-time setup — backend, firmware flash, app, pairing, troubleshooting |
 | `14-remaining-features.md` | Remaining features buildable without hardware — roadmap and checklist |
+| `15-hardware-spec.md` | ES3C28P board spec — GPIO pinout, display, touch, audio, SD, battery, dimensions |
+| `16-hardware-capabilities.md` | Hardware capabilities inventory — what's used, planned, and untapped, with priority tiers |
 
 ## Database tables
 
@@ -119,12 +121,12 @@ All design docs are in `docs/`. This is the entry point:
 ### What's done — Firmware
 - **18 source modules** (18 .cpp, 19 .h, 4,049 lines): Wi-Fi, WebSocket, I2S audio, Opus codec, MicroSD, NVS, TTS cache, presence detector, recording buffer, resilience audio, face animation, display manager, touch driver, VAD, OTA updates, debug logging, power management
 - **NVS wrapper**: persistent Wi-Fi creds, device token, volume/brightness/presence settings — replaces hardcoded config.h values. Wi-Fi and WebSocket fall back to compile-time constants when NVS is empty.
-- **BLE presence state machine**: 3-state (PRESENT/LEAVING/AWAY) with RSSI rolling average, configurable grace period, hysteresis. Sends `presence:arrived`/`presence:departed` events to backend. Auto sleep/wake display on state changes.
+- **BLE presence detection**: 3-state machine (PRESENT/LEAVING/AWAY) with RSSI rolling average, configurable grace period, hysteresis. `initScanOnly()` enables passive BLE scanning alongside WiFi. Sends `presence:arrived`/`presence:departed` events to backend. Auto sleep/wake display on state changes. Enabled from NVS on boot.
 - **TTS cache manager**: SHA256-keyed Opus audio cache on SD, manifest.json persistence, LRU eviction (100MB cap). Audio accumulation during playback, cache-on-response:end with cacheKey parsing.
 - **Recording buffer**: WebSocket disconnect resilience — audio capture loop auto-switches to SD buffering, resends on reconnect via `audio:start{buffered:true}` + binary frames.
 - **Resilience audio**: loads fallback Opus clips from `/audio/resilience/` into PSRAM on startup (offline, error, stt_fail, boot, thinking, sleep, wake).
 - **Face animation**: 10 expressions (idle, listening, thinking, speaking, confused, sleeping, offline, encouraging, calm, focused), blink timer (3-8s random), mouth amplitude sync, breathing cycle, thinking dots, smooth transitions.
-- **Display manager**: 6 modes (face, clock, pomodoro, reminder, countdown, status), auto-return timer, status bar, transcript overlay. TFT rendering stubbed in `display_hw` namespace — swap for real ST7789/ILI9341 when hardware arrives.
+- **Display manager**: 6 modes (face, clock, pomodoro, reminder, countdown, status), auto-return timer, status bar, transcript overlay. PWM backlight with smoothstep fade transitions (wake 300ms, sleep 200ms, dim 500ms). TFT rendering stubbed in `display_hw` namespace — swap for real ST7789/ILI9341 when hardware arrives.
 - **Touch driver**: event abstraction (tap, hold_start, hold_end, long_press, wake), debounce, hold duration tracking. Serial simulation for Phase 1. Touch events → BotState transitions + display mode changes.
 - **VAD (Voice Activity Detection)**: RMS energy + zero-crossing rate analysis, adaptive noise floor, configurable silence threshold (default 1.5s). Wired into audio capture loop — auto-stops recording on end-of-speech.
 - **OTA updates**: HTTP download to SD, SHA-256 verification, staged flash (actual esp_ota_begin is a hardware TODO). Handles `ota:start` WebSocket event.
@@ -137,10 +139,8 @@ All design docs are in `docs/`. This is the entry point:
 1. Test firmware on real ESP32 hardware when it arrives
 2. Implement TFT rendering in `display_hw` namespace (ST7789/ILI9341 SPI driver)
 3. Implement capacitive touch IC reading in touch::feedRaw()
-4. BLE GATT server for provisioning (write Wi-Fi creds + device token to NVS via BLE)
-5. Wire BLE scanner to presence_detector::feedRssi()
-6. Wire esp_ota_begin/write/end in ota_update::apply()
-7. FCM push notifications (backend + app integration)
+4. Wire esp_ota_begin/write/end in ota_update::apply()
+5. FCM push notifications (backend + app integration)
 
 ## Backend structure
 

@@ -14,7 +14,16 @@
 namespace ble_manager {
 
 /// Initialize NimBLE, create GATT server, start advertising.
+/// Use for provisioning flow (before WiFi connects).
 void init();
+
+/// Initialize NimBLE for scanning only (no GATT server, no advertising).
+/// Use after WiFi is up to enable presence detection without the full
+/// GATT overhead. Safe to call if init() was already called — becomes a no-op.
+void initScanOnly();
+
+/// Returns true if BLE has been initialized (via init() or initScanOnly()).
+bool isInitialized();
 
 /// Block until WiFi credentials have been written via BLE.
 /// Returns true when provisioned, false on timeout.

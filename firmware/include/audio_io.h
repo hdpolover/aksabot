@@ -22,4 +22,17 @@ void stopMic();
 /// Stop speaker output (call on interrupt or end of playback).
 void stopSpeaker();
 
+/// Read raw stereo frame from I2S (for echo recording).
+/// Buffer must hold maxSamples * 2 int16 (stereo pairs).
+/// Returns number of stereo sample pairs read.
+size_t readRawStereo(int16_t* buffer, size_t maxSamples);
+
+/// Write raw stereo frame to I2S (for echo playback).
+/// Buffer has numSamples * 2 int16 (stereo pairs).
+/// Uses portMAX_DELAY for complete write (no dropped frames).
+size_t writeRawStereo(const int16_t* buffer, size_t numSamples);
+
+/// Flush TX DMA (call before playback to clear stale data).
+void flushSpeaker();
+
 }  // namespace audio_io
