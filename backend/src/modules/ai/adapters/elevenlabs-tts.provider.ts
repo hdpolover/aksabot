@@ -2,16 +2,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { ITtsProvider, TtsOptions } from '../interfaces';
 
-const DEFAULT_VOICE_ID = '87n4zM8Wuy87vFILuKvE'; // Ziggy - Goofy Coyote (young, energetic boy)
-
-const DEFAULT_VOICE_SETTINGS = {
-  stability: 0.6,
-  similarity_boost: 0.75,
-  style: 0.3,
-  use_speaker_boost: false,
+// Voice preset name → ElevenLabs voice ID mapping
+const VOICE_PRESETS: Record<string, string> = {
+  ziggy: '87n4zM8Wuy87vFILuKvE',  // Ziggy - Goofy Coyote (young, energetic boy)
+  aria: '9BWtsMINqrJLrRacOk9x',   // Aria (warm female)
+  roger: 'CwhRBWXzGAHq8TQ4Fs17',  // Roger (calm male)
+  sarah: 'EXAVITQu4vr4xnSDxMaL',  // Sarah (friendly)
 };
 
+const DEFAULT_VOICE_ID = VOICE_PRESETS.ziggy;
 const DEFAULT_SPEED = 0.7;
+const DEFAULT_STABILITY = 0.6;
 
 @Injectable()
 export class ElevenLabsTtsProvider implements ITtsProvider {
@@ -25,7 +26,14 @@ export class ElevenLabsTtsProvider implements ITtsProvider {
   }
 
   async synthesize(text: string, options?: TtsOptions): Promise<Buffer> {
-    const voiceId = options?.voice ?? DEFAULT_VOICE_ID;
+    // Resolve voice ID from preset name or direct ID
+    let voiceId = DEFAULT_VOICE_ID;
+    if (options?.voice) {
+      voiceId = VOICE_PRESETS[options.voice] ?? options.voice;
+    }
+
+    const stability = options?.stability ?? DEFAULT_STABILITY;
+    const speed = options?.speed ?? DEFAULT_SPEED;
 
     const res = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=pcm_16000`,
@@ -38,8 +46,13 @@ export class ElevenLabsTtsProvider implements ITtsProvider {
         body: JSON.stringify({
           text,
           model_id: 'eleven_turbo_v2_5',
-          voice_settings: DEFAULT_VOICE_SETTINGS,
-          speed: DEFAULT_SPEED,
+          voice_settings: {
+            stability,
+            similarity_boost: 0.75,
+            style: 0.3,
+            use_speaker_boost: false,
+          },
+          speed,
         }),
       },
     );

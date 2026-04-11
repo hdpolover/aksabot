@@ -183,7 +183,10 @@ export class AudioGateway
         return;
       }
 
-      const { opusAudio, pcmAudio } = await this.aiService.synthesizeWithCache(sentence);
+      const device = await this.persistence.getDevice(deviceId);
+      const s = device?.settingsJson ?? {};
+      const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability };
+      const { opusAudio, pcmAudio } = await this.aiService.synthesizeWithCache(sentence, undefined, voiceOpts);
 
       // Save debug files
       if (pcmAudio.length > 0) {
@@ -245,8 +248,13 @@ export class AudioGateway
       const sock = this.deviceToSocket.get(deviceId);
       if (!sock || sock.readyState !== 1) return;
 
+      const wbDevice = await this.persistence.getDevice(deviceId);
+      const wbSettings = wbDevice?.settingsJson ?? {};
+      const wbVoice = { voice: wbSettings.voice_preset, speed: wbSettings.voice_speed, stability: wbSettings.voice_stability };
       const { opusAudio } = await this.aiService.synthesizeWithCache(
         sentence,
+        undefined,
+        wbVoice,
       );
       this.sendToDevice(deviceId, 'response:text', {
         text: sentence,
@@ -524,9 +532,17 @@ export class AudioGateway
         );
     }
 
+    // Extract voice settings from device config
+    const settings = device?.settingsJson ?? {};
+    const voiceOptions = {
+      voice: settings.voice_preset as string | undefined,
+      speed: settings.voice_speed as number | undefined,
+      stability: settings.voice_stability as number | undefined,
+    };
+
     // Run streaming pipeline
     try {
-      await this.runPipeline(deviceId, result.transcript, personality, memories, history);
+      await this.runPipeline(deviceId, result.transcript, personality, memories, history, voiceOptions);
     } catch (err: any) {
       this.logger.error(`Pipeline error for ${deviceId}: ${err.message}`, err.stack);
       this.sendToDevice(deviceId, 'error', {
@@ -551,6 +567,7 @@ export class AudioGateway
     personality: Record<string, any>,
     memories: { fact: string; category: string }[],
     history: { role: string; content: string }[],
+    voiceOptions?: { voice?: string; speed?: number; stability?: number },
   ) {
     const session = this.sessions.get(deviceId);
     if (!session) return;
@@ -560,6 +577,7 @@ export class AudioGateway
       personality,
       memories,
       history,
+      voiceOptions,
     );
 
     let started = false;

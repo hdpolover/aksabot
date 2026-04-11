@@ -265,26 +265,22 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             break;
         }
         case face::Expression::SPEAKING: {
-            // Animated open mouth — wide ellipse that opens/closes with amplitude
-            // amp is 0.0–1.0, smoothed. Boost it for more visible movement.
-            float a = amp * 2.5f;
+            // Animated open mouth — wide, clearly visible movement
+            float a = amp * 3.0f;
             if (a > 1.0f) a = 1.0f;
 
-            // Mouth width stays wide, height drives the open/close
-            int ow = 24 + (int)(a * 12);   // 24–36 wide
-            int oh = 8 + (int)(a * 24);    // 8–32 tall (big range)
+            // Wide mouth that opens dramatically with amplitude
+            int ow = 36 + (int)(a * 16);   // 36–52 wide
+            int oh = 10 + (int)(a * 30);   // 10–40 tall
 
             // Outer mouth shape
             s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
 
-            // Inner dark cavity (visible when mouth is open)
-            if (oh > 12) {
-                uint16_t inside = blendRGB565(pal.accent, pal.bg, 25);
+            // Inner dark cavity (visible when mouth opens)
+            if (oh > 14) {
+                uint16_t inside = blendRGB565(pal.accent, pal.bg, 20);
                 s.fillEllipse(CX, my + 1, ow / 2 - 4, oh / 2 - 4, inside);
             }
-
-            // Upper lip highlight
-            s.fillEllipse(CX, my - oh / 2 + 2, ow / 2 - 2, 3, pal.mouth);
 
             break;
         }
@@ -506,20 +502,26 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
         dotCol = rgb(200, 50, 40);  // red — offline
     s.fillSmoothCircle(8, 8, 4, dotCol);
 
-    // ── Label (bottom) — only shown for non-idle expressions ──
-    // Skip label for CONFUSED (has floating "?" instead)
-    if (fs.expression != face::Expression::IDLE &&
-        fs.expression != face::Expression::CONFUSED) {
-        static const char* EXPR_NAMES[] = {
-            "", "Listening", "Thinking", "Speaking",
-            "", "Sleeping", "Offline", "Hey!",
-            "Relax", "Focus", "Happy", "Sad"
-        };
-        s.setTextColor(pal.label);
-        s.setTextSize(2);
-        s.setTextDatum(lgfx::middle_center);
-        s.drawString(EXPR_NAMES[exprIdx], CX, LCD_HEIGHT - 28);
-        s.setTextDatum(lgfx::top_left);
+    // ── Status icon (bottom) — small icon instead of text label ──
+    {
+        int iconY = LCD_HEIGHT - 24;
+        uint16_t iconCol = blendRGB565(pal.accent, pal.bg, 160);
+
+        if (fs.expression == face::Expression::LISTENING) {
+            // Mic icon — three vertical bars
+            s.fillRoundRect(CX - 3, iconY - 8, 6, 12, 2, iconCol);
+            s.drawRoundRect(CX - 8, iconY + 2, 16, 6, 2, iconCol);
+            s.drawFastVLine(CX, iconY + 8, 4, iconCol);
+        }
+        else if (fs.expression == face::Expression::SPEAKING) {
+            // Speaker icon — triangle + waves
+            s.fillTriangle(CX - 6, iconY - 4, CX - 6, iconY + 4, CX + 2, iconY, iconCol);
+            s.drawArc(CX + 4, iconY, 5, 4, 315, 45, iconCol);
+            s.drawArc(CX + 4, iconY, 9, 8, 315, 45, iconCol);
+        }
+        else if (fs.expression == face::Expression::THINKING) {
+            // Three animated dots already shown above — no extra icon needed
+        }
     }
 
     if (useSprite) sprite.pushSprite(0, 0);

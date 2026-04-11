@@ -9,7 +9,7 @@ import {
 } from './interfaces/tokens';
 import type { ISttProvider, SttStream, SttOptions } from './interfaces';
 import type { ILlmProvider } from './interfaces';
-import type { ITtsProvider } from './interfaces';
+import type { ITtsProvider, TtsOptions } from './interfaces';
 import type { IAudioCodec } from './interfaces';
 import type { ITtsCache } from './interfaces/tts-cache.interface';
 import { PromptService } from './prompt.service';
@@ -53,10 +53,10 @@ export class AiService {
 
   /**
    * Generate a cache key for a TTS sentence.
-   * Hash of text + language ensures uniqueness.
+   * Hash of text + voice settings ensures uniqueness per voice config.
    */
-  ttsCacheKey(text: string, language?: string): string {
-    const input = `${text}|${language ?? 'auto'}`;
+  ttsCacheKey(text: string, options?: TtsOptions): string {
+    const input = `${text}|${options?.language ?? 'auto'}|${options?.voice ?? ''}|${options?.speed ?? ''}|${options?.stability ?? ''}`;
     return createHash('sha256').update(input).digest('hex').slice(0, 16);
   }
 
@@ -66,8 +66,10 @@ export class AiService {
   async synthesizeWithCache(
     sentence: string,
     language?: string,
+    voiceOptions?: TtsOptions,
   ): Promise<{ opusAudio: Buffer; pcmAudio: Buffer; cacheKey: string }> {
-    const cacheKey = this.ttsCacheKey(sentence, language);
+    const ttsOpts: TtsOptions = { ...voiceOptions, language };
+    const cacheKey = this.ttsCacheKey(sentence, ttsOpts);
 
     // Check cache
     if (this.ttsCache) {
@@ -79,7 +81,7 @@ export class AiService {
     }
 
     // Synthesize and encode
-    const pcmAudio = await this.tts.synthesize(sentence, { language });
+    const pcmAudio = await this.tts.synthesize(sentence, ttsOpts);
     const opusAudio = this.codec.encode(pcmAudio);
 
     // Store in cache (non-blocking)
@@ -104,6 +106,7 @@ export class AiService {
     personality: PersonalityConfig,
     memories: MemoryEntry[],
     history: { role: string; content: string }[],
+    voiceOptions?: TtsOptions,
   ): AsyncGenerator<PipelineEvent> {
     const systemPrompt = this.prompt.buildSystemPrompt(personality, memories);
     const messages = this.prompt.buildMessages(history, transcript);
@@ -121,6 +124,7 @@ export class AiService {
         const { opusAudio, cacheKey } = await this.synthesizeWithCache(
           sentence,
           personality.language,
+          voiceOptions,
         );
         cacheKeys.push({ hash: cacheKey, sentence });
 
@@ -134,6 +138,7 @@ export class AiService {
       const { opusAudio, cacheKey } = await this.synthesizeWithCache(
         remaining,
         personality.language,
+        voiceOptions,
       );
       cacheKeys.push({ hash: cacheKey, sentence: remaining });
 
