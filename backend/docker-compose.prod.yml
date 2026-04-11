@@ -1,0 +1,77 @@
+name: aksabot
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aksabot-app
+    restart: unless-stopped
+    ports:
+      - '4280:4280'
+    environment:
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-aksabot}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in Dokploy environment}
+      DB_NAME: ${DB_NAME:-aksabot}
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      # App
+      PORT: 4280
+      NODE_ENV: production
+      # Auth
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in Dokploy environment}
+      JWT_EXPIRY: ${JWT_EXPIRY:-15m}
+      JWT_REFRESH_EXPIRY: ${JWT_REFRESH_EXPIRY:-30d}
+      # AI providers
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      # Google Cloud — mount service account JSON via volume or set inline
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:4280/']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: aksabot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-aksabot}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in Dokploy environment}
+      POSTGRES_DB: ${DB_NAME:-aksabot}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-aksabot}']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: aksabot-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:

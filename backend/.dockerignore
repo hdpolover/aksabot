@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+*.md
+test
+debug-audio
+.env
+.env.local
+coverage
+.pio
