@@ -14,7 +14,7 @@ services:
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: ${DB_USER:-aksabot}
-      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in Dokploy environment}
+      DB_PASSWORD: ${DB_PASSWORD:-aksabot}
       DB_NAME: ${DB_NAME:-aksabot}
       # Redis
       REDIS_HOST: redis
@@ -23,7 +23,7 @@ services:
       PORT: 4280
       NODE_ENV: production
       # Auth
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in Dokploy environment}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       JWT_EXPIRY: ${JWT_EXPIRY:-15m}
       JWT_REFRESH_EXPIRY: ${JWT_REFRESH_EXPIRY:-30d}
       # AI providers
@@ -51,7 +51,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-aksabot}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in Dokploy environment}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-aksabot}
       POSTGRES_DB: ${DB_NAME:-aksabot}
     volumes:
       - pgdata:/var/lib/postgresql/data
