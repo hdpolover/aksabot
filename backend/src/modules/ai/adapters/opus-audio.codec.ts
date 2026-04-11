@@ -10,9 +10,8 @@ export class OpusAudioCodec implements IAudioCodec {
   private encoder: OpusScript;
 
   constructor() {
-    this.encoder = new OpusScript(16000, 1, OpusScript.Application.VOIP);
-    // Set bitrate to 32kbps for clear TTS audio (default is very low)
-    this.encoder.setBitrate(32000);
+    this.encoder = new OpusScript(16000, 1, OpusScript.Application.AUDIO);
+    this.encoder.setBitrate(64000);
   }
 
   /**
