@@ -11,7 +11,7 @@ const DEFAULT_VOICE_SETTINGS = {
   use_speaker_boost: false,
 };
 
-const DEFAULT_SPEED = 0.8;
+const DEFAULT_SPEED = 0.7;
 
 @Injectable()
 export class ElevenLabsTtsProvider implements ITtsProvider {
