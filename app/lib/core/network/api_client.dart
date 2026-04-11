@@ -150,7 +150,10 @@ class ApiClient {
   }
 
   ServerException _mapException(DioException e) {
-    final message = e.response?.data?['message'] ?? e.message ?? 'Unknown error';
+    final data = e.response?.data;
+    final message = data is Map
+        ? (data['message'] ?? e.message ?? 'Unknown error')
+        : (e.message ?? 'Unknown error');
     return ServerException(
       message is List ? message.join(', ') : message.toString(),
       statusCode: e.response?.statusCode,
