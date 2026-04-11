@@ -1,5 +1,6 @@
 #include "audio_io.h"
 #include "config.h"
+#include "nvs_store.h"
 #include "es8311.h"
 #include "driver/i2s_std.h"
 #include <Arduino.h>
@@ -72,12 +73,13 @@ void audio_io::init() {
         return;
     }
 
-    // Max volume + 24dB mic gain (sweet spot: 18dB too quiet, 36dB+ feedback)
+    // Set volume from NVS (default 80%) + 24dB mic gain
+    uint8_t vol = nvs_store::getVolume();
     es8311_handle_t es_handle = es8311_create(I2C_NUM_0, ES8311_ADDRESS_0);
-    es8311_voice_volume_set(es_handle, 70, NULL);  // 70% — prevents clipping with TTS audio
+    es8311_voice_volume_set(es_handle, vol, NULL);
     es8311_microphone_gain_set(es_handle, ES8311_MIC_GAIN_24DB);
 
-    Serial.println("[Audio] ES8311 codec ready (vol=100, mic=24dB)");
+    Serial.printf("[Audio] ES8311 codec ready (vol=%d%%, mic=24dB)\n", vol);
 }
 
 size_t audio_io::readMic(int16_t* buffer, size_t maxSamples) {
@@ -151,4 +153,11 @@ void audio_io::flushSpeaker() {
         i2s_channel_disable(tx_handle);
         i2s_channel_enable(tx_handle);
     }
+}
+
+void audio_io::setVolume(uint8_t percent) {
+    if (percent > 100) percent = 100;
+    es8311_handle_t handle = es8311_create(I2C_NUM_0, ES8311_ADDRESS_0);
+    es8311_voice_volume_set(handle, percent, NULL);
+    Serial.printf("[Audio] Volume set to %d%%\n", percent);
 }

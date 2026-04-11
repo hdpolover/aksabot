@@ -294,10 +294,11 @@ static void onWsJson(const char* event, const char* data) {
     else if (strcmp(event, "config:update") == 0) {
         JsonDocument doc;
         if (deserializeJson(doc, data) == DeserializationError::Ok) {
-            // Volume
+            // Volume — save to NVS and apply to ES8311 codec immediately
             if (doc.containsKey("volume")) {
-                uint8_t vol = doc["volume"] | 70;
+                uint8_t vol = doc["volume"] | 80;
                 nvs_store::setVolume(vol);
+                audio_io::setVolume(vol);
                 Serial.printf("[Main] Config: volume=%d\n", vol);
             }
             // Brightness
@@ -349,6 +350,12 @@ static void onWsJson(const char* event, const char* data) {
                     face::setIdleInterval(8000, 12000);   // 8-20s (default)
                 }
                 Serial.printf("[Main] Config: idle animation speed=%s\n", speed);
+            }
+            // Show transcript overlay
+            if (doc.containsKey("display_transcript")) {
+                bool show = doc["display_transcript"] | true;
+                display::setTranscriptOverlay(show);
+                Serial.printf("[Main] Config: display_transcript=%s\n", show ? "true" : "false");
             }
             // Idle timeout
             if (doc.containsKey("idle_timeout_seconds")) {

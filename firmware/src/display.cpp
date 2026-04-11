@@ -291,17 +291,14 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
         }
         case face::Expression::HAPPY: {
             if (talking) {
-                // Joyful open smile — upturned corners + vertical opening
+                // Joyful wide oval
+                int ow = 46 + (int)(a * 22);
                 int oh = 14 + (int)(a * 40);
-                thickBezier(s, CX - 26, my, CX, my + 16, CX + 26, my, 3, pal.mouth);
-                if (oh > 14) {
-                    s.fillEllipse(CX, my + 6, 14 + (int)(a * 6), oh / 2 - 2, pal.mouth);
-                    s.fillEllipse(CX, my + 7, 10 + (int)(a * 4), oh / 2 - 5,
+                s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
+                if (oh > 16) {
+                    s.fillEllipse(CX, my + 1, ow / 2 - 4, oh / 2 - 4,
                                   blendRGB565(pal.accent, pal.bg, 20));
                 }
-                // Teeth gleam
-                thickBezier(s, CX - 14, my + 2, CX, my + 9, CX + 14, my + 2, 2,
-                            blendRGB565(TFT_WHITE, pal.mouth, 160), 16);
             } else {
                 thickBezier(s, CX - 26, my, CX, my + 16, CX + 26, my, 3, pal.mouth);
                 thickBezier(s, CX - 16, my + 2, CX, my + 10, CX + 16, my + 2, 2,
@@ -311,12 +308,12 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
         }
         case face::Expression::SAD: {
             if (talking) {
-                // Sad talking — frown that opens downward
+                // Sad talking — downturned oval
+                int ow = 38 + (int)(a * 16);
                 int oh = 12 + (int)(a * 32);
-                thickBezier(s, CX - 18, my + 4, CX, my - 4, CX + 18, my + 4, 2, pal.mouth);
-                if (oh > 12) {
-                    s.fillEllipse(CX, my + 6, 10 + (int)(a * 4), oh / 2 - 2, pal.mouth);
-                    s.fillEllipse(CX, my + 7, 7 + (int)(a * 2), oh / 2 - 5,
+                s.fillEllipse(CX, my + 2, ow / 2, oh / 2, pal.mouth);
+                if (oh > 14) {
+                    s.fillEllipse(CX, my + 3, ow / 2 - 4, oh / 2 - 4,
                                   blendRGB565(pal.accent, pal.bg, 20));
                 }
             } else {
@@ -327,17 +324,14 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
         }
         case face::Expression::ENCOURAGING: {
             if (talking) {
-                // Confident wide grin that opens — biggest mouth
+                // Confident wide oval that opens
                 int ow = 48 + (int)(a * 20);
                 int oh = 14 + (int)(a * 42);
-                thickBezier(s, CX - 24, my, CX, my + 14, CX + 24, my, 3, pal.mouth);
+                s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
                 if (oh > 16) {
-                    s.fillEllipse(CX, my + 6, ow / 2 - 6, oh / 2 - 2, pal.mouth);
-                    s.fillEllipse(CX, my + 7, ow / 2 - 10, oh / 2 - 5,
+                    s.fillEllipse(CX, my + 1, ow / 2 - 4, oh / 2 - 4,
                                   blendRGB565(pal.accent, pal.bg, 20));
                 }
-                thickBezier(s, CX - 14, my + 2, CX, my + 9, CX + 14, my + 2, 2,
-                            blendRGB565(TFT_WHITE, pal.mouth, 120), 14);
             } else {
                 thickBezier(s, CX - 24, my, CX, my + 14, CX + 24, my, 3, pal.mouth);
                 thickBezier(s, CX - 14, my + 2, CX, my + 9, CX + 14, my + 2, 2,

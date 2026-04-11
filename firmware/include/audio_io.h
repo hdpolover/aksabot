@@ -35,4 +35,7 @@ size_t writeRawStereo(const int16_t* buffer, size_t numSamples);
 /// Flush TX DMA (call before playback to clear stale data).
 void flushSpeaker();
 
+/// Set speaker volume (0-100). Applied to ES8311 codec.
+void setVolume(uint8_t percent);
+
 }  // namespace audio_io

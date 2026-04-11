@@ -54,6 +54,24 @@ export class UpdateSettingsDto {
   @IsOptional()
   idle_timeout_seconds?: number;
 
+  @IsBoolean()
+  @IsOptional()
+  idle_chat_enabled?: boolean;
+
+  @IsString()
+  @IsOptional()
+  idle_chat_frequency?: string;
+
+  @IsString()
+  @IsOptional()
+  idle_animation_speed?: string;
+
+  @IsNumber()
+  @Min(100)
+  @Max(500)
+  @IsOptional()
+  audio_jitter_ms?: number;
+
   @IsNumber()
   @Min(-90)
   @Max(-60)
@@ -71,4 +89,8 @@ export class UpdateSettingsDto {
   @Max(10)
   @IsOptional()
   presence_silent_wake_minutes?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  presence_enabled?: boolean;
 }

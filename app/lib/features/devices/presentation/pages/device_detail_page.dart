@@ -305,7 +305,6 @@ class _SettingsTab extends StatefulWidget {
 }
 
 class _SettingsTabState extends State<_SettingsTab> {
-  late final TextEditingController _nameController;
   bool _dirty = false;
   double _volume = 80;
   double _brightness = 80;
@@ -315,46 +314,33 @@ class _SettingsTabState extends State<_SettingsTab> {
   @override
   void initState() {
     super.initState();
-    _nameController = TextEditingController(text: widget.device.name);
-    _nameController.addListener(_onChanged);
-    // Load settings from device JSON
     final s = widget.device.settingsJson;
     _volume = (s['volume'] as num?)?.toDouble() ?? 80;
     _brightness = (s['brightness'] as num?)?.toDouble() ?? 80;
-    _showTranscript = s['showTranscript'] as bool? ?? true;
-    _idleTimeout = (s['idleTimeoutMinutes'] ?? 30).toString();
+    _showTranscript = s['display_transcript'] as bool? ?? true;
+    final timeoutSec = (s['idle_timeout_seconds'] as num?) ?? 1800;
+    // Clamp to valid dropdown values
+    final minutes = (timeoutSec ~/ 60);
+    _idleTimeout = const ['1', '5', '10', '30'].contains(minutes.toString())
+        ? minutes.toString()
+        : '30';
   }
 
   @override
   void didUpdateWidget(covariant _SettingsTab oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.device.id != widget.device.id) {
-      _nameController.text = widget.device.name;
       _dirty = false;
     }
   }
 
-  void _onChanged() {
-    final isDirty = _nameController.text.trim() != widget.device.name;
-    if (isDirty != _dirty) setState(() => _dirty = isDirty);
-  }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    super.dispose();
-  }
-
   void _save() {
-    final name = _nameController.text.trim();
-    if (name.isEmpty) return;
     context.read<DevicesBloc>().add(
           UpdateSettings(widget.device.id, {
-            'name': name,
             'volume': _volume.round(),
             'brightness': _brightness.round(),
-            'showTranscript': _showTranscript,
-            'idleTimeoutMinutes': int.parse(_idleTimeout),
+            'display_transcript': _showTranscript,
+            'idle_timeout_seconds': int.parse(_idleTimeout) * 60,
           }),
         );
     setState(() => _dirty = false);
@@ -378,17 +364,6 @@ class _SettingsTabState extends State<_SettingsTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Device name
-                Text('Device name', style: theme.textTheme.bodyMedium),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _nameController,
-                  decoration:
-                      const InputDecoration(hintText: 'Enter device name'),
-                  textCapitalization: TextCapitalization.words,
-                ),
-                const SizedBox(height: 16),
-
                 // Volume
                 Row(
                   children: [
