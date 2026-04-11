@@ -9,7 +9,7 @@ extern LGFX tft;
 // Colors (RGB565)
 static const uint16_t BG      = TFT_BLACK;
 static const uint16_t WHITE   = TFT_WHITE;
-static const uint16_t CYAN    = TFT_CYAN;
+static const uint16_t CYAN    = TFT_WHITE;
 static const uint16_t GREEN   = 0x07E0;
 static const uint16_t RED     = TFT_RED;
 static const uint16_t YELLOW  = TFT_YELLOW;

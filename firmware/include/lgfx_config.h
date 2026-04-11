@@ -17,7 +17,7 @@ public:
             auto cfg = _bus.config();
             cfg.spi_host    = SPI2_HOST;
             cfg.spi_mode    = 0;
-            cfg.freq_write  = 40000000;  // 40MHz (conservative — bump to 80 after verified)
+            cfg.freq_write  = 40000000;  // 40MHz — 80MHz causes horizontal sliding on ES3C28P
             cfg.freq_read   = 16000000;
             cfg.spi_3wire   = false;
             cfg.use_lock    = true;

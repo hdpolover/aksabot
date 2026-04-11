@@ -28,21 +28,23 @@ import 'shell_scaffold.dart';
 
 GoRouter createRouter(AuthBloc authBloc) {
   return GoRouter(
-    initialLocation: '/home',
-    // TODO: re-enable auth guard when backend is connected
-    // refreshListenable: GoRouterRefreshStream(authBloc.stream),
-    // redirect: (context, state) {
-    //   final authState = authBloc.state;
-    //   final isAuth = authState is Authenticated;
-    //   final isAuthRoute =
-    //       state.matchedLocation == '/login' ||
-    //       state.matchedLocation == '/register' ||
-    //       state.matchedLocation == '/forgot-password';
-    //
-    //   if (!isAuth && !isAuthRoute) return '/login';
-    //   if (isAuth && isAuthRoute) return '/home';
-    //   return null;
-    // },
+    initialLocation: '/login',
+    refreshListenable: GoRouterRefreshStream(authBloc.stream),
+    redirect: (context, state) {
+      final authState = authBloc.state;
+      final isAuth = authState is Authenticated;
+      final isAuthRoute =
+          state.matchedLocation == '/login' ||
+          state.matchedLocation == '/register' ||
+          state.matchedLocation == '/forgot-password';
+
+      // Still checking auth status — don't redirect yet
+      if (authState is AuthInitial || authState is AuthLoading) return null;
+
+      if (!isAuth && !isAuthRoute) return '/login';
+      if (isAuth && isAuthRoute) return '/home';
+      return null;
+    },
     routes: [
       // Auth routes (outside shell — no nav bar)
       GoRoute(

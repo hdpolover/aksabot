@@ -70,6 +70,13 @@ void device_server::start(const char* version) {
 
         nvs_store::setDeviceToken(token);
 
+        // Also save backend URL if provided
+        const char* backendUrl = doc["backendUrl"] | (const char*)nullptr;
+        if (backendUrl && strlen(backendUrl) > 0) {
+            nvs_store::setBackendUrl(backendUrl);
+            Serial.printf("[DeviceServer] Backend URL saved: %s\n", backendUrl);
+        }
+
         server->sendHeader("Access-Control-Allow-Origin", "*");
         server->send(200, "application/json", "{\"ok\":true}");
         Serial.println("[DeviceServer] Device token saved via HTTP — will reconnect WS");

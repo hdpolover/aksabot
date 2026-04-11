@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../core/constants/api.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/local/local_device.dart';
@@ -62,7 +63,12 @@ class _CloudRegisterPageState extends State<CloudRegisterPage> {
         connectTimeout: const Duration(seconds: 5),
         receiveTimeout: const Duration(seconds: 10),
       ));
-      await dio.post('http://$ip/token', data: {'token': token});
+      // Send token + backend WS URL so the device knows where to connect
+      final wsUrl = '${ApiConstants.baseUrl.replaceFirst('http', 'ws')}/ws';
+      await dio.post('http://$ip/token', data: {
+        'token': token,
+        'backendUrl': wsUrl,
+      });
 
       await LocalDeviceStore.remove(widget.device.id);
 

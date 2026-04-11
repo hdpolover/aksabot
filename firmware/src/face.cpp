@@ -135,7 +135,16 @@ void face::tick(uint32_t nowMs) {
     }
 
     // ── Pupil drift ────────────────────────────────
-    if (active == Expression::IDLE || active == Expression::CALM || active == Expression::SPEAKING) {
+    if (active == Expression::CONFUSED) {
+        // Confused: faster, wider side-to-side look ("huh? what?")
+        state.driftX = flerp(state.driftX, driftTX, 0.08f);
+        state.driftY = flerp(state.driftY, driftTY, 0.04f);
+        if (nowMs >= nextDriftSwitch) {
+            driftTX = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 24.0f;
+            driftTY = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 8.0f;
+            nextDriftSwitch = nowMs + 800 + (esp_random() % 1200);
+        }
+    } else if (active == Expression::IDLE || active == Expression::CALM || active == Expression::SPEAKING) {
         state.driftX = flerp(state.driftX, driftTX, 0.03f);
         state.driftY = flerp(state.driftY, driftTY, 0.03f);
         if (nowMs >= nextDriftSwitch) {

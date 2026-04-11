@@ -9,6 +9,8 @@ export interface DeviceSession {
   sttStream: SttStream | null;
   interrupted: boolean;
   idleTimer: ReturnType<typeof setTimeout> | null;
+  /** Audio format for current recording session. 'opus' (default, ESP32) or 'pcm16' (web simulator). */
+  audioFormat: 'opus' | 'pcm16';
 }
 
 @Injectable()
@@ -27,6 +29,7 @@ export class SessionManager {
       sttStream: null,
       interrupted: false,
       idleTimer: null,
+      audioFormat: 'opus',
     };
     this.sessions.set(deviceId, session);
     return session;

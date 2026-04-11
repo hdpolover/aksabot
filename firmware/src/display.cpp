@@ -5,6 +5,9 @@
 #include <Arduino.h>
 #include <cmath>
 
+// Pre-allocated sprite buffer from main.cpp (allocated before WiFi eats PSRAM)
+void* preallocSpriteBuffer = nullptr;
+
 // ── Internal state ─────────────────────────────────────
 static display::Mode currentMode = display::Mode::FACE;
 static display::Mode previousMode = display::Mode::FACE;
@@ -52,7 +55,7 @@ static uint16_t COL_STATUS_BG;
 static const int CX = LCD_WIDTH / 2;
 static const int CY = LCD_HEIGHT / 2 - 20;
 static const int EYE_SPACE = 48;
-static const int MOUTH_Y   = CY + 42;
+static const int MOUTH_Y   = CY + 55;
 
 // ── Rich color system (from face-animations firmware) ─────
 
@@ -76,18 +79,19 @@ struct Palette {
 static const int EXPR_COUNT = (int)face::Expression::COUNT;
 
 static const Palette PAL[EXPR_COUNT] = {
-    /* IDLE */    { rgb(5,5,20),   rgb(0,200,220),   rgb(0,140,160),   rgb(0,255,255),   rgb(200,210,230), rgb(80,90,110),   rgb(235,235,245) },
-    /* LISTEN */  { rgb(5,15,15),  rgb(0,230,100),   rgb(0,160,70),    rgb(0,255,120),   rgb(190,230,200), rgb(0,200,90),    rgb(230,245,235) },
-    /* THINK */   { rgb(15,5,20),  rgb(240,180,40),  rgb(180,130,20),  rgb(255,200,60),  rgb(210,190,150), rgb(220,170,30),  rgb(245,240,230) },
-    /* SPEAK */   { rgb(5,8,25),   rgb(80,180,255),  rgb(50,130,200),  rgb(100,200,255), rgb(190,210,245), rgb(70,170,240),  rgb(230,238,250) },
-    /* CONFUS */  { rgb(20,10,5),  rgb(255,160,40),  rgb(200,110,20),  rgb(255,180,60),  rgb(230,195,140), rgb(240,150,30),  rgb(250,240,230) },
-    /* SLEEP */   { rgb(3,3,15),   rgb(80,80,150),   rgb(50,50,110),   rgb(60,60,120),   rgb(110,110,170), rgb(50,50,90),    rgb(200,200,220) },
-    /* OFFLN */   { rgb(15,5,5),   rgb(255,50,50),   rgb(190,30,30),   rgb(255,60,60),   rgb(170,90,90),   rgb(240,40,40),   rgb(240,220,220) },
-    /* ENCOU */   { rgb(15,15,5),  rgb(255,210,60),  rgb(200,160,30),  rgb(255,220,80),  rgb(235,215,145), rgb(245,200,50),  rgb(250,248,230) },
-    /* CALM */    { rgb(5,15,10),  rgb(80,220,120),  rgb(50,170,80),   rgb(100,240,140), rgb(170,225,190), rgb(70,210,110),  rgb(230,248,238) },
-    /* FOCUS */   { rgb(5,5,25),   rgb(50,120,255),  rgb(30,80,200),   rgb(70,140,255),  rgb(175,195,250), rgb(40,110,240),  rgb(230,235,255) },
-    /* HAPPY */   { rgb(20,5,15),  rgb(255,100,180), rgb(200,60,140),  rgb(255,120,200), rgb(250,195,215), rgb(245,90,170),  rgb(255,235,245) },
-    /* SAD */     { rgb(8,8,15),   rgb(100,120,180), rgb(70,85,140),   rgb(80,100,160),  rgb(135,145,175), rgb(90,110,170),  rgb(225,228,240) },
+    //             bg              iris              irisRing          accent            mouth             label             sclera
+    /* IDLE */    { rgb(0,0,0),    rgb(0,200,220),   rgb(0,140,160),   rgb(0,255,255),   rgb(150,155,175), rgb(180,180,190), rgb(245,245,250) },
+    /* LISTEN */  { rgb(0,0,0),    rgb(0,230,100),   rgb(0,160,70),    rgb(0,255,120),   rgb(190,230,200), rgb(0,220,100),   rgb(245,245,250) },
+    /* THINK */   { rgb(0,0,0),    rgb(240,180,40),  rgb(180,130,20),  rgb(255,200,60),  rgb(210,190,150), rgb(255,210,50),  rgb(245,245,250) },
+    /* SPEAK */   { rgb(0,0,0),    rgb(0,230,180),   rgb(0,180,130),   rgb(0,255,200),   rgb(220,240,235), rgb(0,240,180),   rgb(245,245,250) },
+    /* CONFUS */  { rgb(0,0,0),    rgb(255,160,40),  rgb(200,110,20),  rgb(255,180,60),  rgb(230,195,140), rgb(255,170,40),  rgb(245,245,250) },
+    /* SLEEP */   { rgb(0,0,0),    rgb(80,80,150),   rgb(50,50,110),   rgb(60,60,120),   rgb(110,110,170), rgb(90,90,140),   rgb(200,200,220) },
+    /* OFFLN */   { rgb(0,0,0),    rgb(255,50,50),   rgb(190,30,30),   rgb(255,60,60),   rgb(170,90,90),   rgb(255,60,60),   rgb(245,245,250) },
+    /* ENCOU */   { rgb(0,0,0),    rgb(255,210,60),  rgb(200,160,30),  rgb(255,220,80),  rgb(235,215,145), rgb(255,220,60),  rgb(245,245,250) },
+    /* CALM */    { rgb(0,0,0),    rgb(80,220,120),  rgb(50,170,80),   rgb(100,240,140), rgb(170,225,190), rgb(80,230,120),  rgb(245,245,250) },
+    /* FOCUS */   { rgb(0,0,0),    rgb(120,200,255), rgb(80,160,220),  rgb(140,220,255), rgb(195,220,250), rgb(130,210,255), rgb(245,245,250) },
+    /* HAPPY */   { rgb(0,0,0),    rgb(255,100,180), rgb(200,60,140),  rgb(255,120,200), rgb(250,195,215), rgb(255,110,190), rgb(245,245,250) },
+    /* SAD */     { rgb(0,0,0),    rgb(100,120,180), rgb(70,85,140),   rgb(80,100,160),  rgb(135,145,175), rgb(110,130,190), rgb(245,245,250) },
 };
 
 struct EyeShape {
@@ -96,18 +100,18 @@ struct EyeShape {
 };
 
 static const EyeShape EYES[EXPR_COUNT] = {
-    /* IDLE */    { 28, 10,   0,   0, true,  false },
-    /* LISTEN */  { 34, 11,   0,   0, false, false },
-    /* THINK */   { 28, 10, -12, -10, false, false },
-    /* SPEAK */   { 28, 10,   0,   4, true,  false },
-    /* CONFUS */  { 28, 11,  12,  -5, false, false },
+    /* IDLE */    { 42, 12,   0,   2, true,  false },
+    /* LISTEN */  { 46, 13,   0,   0, false, false },
+    /* THINK */   { 38, 12, -12, -10, false, false },
+    /* SPEAK */   { 42, 12,   0,   4, true,  false },
+    /* CONFUS */  { 40, 13,  12,  -5, false, false },
     /* SLEEP */   {  0,  0,   0,   0, false, false },
-    /* OFFLN */   { 24, 10,   0,   5, false, false },
-    /* ENCOU */   { 30,  9,   0,  -8, true,  true  },
-    /* CALM */    { 28, 12,   0,   0, true,  false },
-    /* FOCUS */   { 28,  9,   0,   5, true,  false },
-    /* HAPPY */   { 30,  9,   0,  -6, true,  true  },
-    /* SAD */     { 26, 11,   0,  10, false, false },
+    /* OFFLN */   { 36, 12,   0,   5, false, false },
+    /* ENCOU */   { 44, 11,   0,  -8, true,  true  },
+    /* CALM */    { 40, 14,   0,   0, true,  false },
+    /* FOCUS */   { 38, 11,   0,   5, true,  false },
+    /* HAPPY */   { 44, 11,   0,  -6, true,  true  },
+    /* SAD */     { 38, 13,   0,  10, false, false },
 };
 
 // ── Display hardware implementation ───────────────────
@@ -117,20 +121,31 @@ namespace display_hw {
 void init() {
     tft.init();
     tft.setRotation(0);        // Portrait: 240 wide x 320 tall
-    tft.invertDisplay(false);  // ILI9341V normal mode
+    tft.invertDisplay(true);   // ILI9341V — panel requires inversion for correct colors
     tft.fillScreen(COL_BG);
     tft.setBrightness(255);
 
     COL_DIM = tft.color565(80, 80, 80);
     COL_STATUS_BG = tft.color565(20, 20, 30);
 
-    // Create full-screen sprite in PSRAM for flicker-free rendering
+    // Use pre-allocated PSRAM buffer for sprite (allocated before WiFi in main.cpp)
     sprite.setColorDepth(16);
-    if (sprite.createSprite(LCD_WIDTH, LCD_HEIGHT) == nullptr) {
-        Serial.println("[Display HW] WARNING: Sprite alloc failed, falling back to direct draw");
-    } else {
-        Serial.printf("[Display HW] Sprite buffer: %dx%d (%.1fKB in PSRAM)\n",
+    if (preallocSpriteBuffer) {
+        // Clear the raw buffer first (PSRAM may contain garbage/0xFF = white)
+        memset(preallocSpriteBuffer, 0, LCD_WIDTH * LCD_HEIGHT * 2);
+        sprite.setBuffer(preallocSpriteBuffer, LCD_WIDTH, LCD_HEIGHT, 16);
+        sprite.fillSprite(TFT_BLACK);  // ensure sprite starts black
+        Serial.printf("[Display HW] Sprite buffer: %dx%d (%.1fKB, pre-allocated PSRAM)\n",
             LCD_WIDTH, LCD_HEIGHT, (LCD_WIDTH * LCD_HEIGHT * 2) / 1024.0f);
+    } else {
+        // Fallback: try allocating now (may fail if WiFi took PSRAM)
+        sprite.setPsram(true);
+        if (sprite.createSprite(LCD_WIDTH, LCD_HEIGHT) == nullptr) {
+            Serial.println("[Display HW] WARNING: Sprite alloc failed — DIRECT DRAW WILL FLICKER");
+        } else {
+            Serial.printf("[Display HW] Sprite buffer: %dx%d (%.1fKB, late alloc)\n",
+                LCD_WIDTH, LCD_HEIGHT, (LCD_WIDTH * LCD_HEIGHT * 2) / 1024.0f);
+        }
     }
 
     tft.fillScreen(COL_BG);
@@ -231,9 +246,9 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
 
     switch (expr) {
         case face::Expression::IDLE: {
-            // Gentle smile with subtle breathing movement
+            // Gentle smile — wider to match big eyes, subtle breathing
             float breathOff = sinf(breathPhase * 2 * 3.14159f) * 1.5f;
-            thickBezier(s, CX - 20, my, CX, my + 8 + breathOff, CX + 20, my, 2, pal.mouth);
+            thickBezier(s, CX - 30, my, CX, my + 10 + breathOff, CX + 30, my, 3, pal.mouth);
             break;
         }
         case face::Expression::LISTENING: {
@@ -250,28 +265,37 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             break;
         }
         case face::Expression::SPEAKING: {
-            // Animated open mouth synced to audio amplitude
-            int ow = 16 + (int)(amp * 20);
-            int oh = 6 + (int)(amp * 28);
-            s.fillSmoothCircle(CX, my, oh / 2 + 2, pal.mouth);
-            s.fillEllipse(CX, my, ow / 2, oh / 2 + 2, pal.mouth);
-            if (oh > 8) {
-                uint16_t inside = blendRGB565(pal.accent, pal.bg, 30);
-                s.fillEllipse(CX, my, ow / 2 - 3, oh / 2 - 2, inside);
+            // Animated open mouth — wide ellipse that opens/closes with amplitude
+            // amp is 0.0–1.0, smoothed. Boost it for more visible movement.
+            float a = amp * 2.5f;
+            if (a > 1.0f) a = 1.0f;
+
+            // Mouth width stays wide, height drives the open/close
+            int ow = 24 + (int)(a * 12);   // 24–36 wide
+            int oh = 8 + (int)(a * 24);    // 8–32 tall (big range)
+
+            // Outer mouth shape
+            s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
+
+            // Inner dark cavity (visible when mouth is open)
+            if (oh > 12) {
+                uint16_t inside = blendRGB565(pal.accent, pal.bg, 25);
+                s.fillEllipse(CX, my + 1, ow / 2 - 4, oh / 2 - 4, inside);
             }
+
+            // Upper lip highlight
+            s.fillEllipse(CX, my - oh / 2 + 2, ow / 2 - 2, 3, pal.mouth);
+
             break;
         }
         case face::Expression::CONFUSED: {
-            // Wavy zigzag line + floating question mark
-            for (int i = 0; i <= 36; i++) {
-                float t = (float)i / 36;
-                int wx = CX - 18 + (int)(36 * t);
-                int wy = my + (int)(4.0f * sinf(t * 3.14159f * 2.5f));
+            // Animated wavy mouth — wave crawls along using breathPhase
+            for (int i = 0; i <= 40; i++) {
+                float t = (float)i / 40;
+                int wx = CX - 20 + (int)(40 * t);
+                int wy = my + (int)(5.0f * sinf(t * 3.14159f * 3.0f + breathPhase * 6.28f));
                 s.fillCircle(wx, wy, 2, pal.mouth);
             }
-            s.setTextColor(pal.accent);
-            s.setTextSize(3);
-            s.drawChar('?', CX + 30, my - 20);
             break;
         }
         case face::Expression::SLEEPING: {
@@ -339,9 +363,11 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     if (useSprite) s.fillSprite(pal.bg);
     else           tft.fillScreen(pal.bg);
 
-    // Ambient glow
-    float gp = sinf(fs.glowPhase) * 0.3f + 0.7f;
-    drawGlow(s, CX, CY, 60, pal.accent, pal.bg, (uint8_t)(8 * gp));
+    // Ambient glow — subtle for idle, stronger for active expressions
+    if (fs.expression != face::Expression::IDLE) {
+        float gp = sinf(fs.glowPhase) * 0.3f + 0.7f;
+        drawGlow(s, CX, CY, 60, pal.accent, pal.bg, (uint8_t)(8 * gp));
+    }
 
     // Apply popScale (disappear/reappear animation)
     float ps = fs.popScale;
@@ -446,6 +472,29 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
         s.fillTriangle(tx - 2, ty + 2, tx + 2, ty + 2, tx, ty - 3, tearCol);
     }
 
+    // ── Confused question mark (floating above face) ──
+    if (fs.expression == face::Expression::CONFUSED) {
+        float t = fs.glowPhase * 1.5f;  // reuse glow phase for animation
+        // Bob up and down
+        float bobY = sinf(t) * 6.0f;
+        // Gentle tilt via horizontal offset
+        float tiltX = sinf(t * 0.7f) * 4.0f;
+        // Pulse size
+        float scale = 1.0f + sinf(t * 2.0f) * 0.1f;
+
+        int qx = CX + 35 + (int)tiltX;  // offset right of center
+        int qy = eyeY - 70 + (int)bobY;  // higher above the face
+
+        // Draw "?" with scaled text
+        int textSize = (int)(5 * scale);
+        if (textSize < 4) textSize = 4;
+        s.setTextSize(textSize);
+        s.setTextColor(pal.accent);
+        s.setTextDatum(lgfx::middle_center);
+        s.drawString("?", qx, qy);
+        s.setTextDatum(lgfx::top_left);
+    }
+
     // ── Connection indicator (top-left dot) ────────────
     // Green = online (WiFi + WS), Yellow = WiFi only, Red = offline
     uint16_t dotCol;
@@ -458,10 +507,12 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     s.fillSmoothCircle(8, 8, 4, dotCol);
 
     // ── Label (bottom) — only shown for non-idle expressions ──
-    if (fs.expression != face::Expression::IDLE) {
+    // Skip label for CONFUSED (has floating "?" instead)
+    if (fs.expression != face::Expression::IDLE &&
+        fs.expression != face::Expression::CONFUSED) {
         static const char* EXPR_NAMES[] = {
             "", "Listening", "Thinking", "Speaking",
-            "Hmm?", "Sleeping", "Offline", "Hey!",
+            "", "Sleeping", "Offline", "Hey!",
             "Relax", "Focus", "Happy", "Sad"
         };
         s.setTextColor(pal.label);
@@ -524,24 +575,66 @@ void renderPomodoro(const display::PomodoroData& data) {
 }
 
 void renderReminder(const display::ReminderData& data) {
-    tft.fillScreen(COL_BG);
+    LGFX_Sprite& s = sprite.getBuffer() ? sprite : (LGFX_Sprite&)tft;
+    bool useSprite = (sprite.getBuffer() != nullptr);
 
-    // Icon area
-    tft.setTextDatum(lgfx::middle_center);
-    tft.setTextSize(4);
-    tft.setTextColor(COL_WARM);
-    tft.drawString("!", CX, 60);
+    if (useSprite) s.fillSprite(COL_BG);
+    else           tft.fillScreen(COL_BG);
 
-    // Reminder text
-    tft.setTextSize(2);
-    tft.setTextColor(COL_FACE);
-    tft.setTextDatum(lgfx::middle_center);
-    tft.drawString(data.text, CX, CY);
+    // Icon
+    s.setTextDatum(lgfx::middle_center);
+    s.setTextSize(3);
+    s.setTextColor(COL_WARM);
+    s.drawString("!", CX, 40);
+
+    // Reminder text — word-wrap at size 2
+    s.setTextSize(2);
+    s.setTextColor(COL_FACE);
+    s.setTextDatum(lgfx::top_left);
+
+    const int marginX = 10;
+    const int maxW = LCD_WIDTH - marginX * 2;
+    const int lineH = 22;
+    int y = 75;
+
+    // Simple word-wrap
+    char buf[256];
+    strncpy(buf, data.text, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+
+    char line[64] = {};
+    char* word = strtok(buf, " ");
+    while (word) {
+        char test[64];
+        if (line[0] == '\0') {
+            strncpy(test, word, sizeof(test) - 1);
+        } else {
+            snprintf(test, sizeof(test), "%s %s", line, word);
+        }
+        test[sizeof(test) - 1] = '\0';
+
+        if (s.textWidth(test) > maxW && line[0] != '\0') {
+            s.drawString(line, marginX, y);
+            y += lineH;
+            strncpy(line, word, sizeof(line) - 1);
+        } else {
+            strncpy(line, test, sizeof(line) - 1);
+        }
+        line[sizeof(line) - 1] = '\0';
+        word = strtok(nullptr, " ");
+    }
+    if (line[0] != '\0') {
+        s.drawString(line, marginX, y);
+    }
 
     // Dismiss hint
-    tft.setTextSize(1);
-    tft.setTextColor(COL_DIM);
-    tft.drawString("tap to dismiss", CX, LCD_HEIGHT - 30);
+    s.setTextSize(1);
+    s.setTextColor(COL_DIM);
+    s.setTextDatum(lgfx::middle_center);
+    s.drawString("tap to dismiss", CX, LCD_HEIGHT - 20);
+    s.setTextDatum(lgfx::top_left);
+
+    if (useSprite) sprite.pushSprite(0, 0);
 }
 
 void renderCountdown(const display::CountdownData& data) {

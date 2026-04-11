@@ -68,9 +68,13 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
     final poolResult = await _schedulerRepo.getPoolStats(widget.deviceId);
     poolResult.fold(
       (_) => null,
-      (data) => setState(() {
-        _poolTotal = data['total'] as int? ?? _poolSize;
-        _poolUsed = data['used'] as int? ?? 0;
+      (stats) => setState(() {
+        final total = stats.fold<int>(
+          0,
+          (sum, item) => sum + (item['count'] as int? ?? 0),
+        );
+        _poolTotal = total;
+        _poolUsed = 0; // backend tracks per-category counts, not used/unused
       }),
     );
   }

@@ -27,5 +27,5 @@ abstract class SchedulerRepository {
 
   // Response pool
   Future<Either<Failure, Map<String, dynamic>>> refillPool(String deviceId);
-  Future<Either<Failure, Map<String, dynamic>>> getPoolStats(String deviceId);
+  Future<Either<Failure, List<Map<String, dynamic>>>> getPoolStats(String deviceId);
 }

@@ -114,7 +114,7 @@ class SchedulerRepositoryImpl implements SchedulerRepository {
   }
 
   @override
-  Future<Either<Failure, Map<String, dynamic>>> getPoolStats(
+  Future<Either<Failure, List<Map<String, dynamic>>>> getPoolStats(
     String deviceId,
   ) async {
     try {

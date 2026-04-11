@@ -142,6 +142,7 @@ export class AudioGateway
     this.socketToDevice.delete(client);
     this.deviceToSocket.delete(deviceId);
     this.lastPong.delete(deviceId);
+    this.lastDbRefresh.delete(deviceId);
     this.logger.log(`Device ${deviceId} disconnected`);
   }
 
@@ -314,7 +315,7 @@ export class AudioGateway
       this.logger.debug(`Event from ${deviceId}: ${msg.event}`);
       switch (msg.event) {
         case 'audio:start':
-          this.onAudioStart(deviceId).catch((err) =>
+          this.onAudioStart(deviceId, msg.data?.format as string).catch((err) =>
             this.logger.error(`onAudioStart error: ${err.message}`),
           );
           break;
@@ -348,9 +349,12 @@ export class AudioGateway
 
   // ── Recording handlers ────────────────────────────────────────
 
-  private async onAudioStart(deviceId: string) {
+  private async onAudioStart(deviceId: string, format?: string) {
     const session = this.sessions.get(deviceId);
     if (!session) return;
+
+    // Set audio format for this recording session (opus default, pcm16 for web simulator)
+    session.audioFormat = format === 'pcm16' ? 'pcm16' : 'opus';
 
     // Track activity for idle nudge
     this.proactive.recordActivity(deviceId);
@@ -414,21 +418,28 @@ export class AudioGateway
 
   private chunkCount = new Map<string, number>();
 
-  private onAudioChunk(deviceId: string, opusData: Buffer) {
+  private onAudioChunk(deviceId: string, data: Buffer) {
     const session = this.sessions.get(deviceId);
     if (!session?.sttStream) return;
 
     const count = (this.chunkCount.get(deviceId) ?? 0) + 1;
     this.chunkCount.set(deviceId, count);
 
-    // Decode Opus → PCM and write to STT stream synchronously.
-    // No async rate limiter — Google STT requires real-time pacing.
     try {
-      const pcm = this.aiService.decodeAudio(opusData);
+      let pcm: Buffer;
+      if (session.audioFormat === 'pcm16') {
+        // Web simulator sends raw 16-bit PCM — pass directly to STT
+        pcm = data;
+      } else {
+        // ESP32 sends Opus — decode to PCM
+        pcm = this.aiService.decodeAudio(data);
+      }
       session.sttStream.write(pcm);
 
       if (count === 1) {
-        this.logger.debug(`First audio chunk for ${deviceId}: ${opusData.length}B opus → ${pcm.length}B pcm`);
+        this.logger.debug(
+          `First audio chunk for ${deviceId} (${session.audioFormat}): ${data.length}B → ${pcm.length}B pcm`,
+        );
       }
     } catch (err: any) {
       if (count <= 3) {
@@ -616,6 +627,9 @@ export class AudioGateway
 
   // ── Server-side heartbeat ─────────────────────────────────
 
+  private lastDbRefresh = new Map<string, number>();
+  private static readonly DB_REFRESH_INTERVAL_MS = 120_000; // update lastSeenAt every 2 min
+
   private heartbeat() {
     const now = Date.now();
 
@@ -625,12 +639,20 @@ export class AudioGateway
       if (now - lastSeen > AudioGateway.HEARTBEAT_TIMEOUT_MS) {
         this.logger.warn(`Device ${deviceId} missed heartbeat — closing dead connection`);
         socket.terminate(); // Hard close — triggers handleDisconnect
+        this.lastDbRefresh.delete(deviceId);
         continue;
       }
 
       // Send ping (ws library handles pong automatically on client side)
       if (socket.readyState === 1) {
         socket.ping();
+      }
+
+      // Periodically update lastSeenAt in DB so the REST API reflects online status
+      const lastRefresh = this.lastDbRefresh.get(deviceId) ?? 0;
+      if (now - lastRefresh > AudioGateway.DB_REFRESH_INTERVAL_MS) {
+        this.lastDbRefresh.set(deviceId, now);
+        this.persistence.updateLastSeen(deviceId).catch(() => {});
       }
     }
   }
@@ -690,9 +712,14 @@ export class AudioGateway
   }
 
   private extractDeviceToken(req: IncomingMessage): string | null {
+    // 1. Authorization header (ESP32 / Node clients)
     const auth = req.headers['authorization'];
-    if (!auth) return null;
-    const match = auth.match(/^DeviceToken\s+(.+)$/i);
-    return match?.[1] ?? null;
+    if (auth) {
+      const match = auth.match(/^DeviceToken\s+(.+)$/i);
+      if (match?.[1]) return match[1];
+    }
+    // 2. Query parameter (browser WebSocket — cannot set custom headers)
+    const url = new URL(req.url ?? '', `http://${req.headers.host}`);
+    return url.searchParams.get('token');
   }
 }

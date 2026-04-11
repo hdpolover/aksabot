@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:wifi_scan/wifi_scan.dart';
 
-import 'package:go_router/go_router.dart';
-
 import '../../../../core/ble/ble_constants.dart';
 import '../../../../core/ble/ble_provisioning_service.dart';
 import '../../../../core/constants/app_constants.dart';
@@ -635,7 +633,11 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
       hint: 'Connect to backend later to unlock AI features',
       onPressed: () {
         _ble.disconnect();
-        context.go('/home');
+        // Pop back through the navigation stack so the home page's
+        // _pushAndReload callback fires and refreshes the device list.
+        // Using go('/home') would recreate the shell with a race condition
+        // between DevicesBloc (empty from backend) and local device loading.
+        Navigator.of(context).popUntil((route) => route.isFirst);
       },
     );
   }

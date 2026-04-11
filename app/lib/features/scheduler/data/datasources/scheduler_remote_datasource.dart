@@ -61,8 +61,8 @@ class SchedulerRemoteDatasource {
     return data as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> getPoolStats(String deviceId) async {
+  Future<List<Map<String, dynamic>>> getPoolStats(String deviceId) async {
     final data = await _client.get('/devices/$deviceId/pool/stats');
-    return data as Map<String, dynamic>;
+    return (data as List).cast<Map<String, dynamic>>();
   }
 }

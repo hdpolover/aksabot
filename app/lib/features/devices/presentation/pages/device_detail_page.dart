@@ -118,10 +118,15 @@ class _DeviceDetailView extends StatelessWidget {
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
-            onPressed: () {
-              context.read<DevicesBloc>().add(DeleteDevice(device.id));
+            onPressed: () async {
               Navigator.of(dialogContext).pop();
-              context.pop();
+              final bloc = context.read<DevicesBloc>();
+              bloc.add(DeleteDevice(device.id));
+              // Wait for the bloc to finish the delete before popping
+              await bloc.stream.firstWhere(
+                (s) => s is DevicesLoaded || s is DevicesError,
+              );
+              if (context.mounted) context.pop();
             },
             child: const Text('Delete'),
           ),
@@ -423,12 +428,14 @@ class _SettingsTabState extends State<_SettingsTab> {
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
-            onPressed: () {
-              context
-                  .read<DevicesBloc>()
-                  .add(DeleteDevice(widget.device.id));
+            onPressed: () async {
               Navigator.of(dialogContext).pop();
-              context.pop();
+              final bloc = context.read<DevicesBloc>();
+              bloc.add(DeleteDevice(widget.device.id));
+              await bloc.stream.firstWhere(
+                (s) => s is DevicesLoaded || s is DevicesError,
+              );
+              if (context.mounted) context.pop();
             },
             child: const Text('Remove'),
           ),

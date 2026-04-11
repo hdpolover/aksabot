@@ -120,10 +120,17 @@ void touch::tick(uint32_t nowMs) {
 
         bool rawTouched = false;
         if (intLow) {
-            // INT says something is touching — confirm via I2C
-            lgfx::touch_point_t tp;
-            uint8_t count = tft.getTouch(&tp, 1);
-            rawTouched = (count > 0);
+            if (display::isSleeping()) {
+                // When sleeping, INT LOW is enough to trigger wake.
+                // Skip getTouch() — FT6336G may be in standby and I2C
+                // reads can fail or return stale data after long idle.
+                rawTouched = true;
+            } else {
+                // INT says something is touching — confirm via I2C
+                lgfx::touch_point_t tp;
+                uint8_t count = tft.getTouch(&tp, 1);
+                rawTouched = (count > 0);
+            }
         }
         // If INT is HIGH, rawTouched stays false (no touch)
 

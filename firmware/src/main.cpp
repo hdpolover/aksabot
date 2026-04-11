@@ -588,6 +588,14 @@ void setup() {
     opusBuffer = (uint8_t*)ps_malloc(OPUS_MAX_FRAME_BYTES);
     playbackBuffer = (int16_t*)ps_malloc(OPUS_FRAME_SAMPLES * sizeof(int16_t));
     playbackQueue = xQueueCreate(PLAYBACK_QUEUE_SIZE, sizeof(PlaybackFrame));
+
+    // Pre-allocate display sprite buffer in PSRAM BEFORE WiFi grabs memory.
+    // WiFi RX buffers eat ~100KB of PSRAM; sprite needs 150KB. If we wait
+    // until display::init(), the allocation may fail → direct draw → flicker.
+    extern void* preallocSpriteBuffer;
+    preallocSpriteBuffer = ps_malloc(LCD_WIDTH * LCD_HEIGHT * 2);
+    Serial.printf("[Main] Sprite pre-alloc: %s (%u bytes PSRAM free)\n",
+        preallocSpriteBuffer ? "OK" : "FAILED", ESP.getFreePsram());
     cacheAccumBuf = (uint8_t*)ps_malloc(CACHE_ACCUM_MAX);
     // Echo buffer allocated lazily on first use (saves ~640KB PSRAM at boot)
 
@@ -774,9 +782,11 @@ void setup() {
     xTaskCreatePinnedToCore(wsLoop, "ws_poll", 12288, nullptr, 3, &wsTask, 1);
     Serial.println("[Main] Face UI active — FreeRTOS tasks started");
 
-    // ── 11. WiFi connect (background for configured devices) ─
-    if (!isConfigured && !provisionedViaBle) {
-        wifi_manager::init();  // Only if not already started early
+    // ── 11. WiFi connect ─────────────────────────────────
+    // Start WiFi if not already started in step 2b.
+    // After BLE provisioning, credentials are in NVS but WiFi was never inited.
+    if (!isConfigured || provisionedViaBle) {
+        wifi_manager::init();
     }
 
     if (needsProvisioning) {
@@ -813,6 +823,13 @@ void setup() {
         appState.botState = BotState::OFFLINE;
         syncFaceToState();
         updateStatusBar();
+
+        // Show user-visible error so they know what to do
+        display::ReminderData rd = {};
+        strncpy(rd.text, "Can't connect to WiFi. Check your network and restart.", sizeof(rd.text) - 1);
+        rd.durationMs = 10000;
+        strncpy(rd.icon, "error", sizeof(rd.icon) - 1);
+        display::showReminder(rd);
     }
 
     // ── 12. WebSocket connect ──────────────────────────────
@@ -820,8 +837,15 @@ void setup() {
     if (wifi_manager::isConnected() && hasToken) {
         Serial.println("[Main] Device token found — connecting to backend");
         ws_client::connect();
-    } else if (!hasToken) {
+    } else if (wifi_manager::isConnected() && !hasToken) {
         Serial.println("[Main] No device token — register via Aksabot app to enable AI features");
+        face::setExpression(face::Expression::CONFUSED, 200);
+
+        display::ReminderData rd = {};
+        strncpy(rd.text, "Almost there! Open the Aksabot app to finish setup.", sizeof(rd.text) - 1);
+        rd.durationMs = 10000;
+        strncpy(rd.icon, "setup", sizeof(rd.icon) - 1);
+        display::showReminder(rd);
     }
 
     // ── 13. BLE presence scanning ──────────────────────────
@@ -888,10 +912,7 @@ void loop() {
     // Sync connectivity state — check actual WiFi, not just our flag
     bool wifiNow = wifi_manager::isConnected();
     if (wifiNow && !appState.wifiConnected) {
-        // WiFi just connected (maybe after boot timeout)
         appState.wifiConnected = true;
-        updateStatusBar();
-        // Try WS connect if we have a token
         bool hasToken = nvs_store::hasDeviceToken() || (strlen(DEVICE_TOKEN) > 0);
         if (hasToken && !appState.wsConnected) {
             ws_client::connect();
@@ -911,13 +932,15 @@ void loop() {
 
     if (appState.botState != prevState) {
         syncFaceToState();
-        updateStatusBar();
     }
 
-    // Sync LED when WS connectivity changes (even if BotState didn't change)
-    static bool prevWsConnected = false;
-    if (appState.wsConnected != prevWsConnected) {
-        prevWsConnected = appState.wsConnected;
+    // Throttle status bar updates — only refresh when connectivity actually changes
+    static bool prevWifi = false;
+    static bool prevWs = false;
+    if (appState.wifiConnected != prevWifi || appState.wsConnected != prevWs) {
+        prevWifi = appState.wifiConnected;
+        prevWs = appState.wsConnected;
+        updateStatusBar();
         status_led::syncToState();
     }
 
