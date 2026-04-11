@@ -1,12 +1,24 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { WsAdapter } from '@nestjs/platform-ws';
 import { AppModule } from './app.module';
 import { ResponseInterceptor } from './core/common/interceptors/response.interceptor';
 import { GlobalExceptionFilter } from './core/common/filters/http-exception.filter';
+import type { Request, Response, NextFunction } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Log all HTTP requests
+  const httpLogger = new Logger('HTTP');
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const ms = Date.now() - start;
+      httpLogger.log(`${req.method} ${req.originalUrl} → ${res.statusCode} (${ms}ms)`);
+    });
+    next();
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({
