@@ -18,6 +18,7 @@ import {
 } from '../../core/common/guards/rate-limit.guard';
 import { CurrentUser } from '../../core/common/decorators/current-user.decorator';
 import type { RequestUser } from '../../core/common/decorators/current-user.decorator';
+import { AudioGateway } from '../gateway/audio.gateway';
 import { DevicesService } from './devices.service';
 import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
@@ -27,7 +28,10 @@ import { UpdatePersonalityDto } from './dto/update-personality.dto';
 @UseGuards(JwtAuthGuard, RateLimitGuard)
 @RateLimit({ limit: 60, windowSeconds: 60, keyType: 'user' })
 export class DevicesController {
-  constructor(private readonly devicesService: DevicesService) {}
+  constructor(
+    private readonly devicesService: DevicesService,
+    private readonly gateway: AudioGateway,
+  ) {}
 
   @Post()
   create(@CurrentUser() user: RequestUser, @Body() dto: CreateDeviceDto) {
@@ -48,12 +52,15 @@ export class DevicesController {
   }
 
   @Patch(':id/settings')
-  updateSettings(
+  async updateSettings(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: RequestUser,
     @Body() dto: UpdateSettingsDto,
   ) {
-    return this.devicesService.updateSettings(id, user.userId, dto);
+    const device = await this.devicesService.updateSettings(id, user.userId, dto);
+    // Push updated settings to the ESP32 if it's online
+    this.gateway.sendToDevice(id, 'config:update', device.settingsJson);
+    return device;
   }
 
   @Get(':id/personality')

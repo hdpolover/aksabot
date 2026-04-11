@@ -33,11 +33,15 @@ static const uint32_t MIN_CONNECT_INTERVAL_MS = 5000;
 static bool shouldReconnect = true;
 
 // Keepalive
-static const uint32_t PING_INTERVAL_MS = 10000;   // ping server every 10s
+// Keepalive: firmware sends pings but does NOT enforce pong timeout.
+// The backend has its own heartbeat (10s ping, 20s timeout) which handles
+// dead connection detection. Reverse proxies (Traefik) may intercept
+// WebSocket pings, preventing pongs from reaching the firmware.
+static const uint32_t PING_INTERVAL_MS = 30000;   // ping every 30s (keepalive only)
 static uint32_t lastPingMs = 0;
 static uint32_t lastPongMs = 0;
 static bool pingSent = false;
-static const uint32_t PONG_TIMEOUT_MS = 20000;    // close if no pong in 20s
+static const uint32_t PONG_TIMEOUT_MS = 0;         // disabled — rely on backend heartbeat
 
 // Resolved from NVS or compile-time fallback
 static char wsUrlBuf[256];
@@ -115,9 +119,14 @@ static bool doConnect() {
     everAttempted = true;
     lastConnectAttemptMs = now;
     Serial.printf("[WS] Connecting to %s...\n", wsUrlBuf);
+    Serial.printf("[WS] Free heap: %u, PSRAM: %u\n", ESP.getFreeHeap(), ESP.getFreePsram());
+    uint32_t connectStart = millis();
     bool ok = client.connect(wsUrlBuf);
-    if (!ok) {
-        Serial.println("[WS] Connect failed");
+    uint32_t connectMs = millis() - connectStart;
+    if (ok) {
+        Serial.printf("[WS] Connected! (%ums)\n", connectMs);
+    } else {
+        Serial.printf("[WS] Connect failed (%ums)\n", connectMs);
     }
     return ok;
 }
@@ -186,13 +195,9 @@ void ws_client::poll() {
         pingSent = true;
     }
 
-    // Dead connection detection
-    if (appState.wsConnected && pingSent && (now - lastPongMs) >= PONG_TIMEOUT_MS) {
-        Serial.println("[WS] Pong timeout — closing dead connection");
-        client.close();
-        appState.wsConnected = false;
-        pingSent = false;
-    }
+    // Dead connection detection — disabled for WSS through reverse proxy.
+    // Traefik intercepts WS pings, so pongs never reach the firmware.
+    // The backend's server-side heartbeat handles dead device detection.
 
     // Auto-reconnect
     if (shouldReconnect && !appState.wsConnected && appState.wifiConnected && everAttempted) {

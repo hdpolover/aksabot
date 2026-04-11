@@ -74,7 +74,7 @@ void audio_io::init() {
 
     // Max volume + 24dB mic gain (sweet spot: 18dB too quiet, 36dB+ feedback)
     es8311_handle_t es_handle = es8311_create(I2C_NUM_0, ES8311_ADDRESS_0);
-    es8311_voice_volume_set(es_handle, 100, NULL);
+    es8311_voice_volume_set(es_handle, 70, NULL);  // 70% — prevents clipping with TTS audio
     es8311_microphone_gain_set(es_handle, ES8311_MIC_GAIN_24DB);
 
     Serial.println("[Audio] ES8311 codec ready (vol=100, mic=24dB)");
@@ -97,22 +97,23 @@ size_t audio_io::readMic(int16_t* buffer, size_t maxSamples) {
     return monoSamples;
 }
 
+// Static stereo buffer — avoids malloc/free per frame which fragments heap
+static int16_t speakerStereoBuf[320 * 2];  // max OPUS_FRAME_SAMPLES * 2 channels
+
 size_t audio_io::writeSpeaker(const int16_t* buffer, size_t numSamples) {
-    int16_t* stereoBuf = (int16_t*)malloc(numSamples * 2 * sizeof(int16_t));
-    if (!stereoBuf) return 0;
+    if (numSamples > 320) numSamples = 320;  // safety clamp
 
     for (size_t i = 0; i < numSamples; i++) {
-        stereoBuf[i * 2] = buffer[i];
-        stereoBuf[i * 2 + 1] = buffer[i];
+        speakerStereoBuf[i * 2] = buffer[i];
+        speakerStereoBuf[i * 2 + 1] = buffer[i];
     }
 
     size_t bytesWritten = 0;
     esp_err_t err = i2s_channel_write(
-        tx_handle, stereoBuf,
+        tx_handle, speakerStereoBuf,
         numSamples * 2 * sizeof(int16_t),
         &bytesWritten, portMAX_DELAY
     );
-    free(stereoBuf);
 
     if (err != ESP_OK) return 0;
     return bytesWritten / (2 * sizeof(int16_t));

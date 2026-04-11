@@ -52,7 +52,7 @@ struct PlaybackFrame {
     int16_t samples[OPUS_FRAME_SAMPLES];  // 320 mono samples (20ms)
     int count;                             // actual sample count
 };
-static const size_t PLAYBACK_QUEUE_SIZE = 50;  // ~1s buffer at 20ms/frame
+static const size_t PLAYBACK_QUEUE_SIZE = 30;  // ~600ms buffer at 20ms/frame
 static QueueHandle_t playbackQueue = nullptr;
 static volatile bool playbackActive = false;  // true while audio task should drain queue
 static volatile bool playbackDone = false;    // set by response:end to signal no more frames
@@ -283,6 +283,56 @@ static void onWsJson(const char* event, const char* data) {
             }
             if (!found) {
                 Serial.printf("[Main] Unknown expression: %s\n", exprName);
+            }
+        }
+    }
+    // ── Config update from backend (settings changed via app) ──
+    else if (strcmp(event, "config:update") == 0) {
+        JsonDocument doc;
+        if (deserializeJson(doc, data) == DeserializationError::Ok) {
+            // Volume
+            if (doc.containsKey("volume")) {
+                uint8_t vol = doc["volume"] | 70;
+                nvs_store::setVolume(vol);
+                Serial.printf("[Main] Config: volume=%d\n", vol);
+            }
+            // Brightness
+            if (doc.containsKey("brightness")) {
+                uint8_t br = doc["brightness"] | 70;
+                nvs_store::setBrightness(br);
+                display::setBrightness(br);
+                power_manager::Config pwrCfg;
+                pwrCfg.activeBrightness = br;
+                power_manager::updateConfig(pwrCfg);
+                Serial.printf("[Main] Config: brightness=%d\n", br);
+            }
+            // Presence RSSI threshold
+            if (doc.containsKey("presence_rssi_threshold")) {
+                int rssi = doc["presence_rssi_threshold"] | -75;
+                nvs_store::setPresenceRssiThreshold(rssi);
+                presence_detector::Config presCfg;
+                presCfg.rssiThreshold = rssi;
+                presCfg.gracePeriodSec = nvs_store::getPresenceGracePeriodSec();
+                presence_detector::init(presCfg);
+                Serial.printf("[Main] Config: presence RSSI=%d\n", rssi);
+            }
+            // Presence grace period
+            if (doc.containsKey("presence_grace_period")) {
+                int grace = doc["presence_grace_period"] | 45;
+                nvs_store::setPresenceGracePeriodSec(grace);
+                presence_detector::Config presCfg;
+                presCfg.rssiThreshold = nvs_store::getPresenceRssiThreshold();
+                presCfg.gracePeriodSec = grace;
+                presence_detector::init(presCfg);
+                Serial.printf("[Main] Config: presence grace=%ds\n", grace);
+            }
+            // Idle timeout
+            if (doc.containsKey("idle_timeout_seconds")) {
+                int timeout = doc["idle_timeout_seconds"] | 300;
+                power_manager::Config pwrCfg;
+                pwrCfg.sleepTimeoutSec = timeout;
+                power_manager::updateConfig(pwrCfg);
+                Serial.printf("[Main] Config: idle timeout=%ds\n", timeout);
             }
         }
     }
@@ -767,17 +817,24 @@ void setup() {
     }
 
     // ── 10. Start face UI immediately ───────────────────────
-    // For configured devices, show the face FIRST — WiFi connects in background.
-    appState.botState = isConfigured ? BotState::IDLE : BotState::OFFLINE;
+    // Show face immediately. If just provisioned, show THINKING (loading)
+    // instead of OFFLINE — the setup is still in progress, not broken.
+    if (isConfigured) {
+        appState.botState = BotState::IDLE;
+    } else if (provisionedViaBle) {
+        appState.botState = BotState::THINKING;  // setup in progress, not offline
+    } else {
+        appState.botState = BotState::OFFLINE;
+    }
     syncFaceToState();
     updateStatusBar();
 
     // Init WS client early (creates internal state) — but don't connect yet
     ws_client::init(onWsJson, onWsBinary);
 
-    xTaskCreatePinnedToCore(displayLoop, "display", 8192, nullptr, 3, &displayTask, 1);
+    xTaskCreatePinnedToCore(displayLoop, "display", 6144, nullptr, 3, &displayTask, 1);
     xTaskCreatePinnedToCore(audioCaptureLoop, "audio_cap", 24576, nullptr, 5, &audioCaptureTask, 0);
-    xTaskCreatePinnedToCore(wsLoop, "ws_poll", 12288, nullptr, 3, &wsTask, 1);
+    xTaskCreatePinnedToCore(wsLoop, "ws_poll", 8192, nullptr, 3, &wsTask, 1);
     Serial.println("[Main] Face UI active — FreeRTOS tasks started");
 
     // ── 11. WiFi connect ─────────────────────────────────
@@ -947,7 +1004,8 @@ void loop() {
 
     BotState prevState = appState.botState;
     if (!appState.wifiConnected && appState.botState != BotState::OFFLINE &&
-        appState.botState != BotState::LISTENING && appState.botState != BotState::SPEAKING) {
+        appState.botState != BotState::LISTENING && appState.botState != BotState::SPEAKING &&
+        appState.botState != BotState::THINKING) {
         appState.botState = BotState::OFFLINE;
     } else if (appState.wifiConnected && appState.botState == BotState::OFFLINE) {
         appState.botState = BotState::IDLE;

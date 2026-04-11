@@ -24,7 +24,8 @@ describe('DevicesService', () => {
       remove: jest.fn().mockResolvedValue(undefined),
     };
 
-    service = new DevicesService(repo as any);
+    const emptyRepo = {} as any;
+    service = new DevicesService(repo as any, emptyRepo, emptyRepo, emptyRepo, emptyRepo);
   });
 
   describe('create', () => {

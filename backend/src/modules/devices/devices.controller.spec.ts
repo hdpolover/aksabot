@@ -30,7 +30,8 @@ describe('DevicesController', () => {
       remove: jest.fn(),
     };
 
-    controller = new DevicesController(devicesService as any);
+    const mockGateway = { sendToDevice: jest.fn() };
+    controller = new DevicesController(devicesService as any, mockGateway as any);
   });
 
   describe('create', () => {

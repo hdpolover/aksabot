@@ -4,6 +4,7 @@ import '../../../../core/ble/ble_presence_service.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
+import '../../domain/repositories/devices_repository.dart';
 
 /// Presence detection settings — wired to BLE presence advertising service.
 class PresenceSettingsPage extends StatefulWidget {
@@ -16,6 +17,7 @@ class PresenceSettingsPage extends StatefulWidget {
 
 class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
   late final BlePresenceService _presence;
+  late final DevicesRepository _devicesRepo;
 
   bool _enabled = false;
   bool _isLoading = true;
@@ -28,6 +30,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
   void initState() {
     super.initState();
     _presence = sl<BlePresenceService>();
+    _devicesRepo = sl<DevicesRepository>();
     _loadSettings();
   }
 
@@ -50,6 +53,11 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
       _silentWake = silent.toString();
       _isLoading = false;
     });
+  }
+
+  /// Sync a presence setting to the backend so the ESP32 gets it via WebSocket.
+  Future<void> _syncToBackend(Map<String, dynamic> patch) async {
+    await _devicesRepo.updateSettings(widget.deviceId, patch);
   }
 
   Future<void> _togglePresence(bool enabled) async {
@@ -173,6 +181,9 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                             _presence.saveRssiThreshold(v);
                           }
                         : null,
+                    onChangeEnd: _enabled
+                        ? (v) => _syncToBackend({'presence_rssi_threshold': v.round()})
+                        : null,
                   ),
                   const SizedBox(height: 8),
                   Row(
@@ -208,6 +219,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                                 if (v != null) {
                                   setState(() => _gracePeriod = v);
                                   _presence.saveGracePeriod(int.parse(v));
+                                  _syncToBackend({'presence_grace_period': int.parse(v)});
                                 }
                               }
                             : null,
@@ -252,6 +264,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                                 if (v != null) {
                                   setState(() => _silentWake = v);
                                   _presence.saveSilentWakeMinutes(int.parse(v));
+                                  _syncToBackend({'presence_silent_wake_minutes': int.parse(v)});
                                 }
                               }
                             : null,

@@ -20,4 +20,22 @@ export class UpdateSettingsDto {
   @IsNumber()
   @IsOptional()
   idle_timeout_seconds?: number;
+
+  @IsNumber()
+  @Min(-90)
+  @Max(-60)
+  @IsOptional()
+  presence_rssi_threshold?: number;
+
+  @IsNumber()
+  @Min(15)
+  @Max(60)
+  @IsOptional()
+  presence_grace_period?: number;
+
+  @IsNumber()
+  @Min(2)
+  @Max(10)
+  @IsOptional()
+  presence_silent_wake_minutes?: number;
 }

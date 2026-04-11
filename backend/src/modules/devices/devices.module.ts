@@ -7,12 +7,14 @@ import {
   Memory,
   ResponsePool,
 } from '../../core/database/entities';
+import { GatewayModule } from '../gateway/gateway.module';
 import { DevicesService } from './devices.service';
 import { DevicesController } from './devices.controller';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Device, Conversation, Message, Memory, ResponsePool]),
+    GatewayModule,
   ],
   controllers: [DevicesController],
   providers: [DevicesService],
