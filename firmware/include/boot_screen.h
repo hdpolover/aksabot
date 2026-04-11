@@ -13,6 +13,11 @@ void init();
 /// Show splash screen: logo + firmware version.
 void showSplash(const char* version);
 
+/// Show splash screen while polling BOOT button (GPIO 0).
+/// Displays "Press BOOT for BIOS" hint. If BOOT is pressed during
+/// the splash, shows confirmation and returns early (caller checks GPIO 0).
+void showSplashWithBootCheck(const char* version);
+
 /// Show hardware check progress. Call multiple times as each subsystem initializes.
 /// status: 0=checking, 1=ok, 2=failed, 3=skipped
 void showHardwareCheck(const char* component, uint8_t status);
@@ -44,5 +49,10 @@ void showConnectionFailed(const char* reason);
 
 /// Show "Ready!" and transition hint.
 void showReady();
+
+/// Show "Hold screen for BIOS..." with a 2-second countdown bar.
+/// Returns true if the user held the screen during the countdown (enter BIOS).
+/// Returns false if the countdown expired without a hold (continue boot).
+bool showBiosCountdown();
 
 }  // namespace boot_screen

@@ -23,9 +23,8 @@
 #include "power_manager.h"
 #include "ble_manager.h"
 #include "boot_screen.h"
+#include "bios_menu.h"
 #include "device_server.h"
-
-#define FIRMWARE_VERSION "1.0.0"
 
 // Global application state
 AppState appState;
@@ -414,6 +413,10 @@ static void displayLoop(void* param) {
 // ── Setup & Loop ────────────────────────────────────────
 
 void setup() {
+    // Kill backlight immediately — before any library init can draw to screen
+    pinMode(LCD_BL, OUTPUT);
+    digitalWrite(LCD_BL, LOW);
+
     Serial.begin(115200);
     delay(1000);
     Serial.println("\n=== Aksabot Firmware ===\n");
@@ -432,19 +435,34 @@ void setup() {
     }
     Serial.printf("[Main] PSRAM free: %u bytes\n", ESP.getFreePsram());
 
-    // ── 2. Display init (early — needed for boot screen) ───
+    // ── 2. Check if device is already configured ───────────
+    bool firstBoot = nvs_store::isFirstBoot();
+    bool hasNvsCreds = nvs_store::hasWifiCredentials();
+    bool hasCompileCreds = (strlen(WIFI_SSID) > 0);
+    bool isConfigured = (hasNvsCreds || hasCompileCreds) && !firstBoot;
+
+    // ── 3. Display init + splash ───────────────────────────
     display::init();
-
-    // ── 3. Boot splash ─────────────────────────────────────
     boot_screen::init();
-    boot_screen::showSplash(FIRMWARE_VERSION);
 
-    // ── 4. Hardware checks ─────────────────────────────────
-    boot_screen::showHardwareCheck("Display", 1);   // already working
+    // Show splash and poll BOOT button (GPIO 0) during the splash delay.
+    // User presses RESET to reboot, then presses BOOT during splash to enter BIOS.
+    pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
+    boot_screen::showSplashWithBootCheck(FIRMWARE_VERSION);
+    bool bootButtonHeld = (digitalRead(BOOT_BUTTON_PIN) == LOW);
+    if (bootButtonHeld) {
+        Serial.println("[Main] BOOT button pressed during splash — will enter BIOS");
+    }
+
+    // ── 5. Hardware init ───────────────────────────────────
+    // Fast path: configured device + no BOOT button = skip POST display
+    bool showPOST = bootButtonHeld || !isConfigured;
+
+    if (showPOST) boot_screen::showHardwareCheck("Display", 1);
 
     sd_storage::init();
-    boot_screen::showHardwareCheck("MicroSD",
-        sd_storage::isMounted() ? 1 : 3);  // 3=skipped if no card
+    if (showPOST) boot_screen::showHardwareCheck("MicroSD",
+        sd_storage::isMounted() ? 1 : 3);
 
     tts_cache::init();
     recording_buffer::init();
@@ -473,52 +491,48 @@ void setup() {
         });
     }
 
-    // Touch
     touch::init();
     touch::onEvent(onTouchEvent);
-    boot_screen::showHardwareCheck("Touch", 1);
+    if (showPOST) boot_screen::showHardwareCheck("Touch", 1);
 
-    // Audio
     audio_io::init();
     audioInitialized = true;
-    boot_screen::showHardwareCheck("Audio (ES8311)", 1);
+    if (showPOST) boot_screen::showHardwareCheck("Audio (ES8311)", 1);
 
-    // Opus codec
     bool opusOk = opus_codec::init();
-    boot_screen::showHardwareCheck("Opus Codec", opusOk ? 1 : 2);
+    if (showPOST) boot_screen::showHardwareCheck("Opus Codec", opusOk ? 1 : 2);
     if (!opusOk) {
         Serial.println("[Main] FATAL: Opus init failed");
         while (true) { delay(1000); }
     }
 
-    // VAD, OTA, power
     vad::init();
     ota_update::init();
     power_manager::init();
 
-    // BLE
-    ble_manager::init();
-    boot_screen::showHardwareCheck("Bluetooth LE", 1);
+    if (showPOST) delay(1500);  // Let user see POST results
 
-    delay(2000);  // Let user see the hardware check results
+    // ── 6. BIOS menu (only if BOOT button was held) ───────
+    bool enterSetupFromBios = false;
+    if (bootButtonHeld) {
+        Serial.println("[Main] Entering BIOS menu");
+        enterSetupFromBios = bios_menu::show();
+        Serial.printf("[Main] BIOS exit — setup WiFi: %s\n",
+                       enterSetupFromBios ? "yes" : "no");
+    }
 
-    // ── 5. First-boot detection ────────────────────────────
-    bool firstBoot = nvs_store::isFirstBoot();
+    // ── 7. First-boot introduction ─────────────────────────
     if (firstBoot) {
         Serial.println("[Main] First boot detected — showing introduction");
         boot_screen::showFirstBoot();
     }
 
-    // ── 6. BLE provisioning gate ───────────────────────────
-    // Skip if NVS has credentials OR compile-time credentials exist.
-    // wifi_manager::init() falls back to credentials.h when NVS is empty.
-    bool hasNvsCreds = nvs_store::hasWifiCredentials();
-    bool hasCompileCreds = (strlen(WIFI_SSID) > 0);
+    // ── 8. WiFi provisioning gate ──────────────────────────
+    // Enters provisioning if: BIOS "Setup WiFi" selected, first boot, or no credentials.
+    if (enterSetupFromBios || (!hasNvsCreds && !hasCompileCreds)) {
+        Serial.println("[Main] No WiFi credentials — starting AP provisioning");
 
-    if (!hasNvsCreds && !hasCompileCreds) {
-        Serial.println("[Main] No WiFi credentials — entering provisioning mode");
-
-        // Build SoftAP name from last 2 MAC bytes for uniqueness
+        // Generate AP name from MAC suffix
         char apName[24];
         uint8_t mac[6];
         WiFi.macAddress(mac);
@@ -527,26 +541,16 @@ void setup() {
         wifi_manager::startAP(apName);
         boot_screen::showProvisioningPrompt(apName);
 
-        // Poll for either BLE or SoftAP HTTP to deliver credentials
-        bool bleConnectedShown = false;
-        while (!ble_manager::isProvisioned() && !wifi_manager::isAPProvisioned()) {
-            uint32_t now = millis();
-            if (!bleConnectedShown && ble_manager::isClientConnected()) {
-                boot_screen::showProvisioningStatus("Phone connected via BLE...");
-                bleConnectedShown = true;
-            }
-            boot_screen::tickProvisioningAnimation(now);
+        // Poll until credentials arrive via HTTP
+        while (!wifi_manager::isAPProvisioned()) {
+            boot_screen::tickProvisioningAnimation(millis());
             wifi_manager::tickAP();
             delay(100);
         }
 
         wifi_manager::stopAP();
-
-        const char* method = ble_manager::isProvisioned() ? "BLE" : "Wi-Fi hotspot";
-        char statusMsg[48];
-        snprintf(statusMsg, sizeof(statusMsg), "Credentials received via %s", method);
-        boot_screen::showProvisioningStatus(statusMsg);
-        Serial.printf("[Main] Provisioned via %s\n", method);
+        boot_screen::showProvisioningStatus("Credentials received!");
+        Serial.println("[Main] Provisioned via WiFi hotspot");
         delay(600);
     } else if (hasNvsCreds) {
         Serial.println("[Main] Using NVS WiFi credentials");
@@ -554,7 +558,7 @@ void setup() {
         Serial.println("[Main] Using compile-time WiFi credentials");
     }
 
-    // ── 7. WiFi connect ────────────────────────────────────
+    // ── 9. WiFi connect ────────────────────────────────────
     char ssidBuf[64] = {};
     const char* ssidDisplay = WIFI_SSID;
     if (nvs_store::getWifiSsid(ssidBuf, sizeof(ssidBuf)) && strlen(ssidBuf) > 0) {
@@ -567,7 +571,10 @@ void setup() {
     wifi_manager::waitForConnection(15000);
 
     if (wifi_manager::isConnected()) {
+        // ── 7b. BLE init (after WiFi to avoid radio coexistence issues) ──
+        ble_manager::init();
         ble_manager::notifyWifiStatus(2);  // connected
+        Serial.println("[Main] BLE initialized after WiFi");
 
         // mDNS: advertise as aksabot.local + _aksabot._tcp service on port 80
         if (MDNS.begin("aksabot")) {
@@ -593,11 +600,11 @@ void setup() {
         appState.wifiConnected = true;
     } else {
         boot_screen::showConnectionFailed("Timeout — will retry in background");
-        ble_manager::notifyWifiStatus(3);  // failed
+        ble_manager::init();  // init BLE even if WiFi failed (for re-provisioning)
         appState.botState = BotState::OFFLINE;
     }
 
-    // ── 8. Initialize WS client (connects in background via ws task) ──
+    // ── 10. Initialize WS client (connects in background via ws task) ──
     ws_client::init(onWsJson, onWsBinary);
     if (wifi_manager::isConnected() && nvs_store::hasDeviceToken()) {
         Serial.println("[Main] Device token found — connecting to backend");
@@ -606,17 +613,17 @@ void setup() {
         Serial.println("[Main] No device token — register via Aksabot app to enable AI features");
     }
 
-    // ── 9. Start FreeRTOS tasks ────────────────────────────
+    // ── 11. Start FreeRTOS tasks ────────────────────────────
     xTaskCreatePinnedToCore(audioCaptureLoop, "audio_cap", 24576, nullptr, 5, &audioCaptureTask, 0);
     xTaskCreatePinnedToCore(wsLoop, "ws_poll", 12288, nullptr, 3, &wsTask, 1);
     xTaskCreatePinnedToCore(displayLoop, "display", 8192, nullptr, 3, &displayTask, 1);
 
-    // ── 10. Start presence scanning ───────────────────────
+    // ── 12. Start presence scanning ───────────────────────
     if (nvs_store::getPresenceEnabled()) {
         ble_manager::startPresenceScan();
     }
 
-    // ── 11. Ready — transition to face UI ─────────────────
+    // ── 13. Ready — transition to face UI ─────────────────
     if (appState.wifiConnected) {
         appState.botState = BotState::IDLE;
     }

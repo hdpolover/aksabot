@@ -12,6 +12,9 @@
 //   LED: WS2812B RGB (single)
 // ═══════════════════════════════════════════════════════════════
 
+// ── Firmware version ──────────────────────────────────
+#define FIRMWARE_VERSION "1.0.0"
+
 // ── Credentials (Wi-Fi, backend URL, device token) ────
 // Defined in credentials.h (git-ignored).
 // Copy credentials.h.example → credentials.h and fill in your values.
@@ -75,6 +78,9 @@
 #define SPI_MOSI  SD_CMD
 #define SPI_MISO  SD_D0
 #define SD_CS     -1    // SDIO doesn't use CS
+
+// ── BOOT button (GPIO 0 — active LOW) ────────────────
+#define BOOT_BUTTON_PIN 0
 
 // ── RGB LED (WS2812B) ─────────────────────────────────
 #define LED_PIN   42

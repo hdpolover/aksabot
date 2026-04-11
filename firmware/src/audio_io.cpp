@@ -1,85 +1,90 @@
 #include "audio_io.h"
 #include "config.h"
 #include "es8311.h"
-#include <driver/i2s.h>
-#include <driver/i2c.h>
+#include "driver/i2s_std.h"
 #include <Arduino.h>
 
-// ES8311 codec with legacy I2S driver.
-// Full-duplex on I2S_NUM_0 with MCLK for the codec.
-static const i2s_port_t AUDIO_PORT = I2S_NUM_0;
-
-// ── I2C init for ES8311 codec ──────────────────────────
-// NOTE: I2C bus is shared with the FT6336G touch controller.
-// Touch driver initializes Wire(0) first. We try i2c_driver_install
-// and if it's already installed, that's fine — we just skip it.
-static esp_err_t codec_i2c_init() {
-    // I2C bus is already initialized by the touch driver (Wire.begin in touch.cpp).
-    // The ES8311 codec sits on the same I2C bus (GPIO 15/16) at address 0x18.
-    // No need to re-initialize — just verify the bus is accessible.
-    return ESP_OK;
-}
+// ES8311 codec — new I2S driver (ESP-IDF 5.x).
+// Full-duplex on I2S_NUM_1 (manufacturer's port) with MCLK.
+static i2s_chan_handle_t tx_handle = nullptr;
+static i2s_chan_handle_t rx_handle = nullptr;
 
 void audio_io::init() {
     // Enable amplifier (FM8002E) — active LOW
     pinMode(AUDIO_EN, OUTPUT);
     digitalWrite(AUDIO_EN, LOW);
 
-    // Initialize I2C for ES8311 codec control
-    if (codec_i2c_init() != ESP_OK) {
-        Serial.println("[Audio] I2C init failed!");
-        return;
-    }
-    Serial.println("[Audio] I2C initialized for ES8311");
+    Serial.println("[Audio] I2C ready for ES8311 (shared with touch on Wire)");
 
-    // Configure I2S for full-duplex (TX + RX)
-    i2s_config_t i2sConfig = {};
-    i2sConfig.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_RX);
-    i2sConfig.sample_rate = I2S_MIC_SAMPLE_RATE;
-    i2sConfig.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
-    i2sConfig.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;  // Stereo for ES8311
-    i2sConfig.communication_format = I2S_COMM_FORMAT_STAND_I2S;
-    i2sConfig.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
-    i2sConfig.dma_buf_count = 8;
-    i2sConfig.dma_buf_len = AUDIO_RING_BUFFER_SAMPLES;
-    i2sConfig.use_apll = false;
-    i2sConfig.fixed_mclk = I2S_MIC_SAMPLE_RATE * 384;  // MCLK = 16000 * 384 = 6.144MHz
+    // ── 1. Create I2S channel pair (full-duplex, I2S_NUM_1) ──────────────
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+    chan_cfg.auto_clear = true;
 
-    esp_err_t err = i2s_driver_install(AUDIO_PORT, &i2sConfig, 0, NULL);
+    esp_err_t err = i2s_new_channel(&chan_cfg, &tx_handle, &rx_handle);
     if (err != ESP_OK) {
-        Serial.printf("[Audio] I2S driver install failed: %d\n", err);
+        Serial.printf("[Audio] i2s_new_channel failed: %d\n", err);
         return;
     }
 
-    i2s_pin_config_t pins = {};
-    pins.mck_io_num = I2S_MCLK;    // GPIO 4
-    pins.bck_io_num = I2S_BCLK;    // GPIO 5
-    pins.ws_io_num = I2S_WS;       // GPIO 7
-    pins.data_out_num = I2S_DOUT;   // GPIO 8
-    pins.data_in_num = I2S_DIN;     // GPIO 6
+    // ── 2. Standard mode config (shared clock/slot for full-duplex) ──────
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(I2S_MIC_SAMPLE_RATE),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
+            I2S_DATA_BIT_WIDTH_16BIT,
+            I2S_SLOT_MODE_STEREO
+        ),
+        .gpio_cfg = {
+            .mclk = (gpio_num_t)I2S_MCLK,
+            .bclk = (gpio_num_t)I2S_BCLK,
+            .ws   = (gpio_num_t)I2S_WS,
+            .dout = (gpio_num_t)I2S_DOUT,
+            .din  = (gpio_num_t)I2S_DIN,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv   = false,
+            },
+        },
+    };
+    std_cfg.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_384;
 
-    err = i2s_set_pin(AUDIO_PORT, &pins);
+    err = i2s_channel_init_std_mode(tx_handle, &std_cfg);
     if (err != ESP_OK) {
-        Serial.printf("[Audio] I2S set pin failed: %d\n", err);
+        Serial.printf("[Audio] TX init failed: %d\n", err);
         return;
     }
-    Serial.println("[Audio] I2S initialized (16kHz, stereo, full-duplex)");
 
-    // Initialize ES8311 codec via I2C
+    err = i2s_channel_init_std_mode(rx_handle, &std_cfg);
+    if (err != ESP_OK) {
+        Serial.printf("[Audio] RX init failed: %d\n", err);
+        return;
+    }
+
+    // ── 3. Enable both channels before ES8311 init ───────────────────────
+    i2s_channel_enable(tx_handle);
+    i2s_channel_enable(rx_handle);
+
+    Serial.println("[Audio] I2S initialized (16kHz, stereo, full-duplex, I2S_NUM_1)");
+
+    // ── 4. Initialize ES8311 codec via I2C ──────────────────────────────
     if (es8311_codec_init() != ESP_OK) {
         Serial.println("[Audio] ES8311 codec init failed!");
         return;
     }
 
-    Serial.println("[Audio] ES8311 codec ready (mic + speaker)");
+    // Max volume + 24dB mic gain (sweet spot: 18dB too quiet, 36dB+ feedback)
+    es8311_handle_t es_handle = es8311_create(I2C_NUM_0, ES8311_ADDRESS_0);
+    es8311_voice_volume_set(es_handle, 100, NULL);
+    es8311_microphone_gain_set(es_handle, ES8311_MIC_GAIN_24DB);
+
+    Serial.println("[Audio] ES8311 codec ready (vol=100, mic=24dB)");
 }
 
 size_t audio_io::readMic(int16_t* buffer, size_t maxSamples) {
-    // Read stereo data, then extract left channel for mono
     size_t stereoBytes = maxSamples * 2 * sizeof(int16_t);
     size_t bytesRead = 0;
 
-    esp_err_t err = i2s_read(AUDIO_PORT, buffer, stereoBytes, &bytesRead, pdMS_TO_TICKS(100));
+    esp_err_t err = i2s_channel_read(rx_handle, buffer, stereoBytes, &bytesRead, 100);
     if (err != ESP_OK) return 0;
 
     // Extract left channel (every other sample) in-place
@@ -93,7 +98,6 @@ size_t audio_io::readMic(int16_t* buffer, size_t maxSamples) {
 }
 
 size_t audio_io::writeSpeaker(const int16_t* buffer, size_t numSamples) {
-    // Duplicate mono to stereo for ES8311
     int16_t* stereoBuf = (int16_t*)malloc(numSamples * 2 * sizeof(int16_t));
     if (!stereoBuf) return 0;
 
@@ -103,7 +107,11 @@ size_t audio_io::writeSpeaker(const int16_t* buffer, size_t numSamples) {
     }
 
     size_t bytesWritten = 0;
-    esp_err_t err = i2s_write(AUDIO_PORT, stereoBuf, numSamples * 2 * sizeof(int16_t), &bytesWritten, pdMS_TO_TICKS(100));
+    esp_err_t err = i2s_channel_write(
+        tx_handle, stereoBuf,
+        numSamples * 2 * sizeof(int16_t),
+        &bytesWritten, 100
+    );
     free(stereoBuf);
 
     if (err != ESP_OK) return 0;
@@ -111,9 +119,13 @@ size_t audio_io::writeSpeaker(const int16_t* buffer, size_t numSamples) {
 }
 
 void audio_io::stopMic() {
-    // In full-duplex mode, can't stop RX independently
+    // In full-duplex mode, leave RX running to avoid DMA stalls
 }
 
 void audio_io::stopSpeaker() {
-    i2s_zero_dma_buffer(AUDIO_PORT);
+    // Flush TX DMA by cycling disable/enable
+    if (tx_handle) {
+        i2s_channel_disable(tx_handle);
+        i2s_channel_enable(tx_handle);
+    }
 }

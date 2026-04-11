@@ -57,7 +57,7 @@ void init() {
     tft.setRotation(0);        // Portrait: 240 wide x 320 tall
     tft.invertDisplay(false);  // ILI9341V normal mode
     tft.fillScreen(COL_BG);
-    tft.setBrightness(255);    // Backlight on via PWM
+    tft.setBrightness(255);
 
     COL_DIM = tft.color565(80, 80, 80);
     COL_STATUS_BG = tft.color565(20, 20, 30);

@@ -85,12 +85,12 @@ static void wifiStatusWatchTask(void*) {
 // ── Server callbacks ────────────────────────────────────
 
 class ServerCallbacks : public NimBLEServerCallbacks {
-    void onConnect(NimBLEServer* server) override {
+    void onConnect(NimBLEServer* server, NimBLEConnInfo& connInfo) override {
         clientConnected = true;
         Serial.println("[BLE] Client connected");
     }
 
-    void onDisconnect(NimBLEServer* server) override {
+    void onDisconnect(NimBLEServer* server, NimBLEConnInfo& connInfo, int reason) override {
         clientConnected = false;
         Serial.println("[BLE] Client disconnected");
         // Restart advertising so the app can reconnect
@@ -101,7 +101,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 // ── WiFi SSID write callback ────────────────────────────
 
 class SsidCallback : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pChar) override {
+    void onWrite(NimBLECharacteristic* pChar, NimBLEConnInfo& connInfo) override {
         std::string value = pChar->getValue();
         if (value.length() > 0 && value.length() < sizeof(pendingSsid)) {
             strncpy(pendingSsid, value.c_str(), sizeof(pendingSsid) - 1);
@@ -115,7 +115,7 @@ class SsidCallback : public NimBLECharacteristicCallbacks {
 // ── WiFi Password write callback ────────────────────────
 
 class PasswordCallback : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pChar) override {
+    void onWrite(NimBLECharacteristic* pChar, NimBLEConnInfo& connInfo) override {
         std::string value = pChar->getValue();
         if (value.length() > 0 && value.length() < sizeof(pendingPass)) {
             strncpy(pendingPass, value.c_str(), sizeof(pendingPass) - 1);
@@ -144,7 +144,7 @@ class PasswordCallback : public NimBLECharacteristicCallbacks {
 // ── Device Token write callback ─────────────────────────
 
 class TokenCallback : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pChar) override {
+    void onWrite(NimBLECharacteristic* pChar, NimBLEConnInfo& connInfo) override {
         std::string value = pChar->getValue();
         if (value.length() > 0) {
             nvs_store::setDeviceToken(value.c_str());
@@ -157,13 +157,13 @@ class TokenCallback : public NimBLECharacteristicCallbacks {
 // ── Volume write callback ───────────────────────────────
 
 class VolumeCallback : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pChar) override {
+    void onWrite(NimBLECharacteristic* pChar, NimBLEConnInfo& connInfo) override {
         uint8_t vol = pChar->getValue<uint8_t>();
         nvs_store::setVolume(vol);
         Serial.printf("[BLE] Volume set: %d\n", vol);
     }
 
-    void onRead(NimBLECharacteristic* pChar) override {
+    void onRead(NimBLECharacteristic* pChar, NimBLEConnInfo& connInfo) override {
         pChar->setValue(nvs_store::getVolume());
     }
 };
@@ -171,13 +171,13 @@ class VolumeCallback : public NimBLECharacteristicCallbacks {
 // ── Brightness write callback ───────────────────────────
 
 class BrightnessCallback : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pChar) override {
+    void onWrite(NimBLECharacteristic* pChar, NimBLEConnInfo& connInfo) override {
         uint8_t brt = pChar->getValue<uint8_t>();
         nvs_store::setBrightness(brt);
         Serial.printf("[BLE] Brightness set: %d\n", brt);
     }
 
-    void onRead(NimBLECharacteristic* pChar) override {
+    void onRead(NimBLECharacteristic* pChar, NimBLEConnInfo& connInfo) override {
         pChar->setValue(nvs_store::getBrightness());
     }
 };
@@ -186,8 +186,8 @@ class BrightnessCallback : public NimBLECharacteristicCallbacks {
 
 static volatile bool presenceFoundThisCycle = false;
 
-class PresenceScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
-    void onResult(NimBLEAdvertisedDevice* device) override {
+class PresenceScanCallbacks : public NimBLEScanCallbacks {
+    void onResult(const NimBLEAdvertisedDevice* device) override {
         if (device->isAdvertisingService(NimBLEUUID(UUID_PRESENCE_SVC))) {
             presence_detector::feedRssi(device->getRSSI());
             presenceFoundThisCycle = true;
@@ -202,7 +202,7 @@ void ble_manager::init() {
 
     NimBLEDevice::init("Aksabot");
     NimBLEDevice::setMTU(185);
-    NimBLEDevice::setPower(ESP_PWR_LVL_P6);  // +6dBm for good range
+    NimBLEDevice::setPower(6);  // +6dBm for good range
 
     pServer = NimBLEDevice::createServer();
     pServer->setCallbacks(new ServerCallbacks());
@@ -229,7 +229,7 @@ void ble_manager::init() {
     uint8_t initialWifiStatus = 0;
     pWifiStatus->setValue(&initialWifiStatus, 1);
 
-    wifiSvc->start();
+    // Services auto-start with server in NimBLE v2
 
     // ── Auth Service (0xFFE1) ───────────────────────────
     NimBLEService* authSvc = pServer->createService(UUID_AUTH_SVC);
@@ -247,7 +247,6 @@ void ble_manager::init() {
     uint8_t initialAuthStatus = nvs_store::hasDeviceToken() ? 1 : 0;
     pAuthStatus->setValue(&initialAuthStatus, 1);
 
-    authSvc->start();
 
     // ── Control Service (0xFFE2) ────────────────────────
     NimBLEService* ctrlSvc = pServer->createService(UUID_CTRL_SVC);
@@ -268,7 +267,6 @@ void ble_manager::init() {
     uint8_t brt = nvs_store::getBrightness();
     pBrightness->setValue(&brt, 1);
 
-    ctrlSvc->start();
 
     // ── Status Service (0xFFE3) ─────────────────────────
     NimBLEService* statusSvc = pServer->createService(UUID_STATUS_SVC);
@@ -294,13 +292,12 @@ void ble_manager::init() {
     uint32_t up = 0;
     pUptime->setValue((uint8_t*)&up, 4);
 
-    statusSvc->start();
 
     // ── Start advertising ───────────────────────────────
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(UUID_WIFI_SVC);
-    pAdvertising->setScanResponse(true);
-    pAdvertising->setMinPreferred(0x06);  // helps iPhone find it
+    pAdvertising->enableScanResponse(true);
+    pAdvertising->setPreferredParams(0x06, 0x12);
     pAdvertising->start();
 
     Serial.println("[BLE] GATT server started, advertising 0xFFE0");
@@ -357,7 +354,7 @@ static bool presenceScanActive = false;
 
 void ble_manager::startPresenceScan() {
     NimBLEScan* pScan = NimBLEDevice::getScan();
-    pScan->setAdvertisedDeviceCallbacks(&presenceScanCb, false);
+    pScan->setScanCallbacks(&presenceScanCb, false);
     pScan->setActiveScan(false);
     pScan->setInterval(100);
     pScan->setWindow(50);

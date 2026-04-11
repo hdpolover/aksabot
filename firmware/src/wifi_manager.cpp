@@ -104,8 +104,10 @@ void wifi_manager::startAP(const char* apName) {
     }
 
     // AP+STA so BLE can coexist and we can switch to STA without re-init
-    WiFi.mode(WIFI_AP_STA);
-    WiFi.softAP(apName, "");  // open network — no password needed for setup
+    WiFi.mode(WIFI_AP);
+    bool apOk = WiFi.softAP(apName);  // open network — no password
+    Serial.printf("[WiFi] softAP result: %s\n", apOk ? "OK" : "FAILED");
+    delay(100);  // let AP stabilize
     // onWiFiEvent is already registered in init(); no duplicate registration here
 
     Serial.printf("[WiFi] SoftAP '%s' started — IP: %s\n",

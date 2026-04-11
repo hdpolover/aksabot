@@ -2,6 +2,7 @@
 #include "sd_storage.h"
 #include <SD_MMC.h>
 #define SD SD_MMC
+#include <WiFi.h>
 #include <HTTPClient.h>
 #include <mbedtls/sha256.h>
 #include <Arduino.h>
@@ -116,19 +117,19 @@ bool ota_update::start(const char* url, const char* expectedSha256, const char* 
         return false;
     }
 
-    WiFiClient* stream = http.getStreamPtr();
+    WiFiClient* httpStream = http.getStreamPtr();
     uint8_t buf[DOWNLOAD_BUF_SIZE];
     int totalRead = 0;
 
     while (http.connected() && totalRead < contentLength) {
-        size_t available = stream->available();
+        size_t available = httpStream->available();
         if (available == 0) {
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
 
         size_t toRead = min(available, sizeof(buf));
-        size_t bytesRead = stream->readBytes(buf, toRead);
+        size_t bytesRead = httpStream->readBytes(buf, toRead);
         outFile.write(buf, bytesRead);
         totalRead += bytesRead;
 

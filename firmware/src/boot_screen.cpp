@@ -1,6 +1,7 @@
 #include "boot_screen.h"
 #include "config.h"
 #include "lgfx_config.h"
+#include "touch.h"
 #include <Arduino.h>
 
 extern LGFX tft;
@@ -85,6 +86,50 @@ void boot_screen::showSplash(const char* version) {
     drawSmall("AI Desk Companion", 170, DIM);
 
     delay(1500);
+}
+
+void boot_screen::showSplashWithBootCheck(const char* version) {
+    clearScreen();
+
+    // Robot face logo (same as showSplash)
+    int logoY = 70;
+    tft.drawRoundRect(CX - 25, logoY, 50, 38, 6, CYAN);
+    tft.fillCircle(CX - 10, logoY + 14, 4, CYAN);
+    tft.fillCircle(CX + 10, logoY + 14, 4, CYAN);
+    tft.drawLine(CX - 8, logoY + 28, CX + 8, logoY + 28, CYAN);
+    tft.drawLine(CX, logoY, CX, logoY - 10, CYAN);
+    tft.fillCircle(CX, logoY - 12, 3, CYAN);
+
+    drawCentered("AKSABOT", 120, WHITE, 1.2);
+
+    char versionStr[32];
+    snprintf(versionStr, sizeof(versionStr), "v%s", version);
+    drawSmall(versionStr, 150, DIM);
+    drawSmall("AI Desk Companion", 170, DIM);
+
+    // BOOT button hint
+    drawSmall("Press BOOT for BIOS", 220, DIM);
+
+    // Poll GPIO 0 for 2 seconds during splash
+    uint32_t start = millis();
+    bool detected = false;
+    while ((millis() - start) < 2000) {
+        if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
+            detected = true;
+            // Visual feedback
+            tft.fillRect(0, 215, LCD_WIDTH, 25, BG);
+            drawSmall("Entering BIOS...", 220, GREEN);
+            delay(500);
+            break;
+        }
+        delay(20);
+    }
+
+    if (!detected) {
+        // Normal boot — brief pause then continue
+        uint32_t elapsed = millis() - start;
+        if (elapsed < 1500) delay(1500 - elapsed);
+    }
 }
 
 void boot_screen::showHardwareCheck(const char* component, uint8_t status) {
@@ -257,6 +302,82 @@ void boot_screen::showReady() {
     drawSmall("Hold screen to talk", 158, DIM);
 
     delay(1500);
+}
+
+bool boot_screen::showBiosCountdown() {
+    // Draw the countdown UI
+    clearScreen();
+
+    // Gear icon (simple representation)
+    int gearY = 70;
+    tft.drawCircle(CX, gearY, 18, DIM);
+    tft.drawCircle(CX, gearY, 12, DIM);
+    tft.fillCircle(CX, gearY, 6, DIM);
+    // Gear teeth
+    for (int a = 0; a < 360; a += 45) {
+        float rad = a * PI / 180.0f;
+        int x1 = CX + (int)(16 * cosf(rad));
+        int y1 = gearY + (int)(16 * sinf(rad));
+        int x2 = CX + (int)(22 * cosf(rad));
+        int y2 = gearY + (int)(22 * sinf(rad));
+        tft.drawLine(x1, y1, x2, y2, DIM);
+    }
+
+    drawCentered("Hold for BIOS", 105, WHITE);
+    drawSmall("Release to continue boot", 130, DIM);
+
+    // Progress bar background
+    const int barX = 30;
+    const int barY = 165;
+    const int barW = LCD_WIDTH - 60;
+    const int barH = 8;
+    tft.drawRoundRect(barX - 1, barY - 1, barW + 2, barH + 2, 3, DIM);
+
+    // 2-second countdown, polling touch every 20ms
+    const uint32_t durationMs = 2000;
+    const uint32_t startMs = millis();
+    bool held = false;
+
+    while ((millis() - startMs) < durationMs) {
+        uint32_t elapsed = millis() - startMs;
+
+        // Update progress bar (drains left to right)
+        int fillW = barW - (int)((elapsed * barW) / durationMs);
+        if (fillW < 0) fillW = 0;
+        tft.fillRoundRect(barX, barY, fillW, barH, 2, CYAN);
+        // Clear the emptied portion
+        if (fillW < barW) {
+            tft.fillRect(barX + fillW, barY, barW - fillW, barH, BG);
+        }
+
+        // Poll touch
+        touch::tick(millis());
+        touch::processSerial(millis());
+
+        if (touch::isTouched()) {
+            held = true;
+            // Visual feedback — change bar color and text
+            tft.fillRoundRect(barX, barY, fillW, barH, 2, GREEN);
+            tft.fillRect(0, 128, LCD_WIDTH, 20, BG);
+            drawSmall("Entering BIOS...", 130, GREEN);
+            // Wait for the bar to finish with green
+            while ((millis() - startMs) < durationMs) {
+                elapsed = millis() - startMs;
+                fillW = barW - (int)((elapsed * barW) / durationMs);
+                if (fillW < 0) fillW = 0;
+                tft.fillRoundRect(barX, barY, fillW, barH, 2, GREEN);
+                if (fillW < barW) {
+                    tft.fillRect(barX + fillW, barY, barW - fillW, barH, BG);
+                }
+                delay(20);
+            }
+            break;
+        }
+
+        delay(20);
+    }
+
+    return held;
 }
 
 void boot_screen::showSetupComplete(const char* ssid) {
