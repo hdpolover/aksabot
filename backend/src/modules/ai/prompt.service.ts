@@ -46,8 +46,8 @@ export class PromptService {
         ? `\n\nYou know this about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
         : '';
 
-    // Time context — always included
-    const tz = context?.timezone || 'Asia/Jakarta';
+    // Time context — always included, uses server timezone by default
+    const tz = context?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
     const now = new Date().toLocaleString('en-US', {
       timeZone: tz,
       weekday: 'long',
