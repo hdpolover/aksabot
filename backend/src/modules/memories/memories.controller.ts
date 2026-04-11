@@ -5,8 +5,10 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Param,
   ParseUUIDPipe,
+  Post,
   Put,
   Query,
   UseGuards,
@@ -18,7 +20,21 @@ import { UpdateMemoryDto } from './dto/update-memory.dto';
 @Controller()
 @UseGuards(JwtAuthGuard)
 export class MemoriesController {
+  private readonly logger = new Logger(MemoriesController.name);
   constructor(private readonly memoriesService: MemoriesService) {}
+
+  @Post('devices/:deviceId/memories/extract')
+  async extractFromConversation(
+    @Param('deviceId', ParseUUIDPipe) deviceId: string,
+    @Body('conversationId') conversationId: string,
+  ) {
+    this.logger.log(`Manual extraction for device ${deviceId}, conversation ${conversationId}`);
+    const memories = await this.memoriesService.extractFromConversation(
+      conversationId,
+      deviceId,
+    );
+    return { extracted: memories.length, memories };
+  }
 
   @Get('devices/:deviceId/memories')
   findByDevice(
