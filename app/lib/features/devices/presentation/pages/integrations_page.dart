@@ -138,12 +138,10 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
 
       if (!mounted) return false;
 
-      final tz = DateTime.now().timeZoneName;
-      // Save location + timezone to device settings
+      // Save location to device settings (timezone auto-detected by server)
       await _saveSettings({
         'latitude': position.latitude,
         'longitude': position.longitude,
-        'timezone': tz,
       });
 
       setState(() {

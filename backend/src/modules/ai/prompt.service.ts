@@ -47,17 +47,34 @@ export class PromptService {
         : '';
 
     // Time context — always included, uses server timezone by default
-    const tz = context?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const now = new Date().toLocaleString('en-US', {
-      timeZone: tz,
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
+    const serverTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    let tz = context?.timezone || serverTz;
+    let now: string;
+    try {
+      now = new Date().toLocaleString('en-US', {
+        timeZone: tz,
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+    } catch {
+      // Invalid timezone (e.g. "WIB" abbreviation) — fall back to server timezone
+      tz = serverTz;
+      now = new Date().toLocaleString('en-US', {
+        timeZone: tz,
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+    }
     const timeBlock = `\n\nCurrent date and time: ${now} (${tz})`;
 
     // Weather context — only if enabled and cached
