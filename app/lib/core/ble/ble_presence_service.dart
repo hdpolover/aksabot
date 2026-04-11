@@ -25,12 +25,36 @@ class BlePresenceService {
   ///
   /// Uses low-power mode suitable for background operation.
   /// The ESP32 will scan for this advertisement to detect the user's phone.
+  /// Last failure reason — readable by the UI for diagnostics.
+  String? lastError;
+
   Future<bool> startAdvertising() async {
+    lastError = null;
+
     final supported = await _peripheral.isSupported;
-    if (!supported) return false;
+    if (!supported) {
+      lastError = 'BLE peripheral mode not supported on this device';
+      return false;
+    }
+
+    // Check permission first
+    final permState = await _peripheral.requestPermission();
+    if (permState == BluetoothPeripheralState.denied ||
+        permState == BluetoothPeripheralState.permanentlyDenied) {
+      lastError = 'Bluetooth permission denied (state: ${permState.name})';
+      return false;
+    }
+    if (permState == BluetoothPeripheralState.turnedOff) {
+      lastError = 'Bluetooth is turned off';
+      return false;
+    }
+    if (permState == BluetoothPeripheralState.unsupported) {
+      lastError = 'BLE advertising not supported';
+      return false;
+    }
 
     final advertiseData = AdvertiseData(
-      serviceUuid: BleConstants.presenceService.str,
+      serviceUuid: '0000ffe4-0000-1000-8000-00805f9b34fb',
       includeDeviceName: false,
     );
 
@@ -47,18 +71,21 @@ class BlePresenceService {
         advertiseSettings: settings,
       );
 
-      // Accept any non-error state as success
       _isAdvertising = result == BluetoothPeripheralState.ready ||
           result == BluetoothPeripheralState.granted ||
           result == BluetoothPeripheralState.limited;
 
       if (!_isAdvertising) {
-        // Check if advertising actually started despite the state code
         _isAdvertising = await _peripheral.isAdvertising;
+      }
+
+      if (!_isAdvertising) {
+        lastError = 'Advertising failed to start (state: ${result.name})';
       }
 
       return _isAdvertising;
     } catch (e) {
+      lastError = 'Advertising error: $e';
       _isAdvertising = false;
       return false;
     }

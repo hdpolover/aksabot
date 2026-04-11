@@ -7,7 +7,7 @@ import '../../domain/entities/device_entity.dart';
 import '../../domain/repositories/devices_repository.dart';
 
 /// Idle personality settings — controls idle chat and animation frequency.
-/// Persisted via PATCH /devices/:id/settings (one key at a time).
+/// All changes are collected locally and saved together via a Save button.
 class IdlePersonalityPage extends StatefulWidget {
   final String deviceId;
   const IdlePersonalityPage({super.key, required this.deviceId});
@@ -20,11 +20,18 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
   final _devicesRepo = sl<DevicesRepository>();
 
   bool _loading = true;
+  bool _saving = false;
+  bool _dirty = false;
   String? _error;
 
   bool _idleChatEnabled = true;
   String _idleChatFrequency = 'normal';
   String _idleAnimationSpeed = 'normal';
+
+  // Server values — used to detect changes
+  bool _serverChatEnabled = true;
+  String _serverChatFrequency = 'normal';
+  String _serverAnimationSpeed = 'normal';
 
   @override
   void initState() {
@@ -44,35 +51,62 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
         _error = failure.message;
         _loading = false;
       }),
-      (device) {
-        final s = device.settingsJson;
-        setState(() {
-          _idleChatEnabled = s['idle_chat_enabled'] as bool? ?? true;
-          _idleChatFrequency =
-              s['idle_chat_frequency'] as String? ?? 'normal';
-          _idleAnimationSpeed =
-              s['idle_animation_speed'] as String? ?? 'normal';
-          _loading = false;
-        });
-      },
+      (device) => _applyFromServer(device),
     );
   }
 
-  int _pendingSaves = 0;
+  void _applyFromServer(Device device) {
+    final s = device.settingsJson;
+    final chatEnabled = s['idle_chat_enabled'] as bool? ?? true;
+    final chatFreq = s['idle_chat_frequency'] as String? ?? 'normal';
+    final animSpeed = s['idle_animation_speed'] as String? ?? 'normal';
+    setState(() {
+      _idleChatEnabled = chatEnabled;
+      _idleChatFrequency = chatFreq;
+      _idleAnimationSpeed = animSpeed;
+      _serverChatEnabled = chatEnabled;
+      _serverChatFrequency = chatFreq;
+      _serverAnimationSpeed = animSpeed;
+      _dirty = false;
+      _loading = false;
+    });
+  }
 
-  Future<void> _save(String key, dynamic value) async {
-    setState(() => _pendingSaves++);
+  void _markDirty() {
+    final isDirty = _idleChatEnabled != _serverChatEnabled ||
+        _idleChatFrequency != _serverChatFrequency ||
+        _idleAnimationSpeed != _serverAnimationSpeed;
+    if (isDirty != _dirty) setState(() => _dirty = isDirty);
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+
+    // Only send keys that actually changed
+    final patch = <String, dynamic>{};
+    if (_idleChatEnabled != _serverChatEnabled) {
+      patch['idle_chat_enabled'] = _idleChatEnabled;
+    }
+    if (_idleChatFrequency != _serverChatFrequency) {
+      patch['idle_chat_frequency'] = _idleChatFrequency;
+    }
+    if (_idleAnimationSpeed != _serverAnimationSpeed) {
+      patch['idle_animation_speed'] = _idleAnimationSpeed;
+    }
+
+    if (patch.isEmpty) {
+      setState(() => _saving = false);
+      return;
+    }
 
     final result =
-        await _devicesRepo.updateSettings(widget.deviceId, {key: value});
+        await _devicesRepo.updateSettings(widget.deviceId, patch);
     if (!mounted) return;
-
-    setState(() => _pendingSaves--);
 
     result.fold(
       (failure) {
-        // Revert only the failed key by reloading from server
-        _loadSettings();
+        setState(() => _saving = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to save: ${failure.message}'),
@@ -80,10 +114,12 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
           ),
         );
       },
-      (_) {
-        // Success — local state is already correct from the optimistic
-        // setState in the onChanged callback. No need to overwrite other
-        // fields from the server response.
+      (device) {
+        _applyFromServer(device);
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Settings saved')),
+        );
       },
     );
   }
@@ -102,7 +138,8 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.error_outline, size: 48, color: colors.error),
+                      Icon(Icons.error_outline,
+                          size: 48, color: colors.error),
                       const SizedBox(height: 16),
                       Text(_error!, style: TextStyle(color: colors.error)),
                       const SizedBox(height: 16),
@@ -113,7 +150,10 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
                     ],
                   ),
                 )
-              : ListView(
+              : Column(
+                  children: [
+                    Expanded(
+                      child: ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
                     // Idle chat section
@@ -135,12 +175,10 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
                               'Random fun facts, thoughts, and roasts',
                             ),
                             value: _idleChatEnabled,
-                            onChanged: _pendingSaves > 0
-                                ? null
-                                : (v) {
-                                    setState(() => _idleChatEnabled = v);
-                                    _save('idle_chat_enabled', v);
-                                  },
+                            onChanged: (v) {
+                              setState(() => _idleChatEnabled = v);
+                              _markDirty();
+                            },
                           ),
                           if (_idleChatEnabled) ...[
                             const Divider(height: 1),
@@ -152,10 +190,8 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
                               child: Row(
                                 children: [
                                   Expanded(
-                                    child: Text(
-                                      'Frequency',
-                                      style: theme.textTheme.bodyLarge,
-                                    ),
+                                    child: Text('Frequency',
+                                        style: theme.textTheme.bodyLarge),
                                   ),
                                   DropdownButton<String>(
                                     value: _idleChatFrequency,
@@ -174,14 +210,12 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
                                         child: Text('Often (3-8 min)'),
                                       ),
                                     ],
-                                    onChanged: _pendingSaves > 0
-                                        ? null
-                                        : (v) {
-                                            if (v == null) return;
-                                            setState(
-                                                () => _idleChatFrequency = v);
-                                            _save('idle_chat_frequency', v);
-                                          },
+                                    onChanged: (v) {
+                                      if (v == null) return;
+                                      setState(
+                                          () => _idleChatFrequency = v);
+                                      _markDirty();
+                                    },
                                   ),
                                 ],
                               ),
@@ -212,10 +246,8 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
                         child: Row(
                           children: [
                             Expanded(
-                              child: Text(
-                                'Animation speed',
-                                style: theme.textTheme.bodyLarge,
-                              ),
+                              child: Text('Animation speed',
+                                  style: theme.textTheme.bodyLarge),
                             ),
                             DropdownButton<String>(
                               value: _idleAnimationSpeed,
@@ -234,30 +266,40 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
                                   child: Text('Fast (3-10s)'),
                                 ),
                               ],
-                              onChanged: _pendingSaves > 0
-                                  ? null
-                                  : (v) {
-                                      if (v == null) return;
-                                      setState(
-                                          () => _idleAnimationSpeed = v);
-                                      _save('idle_animation_speed', v);
-                                    },
+                              onChanged: (v) {
+                                if (v == null) return;
+                                setState(() => _idleAnimationSpeed = v);
+                                _markDirty();
+                              },
                             ),
                           ],
                         ),
                       ),
                     ),
-
-                    if (_pendingSaves > 0) ...[
-                      const SizedBox(height: 16),
-                      const Center(
+                  ],
+                ),
+                    ),
+                    // Sticky save bar
+                    if (_dirty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                         child: SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                          width: double.infinity,
+                          child: FilledButton(
+                            onPressed: _saving ? null : _save,
+                            child: _saving
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Text('Save'),
+                          ),
                         ),
                       ),
-                    ],
                   ],
                 ),
     );

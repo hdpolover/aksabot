@@ -25,9 +25,9 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
   String? _error;
   Device? _device;
 
-  double _volume = 80;
-  double _brightness = 80;
-  bool _showTranscript = true;
+  double _volume = 70;
+  double _brightness = 70;
+  bool _showTranscript = false;
   String _idleTimeout = '30';
 
   @override
@@ -54,9 +54,9 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
         final minutes = (timeoutSec ~/ 60);
         setState(() {
           _device = device;
-          _volume = (s['volume'] as num?)?.toDouble() ?? 80;
-          _brightness = (s['brightness'] as num?)?.toDouble() ?? 80;
-          _showTranscript = s['display_transcript'] as bool? ?? true;
+          _volume = (s['volume'] as num?)?.toDouble() ?? 70;
+          _brightness = (s['brightness'] as num?)?.toDouble() ?? 70;
+          _showTranscript = s['display_transcript'] as bool? ?? false;
           _idleTimeout =
               const ['1', '5', '10', '30'].contains(minutes.toString())
                   ? minutes.toString()
@@ -94,9 +94,9 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
         final minutes = (timeoutSec ~/ 60);
         setState(() {
           _device = device;
-          _volume = (s['volume'] as num?)?.toDouble() ?? 80;
-          _brightness = (s['brightness'] as num?)?.toDouble() ?? 80;
-          _showTranscript = s['display_transcript'] as bool? ?? true;
+          _volume = (s['volume'] as num?)?.toDouble() ?? 70;
+          _brightness = (s['brightness'] as num?)?.toDouble() ?? 70;
+          _showTranscript = s['display_transcript'] as bool? ?? false;
           _idleTimeout =
               const ['1', '5', '10', '30'].contains(minutes.toString())
                   ? minutes.toString()

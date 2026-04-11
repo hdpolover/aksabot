@@ -123,13 +123,16 @@ static void onWsJson(const char* event, const char* data) {
     else if (strcmp(event, "session:end") == 0) {
         Serial.printf("[Main] Session ended: %s\n", data);
     }
-    else if (strcmp(event, "transcript:partial") == 0) {
-        Serial.printf("[Main] STT partial: %s\n", data);
-        display::setTranscriptText("You", data);
-    }
-    else if (strcmp(event, "transcript:final") == 0) {
-        Serial.printf("[Main] STT final: %s\n", data);
-        display::setTranscriptText("You", data);
+    else if (strcmp(event, "transcript:partial") == 0 ||
+             strcmp(event, "transcript:final") == 0) {
+        // STT transcript: parse {"text":"..."} or use raw data as fallback
+        const char* txt = data;
+        JsonDocument sttDoc;
+        if (deserializeJson(sttDoc, data) == DeserializationError::Ok) {
+            txt = sttDoc["text"] | data;
+        }
+        Serial.printf("[Main] STT: %s\n", txt);
+        display::setTranscriptText("You", txt);
     }
     else if (strcmp(event, "response:start") == 0) {
         power_manager::recordInteraction();  // Wake display for response
@@ -143,8 +146,14 @@ static void onWsJson(const char* event, const char* data) {
         Serial.println("[Main] Response start — buffering audio");
     }
     else if (strcmp(event, "response:text") == 0) {
-        Serial.printf("[Main] LLM: %s\n", data);
-        display::setTranscriptText("Aksa", data);
+        // LLM response text: parse {"text":"...","isFinal":bool} or use raw
+        const char* txt = data;
+        JsonDocument respDoc;
+        if (deserializeJson(respDoc, data) == DeserializationError::Ok) {
+            txt = respDoc["text"] | data;
+        }
+        Serial.printf("[Main] LLM: %s\n", txt);
+        display::setTranscriptText("Aksa", txt);
     }
     else if (strcmp(event, "response:end") == 0) {
         if (data && data[0] != '\0') {
@@ -357,6 +366,19 @@ static void onWsJson(const char* event, const char* data) {
                 display::setTranscriptOverlay(show);
                 Serial.printf("[Main] Config: display_transcript=%s\n", show ? "true" : "false");
             }
+            // Presence detection enable/disable at runtime
+            if (doc.containsKey("presence_enabled")) {
+                bool enabled = doc["presence_enabled"] | false;
+                nvs_store::setPresenceEnabled(enabled);
+                if (enabled) {
+                    ble_manager::initScanOnly();
+                    ble_manager::startPresenceScan();
+                    Serial.println("[Main] Config: presence scanning STARTED");
+                } else {
+                    ble_manager::stopPresenceScan();
+                    Serial.println("[Main] Config: presence scanning STOPPED");
+                }
+            }
             // Idle timeout
             if (doc.containsKey("idle_timeout_seconds")) {
                 int timeout = doc["idle_timeout_seconds"] | 300;
@@ -471,6 +493,7 @@ static void onTouchEvent(touch::Event event) {
                 ws_client::sendEvent("audio:interrupt");
                 audio_io::stopSpeaker();
                 face::feedAudioAmplitude(0);
+                display::setTranscriptText("", "");  // Clear transcript
                 Serial.println("[Main] Interrupted");
             }
             else if (display::getMode() == display::Mode::REMINDER) {
@@ -558,6 +581,7 @@ static void audioCaptureLoop(void* param) {
                 face::feedAudioAmplitude(0);
                 appState.botState = BotState::IDLE;
                 syncFaceToState();
+                display::setTranscriptText("", "");  // Clear transcript overlay
                 Serial.println("[Main] Playback complete");
             }
             continue;
@@ -591,6 +615,7 @@ static void audioCaptureLoop(void* param) {
             face::feedAudioAmplitude(0);
             appState.botState = BotState::IDLE;
             syncFaceToState();
+            display::setTranscriptText("", "");
             Serial.println("[Echo] Playback done");
             continue;
         }

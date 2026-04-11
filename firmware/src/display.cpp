@@ -778,23 +778,58 @@ void renderStatus(const display::StatusBar& status) {
 }
 
 void renderTranscriptOverlay(const char* speaker, const char* text) {
-    // Semi-transparent bar at bottom
-    int barH = 60;
+    const int padX = 8;
+    const int lineH = 14;
+    const int maxLines = 3;
+    const int maxCharsPerLine = 36;
+
+    tft.setFont(&fonts::Font2);
+    tft.setTextSize(1);
+    tft.setTextDatum(lgfx::top_left);
+
+    // Word-wrap text into lines
+    char lines[maxLines][42];
+    int lineCount = 0;
+    memset(lines, 0, sizeof(lines));
+
+    const char* p = text;
+    int col = 0;
+
+    while (*p && lineCount < maxLines) {
+        while (*p == ' ') p++;
+        if (!*p) break;
+
+        const char* wordStart = p;
+        while (*p && *p != ' ') p++;
+        int wordLen = p - wordStart;
+
+        if (col + (col > 0 ? 1 : 0) + wordLen > maxCharsPerLine) {
+            lineCount++;
+            col = 0;
+            if (lineCount >= maxLines) break;
+        }
+
+        if (col > 0) lines[lineCount][col++] = ' ';
+
+        int copyLen = (col + wordLen < (int)sizeof(lines[0]) - 1) ? wordLen : ((int)sizeof(lines[0]) - 1 - col);
+        memcpy(&lines[lineCount][col], wordStart, copyLen);
+        col += copyLen;
+        lines[lineCount][col] = '\0';
+    }
+    if (col > 0) lineCount++;
+
+    int barH = 18 + lineCount * lineH + 4;
     int barY = LCD_HEIGHT - barH;
+
     tft.fillRect(0, barY, LCD_WIDTH, barH, COL_STATUS_BG);
 
-    tft.setTextDatum(lgfx::top_left);
-    tft.setTextSize(1);
     tft.setTextColor(COL_ACCENT);
-    tft.drawString(speaker, 8, barY + 4);
+    tft.drawString(speaker, padX, barY + 3);
 
     tft.setTextColor(COL_FACE);
-    tft.setTextSize(1);
-    // Truncate text to fit
-    char truncBuf[48];
-    strncpy(truncBuf, text, sizeof(truncBuf) - 1);
-    truncBuf[sizeof(truncBuf) - 1] = '\0';
-    tft.drawString(truncBuf, 8, barY + 20);
+    for (int i = 0; i < lineCount; i++) {
+        tft.drawString(lines[i], padX, barY + 16 + i * lineH);
+    }
 }
 
 }  // namespace display_hw

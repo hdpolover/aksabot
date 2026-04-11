@@ -4,6 +4,7 @@
 #include "es8311.h"
 #include "driver/i2s_std.h"
 #include <Arduino.h>
+#include <math.h>
 
 // ES8311 codec — new I2S driver (ESP-IDF 5.x).
 // Full-duplex on I2S_NUM_1 (manufacturer's port) with MCLK.
@@ -157,7 +158,17 @@ void audio_io::flushSpeaker() {
 
 void audio_io::setVolume(uint8_t percent) {
     if (percent > 100) percent = 100;
+
+    // Apply perceptual curve — ES8311 DAC volume is dB-scale (logarithmic),
+    // so a linear slider feels very quiet at low values.
+    // Remap so 50% slider ≈ 50% perceived loudness.
+    // Using power curve: mapped = (percent/100)^0.5 * 100
+    // This maps: 0→0, 25→50, 50→71, 75→87, 100→100
+    float normalized = (float)percent / 100.0f;
+    float curved = sqrtf(normalized);
+    uint8_t mapped = (uint8_t)(curved * 100.0f);
+
     es8311_handle_t handle = es8311_create(I2C_NUM_0, ES8311_ADDRESS_0);
-    es8311_voice_volume_set(handle, percent, NULL);
-    Serial.printf("[Audio] Volume set to %d%%\n", percent);
+    es8311_voice_volume_set(handle, mapped, NULL);
+    Serial.printf("[Audio] Volume %d%% → ES8311 %d%%\n", percent, mapped);
 }

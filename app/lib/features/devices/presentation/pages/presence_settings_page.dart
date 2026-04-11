@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 
@@ -19,6 +21,7 @@ class PresenceSettingsPage extends StatefulWidget {
 class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
   late final BlePresenceService _presence;
   late final DevicesRepository _devicesRepo;
+  StreamSubscription<PeripheralState>? _stateSub;
 
   bool _enabled = false;
   bool _isLoading = true;
@@ -33,6 +36,28 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
     _presence = sl<BlePresenceService>();
     _devicesRepo = sl<DevicesRepository>();
     _loadSettings();
+    _listenBleState();
+  }
+
+  void _listenBleState() {
+    _stateSub = FlutterBlePeripheral()
+        .onPeripheralStateChanged
+        ?.listen((state) {
+      if (!mounted) return;
+      // Only update UI — don't call start/stop advertising here to avoid
+      // "Reply already submitted" crash in the plugin when BT toggles.
+      setState(() {
+        if (state == PeripheralState.poweredOff) {
+          _enabled = false;
+        }
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _stateSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadSettings() async {
@@ -68,6 +93,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
       if (started) {
         await _presence.saveEnabled(true);
         _syncToBackend({'presence_enabled': true});
+        if (mounted) setState(() {}); // refresh advertising status text
       } else {
         await _presence.saveEnabled(false);
         if (!mounted) return;
@@ -82,48 +108,65 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
   }
 
   void _showPermissionDialog() {
+    final errorDetail = _presence.lastError ?? 'Unknown error';
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        icon: Icon(
-          Icons.bluetooth_disabled,
-          size: 48,
-          color: Theme.of(context).colorScheme.error,
-        ),
-        title: const Text('Bluetooth Permission Required'),
-        content: const Text(
-          'Presence detection needs Bluetooth advertising permission to work. '
-          'Please enable Bluetooth and grant the required permissions in your device settings.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
+      builder: (ctx) {
+        final colors = Theme.of(ctx).colorScheme;
+        return AlertDialog(
+          icon: Icon(Icons.bluetooth_disabled, size: 40, color: colors.error),
+          title: const Text('Bluetooth Required'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Presence detection needs Bluetooth advertising to work. '
+                  'Make sure Bluetooth is on and permissions are granted.',
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: colors.errorContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    errorDetail,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colors.onErrorContainer,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-          FilledButton.tonal(
-            onPressed: () async {
-              Navigator.of(ctx).pop();
-              // Try requesting permission via the BLE peripheral plugin
-              final result =
-                  await FlutterBlePeripheral().requestPermission();
-              if (!mounted) return;
-              if (result == BluetoothPeripheralState.granted ||
-                  result == BluetoothPeripheralState.ready) {
+          actionsAlignment: MainAxisAlignment.end,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.tonal(
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                await FlutterBlePeripheral().openAppSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                Navigator.of(ctx).pop();
                 _togglePresence(true);
-              }
-            },
-            child: const Text('Grant Permission'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              Navigator.of(ctx).pop();
-              // Open app settings so user can manually enable permissions
-              await FlutterBlePeripheral().openAppSettings();
-            },
-            child: const Text('Open Settings'),
-          ),
-        ],
-      ),
+              },
+              child: const Text('Try Again'),
+            ),
+          ],
+        );
+      },
     );
   }
 
