@@ -70,7 +70,8 @@ static bool canBlink(face::Expression e) {
            e == face::Expression::CALM ||
            e == face::Expression::FOCUSED ||
            e == face::Expression::HAPPY ||
-           e == face::Expression::OFFLINE;
+           e == face::Expression::OFFLINE ||
+           e == face::Expression::SHRUG;
 }
 
 // ── Public API ─────────────────────────────────────────
@@ -178,6 +179,17 @@ void face::tick(uint32_t nowMs) {
     // ── Breathing cycle (always runs — used by sleeping, idle mouth, sad tremble)
     state.breathPhase += dt / 4.0f;
     if (state.breathPhase > 1.0f) state.breathPhase -= 1.0f;
+
+    // ── Shrug animation (head shake) ──────────────────
+    if (active == Expression::SHRUG) {
+        state.shrugPhase += dt * 3.0f;  // ~3 shakes per second
+        // Oscillate face left-right via fidget
+        state.fidgetX = sinf(state.shrugPhase * 6.28f) * 8.0f;
+        // Slight vertical bob
+        state.bounceY = sinf(state.shrugPhase * 12.56f) * 1.5f;
+    } else {
+        state.shrugPhase = 0.0f;
+    }
 
     // ── Mouth amplitude smoothing ──────────────────
     // Feed amplitude for ANY expression (not just SPEAKING) — enables emotion-aware speech

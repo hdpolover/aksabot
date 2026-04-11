@@ -164,10 +164,10 @@ static void onWsJson(const char* event, const char* data) {
     }
     else if (strcmp(event, "error") == 0) {
         Serial.printf("[Main] Error: %s\n", data);
-        face::setExpression(face::Expression::CONFUSED, 200);
-        scheduleFaceRevert(2500);
+        face::setExpression(face::Expression::SHRUG, 200);
+        scheduleFaceRevert(3000);
         appState.botState = BotState::IDLE;
-        // Don't call syncFaceToState() — let CONFUSED show for 2.5s first
+        // Don't call syncFaceToState() — let SHRUG play for 3s first
     }
     else if (strcmp(event, "state:update") == 0) {
         // Backend state sync (e.g., after STT error resets to idle)
@@ -269,6 +269,7 @@ static void onWsJson(const char* event, const char* data) {
                 {"focused",     face::Expression::FOCUSED},
                 {"happy",       face::Expression::HAPPY},
                 {"sad",         face::Expression::SAD},
+                {"shrug",       face::Expression::SHRUG},
             };
 
             bool found = false;

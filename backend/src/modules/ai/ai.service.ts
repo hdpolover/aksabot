@@ -26,13 +26,20 @@ export type PipelineEvent =
   | { type: 'audio'; data: Buffer; cacheKey?: string; emotion?: string }
   | { type: 'done'; fullText: string; cacheKeys: CacheEntry[] };
 
-// Parse "[emotion]" tag from end of sentence
-const EMOTION_TAG_RE = /\s*\[(\w+)\]\s*$/;
+// Parse "[emotion]" tag from anywhere in the sentence (start, end, or inline)
+const EMOTION_TAGS = new Set([
+  'happy', 'sad', 'excited', 'calm', 'confused', 'focused',
+  'sarcastic', 'sympathetic', 'neutral',
+]);
 
 function extractEmotion(sentence: string): { text: string; emotion?: string } {
-  const match = sentence.match(EMOTION_TAG_RE);
-  if (match) {
-    return { text: sentence.replace(EMOTION_TAG_RE, '').trim(), emotion: match[1] };
+  // Match [word] anywhere — greedy, finds the first valid emotion tag
+  const allTags = [...sentence.matchAll(/\[(\w+)\]/g)];
+  for (const m of allTags) {
+    if (EMOTION_TAGS.has(m[1])) {
+      const cleaned = sentence.replace(m[0], '').replace(/\s{2,}/g, ' ').trim();
+      return { text: cleaned, emotion: m[1] };
+    }
   }
   return { text: sentence };
 }

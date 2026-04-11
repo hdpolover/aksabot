@@ -55,7 +55,7 @@ static uint16_t COL_STATUS_BG;
 static const int CX = LCD_WIDTH / 2;
 static const int CY = LCD_HEIGHT / 2 - 20;
 static const int EYE_SPACE = 48;
-static const int MOUTH_Y   = CY + 55;
+static const int MOUTH_Y   = CY + 70;
 
 // ── Rich color system (from face-animations firmware) ─────
 
@@ -92,6 +92,7 @@ static const Palette PAL[EXPR_COUNT] = {
     /* FOCUS */   { rgb(0,0,0),    rgb(120,200,255), rgb(80,160,220),  rgb(140,220,255), rgb(195,220,250), rgb(130,210,255), rgb(245,245,250) },
     /* HAPPY */   { rgb(0,0,0),    rgb(255,100,180), rgb(200,60,140),  rgb(255,120,200), rgb(250,195,215), rgb(255,110,190), rgb(245,245,250) },
     /* SAD */     { rgb(0,0,0),    rgb(100,120,180), rgb(70,85,140),   rgb(80,100,160),  rgb(135,145,175), rgb(110,130,190), rgb(245,245,250) },
+    /* SHRUG */   { rgb(0,0,0),    rgb(180,180,200), rgb(130,130,160), rgb(200,200,220), rgb(170,170,190), rgb(190,190,210), rgb(240,240,245) },
 };
 
 struct EyeShape {
@@ -112,6 +113,7 @@ static const EyeShape EYES[EXPR_COUNT] = {
     /* FOCUS */   { 38, 11,   0,   5, true,  false },
     /* HAPPY */   { 44, 11,   0,  -6, true,  true  },
     /* SAD */     { 38, 13,   0,  10, false, false },
+    /* SHRUG */   { 40, 12,   0,   0, true,  true  },
 };
 
 // ── Display hardware implementation ───────────────────
@@ -253,8 +255,8 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
         case face::Expression::IDLE: {
             if (talking) {
                 // Neutral talking mouth — oval opens with amplitude
-                int ow = 40 + (int)(a * 20);
-                int oh = 12 + (int)(a * 36);
+                int ow = 44 + (int)(a * 24);
+                int oh = 14 + (int)(a * 42);
                 s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
                 if (oh > 16) {
                     s.fillEllipse(CX, my + 1, ow / 2 - 4, oh / 2 - 4,
@@ -277,9 +279,9 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             break;
         }
         case face::Expression::SPEAKING: {
-            // Default speaking — bigger, more dramatic
-            int ow = 40 + (int)(a * 20);
-            int oh = 14 + (int)(a * 34);
+            // Default speaking — big, dramatic
+            int ow = 44 + (int)(a * 24);
+            int oh = 16 + (int)(a * 42);
             s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
             if (oh > 16) {
                 s.fillEllipse(CX, my + 1, ow / 2 - 4, oh / 2 - 4,
@@ -290,7 +292,7 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
         case face::Expression::HAPPY: {
             if (talking) {
                 // Joyful open smile — upturned corners + vertical opening
-                int oh = 10 + (int)(a * 32);
+                int oh = 14 + (int)(a * 40);
                 thickBezier(s, CX - 26, my, CX, my + 16, CX + 26, my, 3, pal.mouth);
                 if (oh > 14) {
                     s.fillEllipse(CX, my + 6, 14 + (int)(a * 6), oh / 2 - 2, pal.mouth);
@@ -310,7 +312,7 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
         case face::Expression::SAD: {
             if (talking) {
                 // Sad talking — frown that opens downward
-                int oh = 8 + (int)(a * 24);
+                int oh = 12 + (int)(a * 32);
                 thickBezier(s, CX - 18, my + 4, CX, my - 4, CX + 18, my + 4, 2, pal.mouth);
                 if (oh > 12) {
                     s.fillEllipse(CX, my + 6, 10 + (int)(a * 4), oh / 2 - 2, pal.mouth);
@@ -326,8 +328,8 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
         case face::Expression::ENCOURAGING: {
             if (talking) {
                 // Confident wide grin that opens — biggest mouth
-                int ow = 44 + (int)(a * 16);
-                int oh = 12 + (int)(a * 36);
+                int ow = 48 + (int)(a * 20);
+                int oh = 14 + (int)(a * 42);
                 thickBezier(s, CX - 24, my, CX, my + 14, CX + 24, my, 3, pal.mouth);
                 if (oh > 16) {
                     s.fillEllipse(CX, my + 6, ow / 2 - 6, oh / 2 - 2, pal.mouth);
@@ -346,8 +348,8 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
         case face::Expression::CALM: {
             if (talking) {
                 // Gentle small opening — soft, rounded
-                int ow = 30 + (int)(a * 10);
-                int oh = 8 + (int)(a * 20);
+                int ow = 36 + (int)(a * 14);
+                int oh = 10 + (int)(a * 28);
                 s.fillEllipse(CX, my + 2, ow / 2, oh / 2, pal.mouth);
                 if (oh > 12) {
                     s.fillEllipse(CX, my + 3, ow / 2 - 3, oh / 2 - 3,
@@ -362,8 +364,8 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             if (talking) {
                 // Wavering asymmetric open — slightly off-center, wobbles
                 float wobble = sinf(breathPhase * 6.28f * 2) * 3.0f;
-                int ow = 32 + (int)(a * 14);
-                int oh = 10 + (int)(a * 22);
+                int ow = 36 + (int)(a * 18);
+                int oh = 12 + (int)(a * 30);
                 s.fillEllipse(CX + (int)wobble, my, ow / 2, oh / 2, pal.mouth);
                 if (oh > 14) {
                     s.fillEllipse(CX + (int)wobble, my + 1, ow / 2 - 4, oh / 2 - 4,
@@ -381,9 +383,9 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
         }
         case face::Expression::FOCUSED: {
             if (talking) {
-                // Firm controlled opening — tight, small
-                int ow = 28 + (int)(a * 8);
-                int oh = 8 + (int)(a * 16);
+                // Firm controlled opening — tight but visible
+                int ow = 32 + (int)(a * 12);
+                int oh = 10 + (int)(a * 24);
                 s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
                 if (oh > 12) {
                     s.fillEllipse(CX, my + 1, ow / 2 - 3, oh / 2 - 3,
@@ -407,6 +409,27 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
         case face::Expression::OFFLINE:
             thickBezier(s, CX - 18, my, CX, my, CX + 18, my, 2, pal.mouth);
             break;
+        case face::Expression::SHRUG: {
+            // Pursed lips blowing a bubble
+            float bp = breathPhase * 2 * 3.14159f;
+            // Pursed mouth (small circle)
+            s.fillSmoothCircle(CX, my, 5, pal.mouth);
+            s.fillSmoothCircle(CX, my, 2, blendRGB565(pal.accent, pal.bg, 40));
+            // Floating bubble — grows and drifts right from mouth
+            float bubbleT = fmodf(breathPhase * 3.0f, 1.0f);  // 3x faster cycle
+            int bubbleR = 3 + (int)(bubbleT * 8);
+            int bubbleX = CX + 10 + (int)(bubbleT * 30);
+            int bubbleY = my - (int)(bubbleT * 20);
+            uint8_t bubbleAlpha = (uint8_t)(200 * (1.0f - bubbleT));
+            uint16_t bubbleCol = blendRGB565(pal.accent, pal.bg, bubbleAlpha);
+            s.drawCircle(bubbleX, bubbleY, bubbleR, bubbleCol);
+            // Highlight
+            if (bubbleR > 4) {
+                s.fillSmoothCircle(bubbleX - bubbleR/3, bubbleY - bubbleR/3, 2,
+                                   blendRGB565(TFT_WHITE, pal.bg, bubbleAlpha));
+            }
+            break;
+        }
         default: break;
     }
 }
@@ -508,16 +531,16 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     }
     skip_face:
 
-    // ── Thinking dots (bottom, matching listening indicator) ──
+    // ── Thinking dots (bottom, bright white for visibility) ──
     if (fs.expression == face::Expression::THINKING) {
         int dy = LCD_HEIGHT - 45;
+        uint16_t dotLit = TFT_WHITE;
+        uint16_t dotDim = blendRGB565(TFT_WHITE, pal.bg, 50);
         for (int i = 0; i < 3; i++) {
             int dx = CX - 15 + i * 15;
             bool lit = i < fs.thinkDots;
-            uint16_t dotCol = lit ? pal.iris : blendRGB565(pal.iris, pal.bg, 40);
-            int r = lit ? 5 : 3;
-            s.fillSmoothCircle(dx, dy, r, dotCol);
-            if (lit) drawGlow(s, dx, dy, 10, pal.iris, pal.bg, 40);
+            s.fillSmoothCircle(dx, dy, lit ? 5 : 3, lit ? dotLit : dotDim);
+            if (lit) drawGlow(s, dx, dy, 12, dotLit, pal.bg, 50);
         }
     }
 

@@ -22,6 +22,7 @@ enum class Expression : uint8_t {
     FOCUSED,        // Determined eyes, slight squint (pomodoro focus)
     HAPPY,          // Wide grin, bouncing
     SAD,            // Frown, teardrops
+    SHRUG,          // Head shake + bubble blow — "idk/whatever"
     COUNT
 };
 
@@ -73,6 +74,9 @@ struct FaceState {
     float audioEnergy;          // Smoothed rolling energy (0.0-1.0)
     bool  energyPeak;           // True when sudden amplitude spike detected
     float speakingNodY;         // Subtle head nod driven by amplitude
+
+    // Shrug animation
+    float shrugPhase;           // 0.0-1.0 progress of head-shake + bubble animation
 
     // Transition
     bool  transitionActive;
