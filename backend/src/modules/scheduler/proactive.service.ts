@@ -72,15 +72,12 @@ export class ProactiveService {
           : '';
 
       const { text } = await this.llm.generate(
-        `You are a friendly desk companion named ${name}. ` +
-          `It is currently ${timeOfDay} (${hour}:00). Generate a brief, warm ${timeOfDay} greeting. ` +
-          `Use an appropriate greeting for the time of day (e.g., "Good morning" before noon, "Good afternoon", "Good evening", or "Hey, still up?" late at night). ` +
-          `If you have context about what the user was working on, reference it naturally. ` +
-          `Keep it under 30 words. Be conversational, not robotic.`,
+        `You are ${name}, a chill desk buddy. Talk like a friend — casual, short, punchy. ` +
+          `No corporate speak. No "I hope you're doing well." Just be real.`,
         [
           {
             role: 'user',
-            content: `${memoryContext}\n\nGenerate a ${timeOfDay} greeting. The current time is ${hour}:00.`,
+            content: `${memoryContext}\n\nIt's ${timeOfDay} (${hour}:00). Say a quick ${timeOfDay} greeting. One sentence, max 15 words. If you know what they were working on, mention it casually.`,
           },
         ],
       );
@@ -139,18 +136,11 @@ export class ProactiveService {
       const isLongAbsence = awayMinutes > 30;
 
       const { text } = await this.llm.generate(
-        `You are a friendly desk companion named ${name}. ` +
-          `The user just returned to their desk after being away for ${awayMinutes} minutes. ` +
-          `The current time is ${hour}:00. ` +
-          `Generate a brief, warm welcome-back message. ` +
-          (isLongAbsence
-            ? `They were gone a while — acknowledge it naturally (e.g., "Long meeting?" or "Welcome back!"). `
-            : `They were only gone briefly — keep it casual (e.g., "Hey, welcome back" or "There you are!"). `) +
-          `Keep it under 20 words. Be conversational, not robotic.`,
+        `You are ${name}, a chill desk buddy. Talk like a friend — casual, short, punchy.`,
         [
           {
             role: 'user',
-            content: `${memoryContext}\n\nGenerate a welcome-back message for someone who was away ${awayMinutes} minutes.`,
+            content: `${memoryContext}\n\nUser just came back after ${awayMinutes} min away. ${isLongAbsence ? 'They were gone a while.' : 'Quick absence.'} Say something casual. One sentence, max 10 words.`,
           },
         ],
       );
@@ -189,7 +179,7 @@ export class ProactiveService {
       if (idleMinutes >= 180) {
         // 3+ hours idle
         this.sendToDevice(deviceId, 'proactive:nudge', {
-          text: "Everything okay? You've been quiet for a while.",
+          text: "You alive over there? Been pretty quiet.",
           display: {
             expression: 'gentle',
             screenMode: 'reminder',
@@ -224,14 +214,11 @@ export class ProactiveService {
             : '';
 
         const { text } = await this.llm.generate(
-          `You are ${name}, a friendly desk companion. ` +
-            `It's the end of the work day. Generate a brief wind-down message ` +
-            `asking what the user accomplished today. Keep it under 25 words. ` +
-            `Be warm and encouraging.`,
+          `You are ${name}, a chill desk buddy. Talk like a friend — casual, short, punchy.`,
           [
             {
               role: 'user',
-              content: `${memoryHint}\n\nGenerate an end-of-day wrap-up message.`,
+              content: `${memoryHint}\n\nIt's end of day. Ask what they got done today. One sentence, max 12 words. Be casual, not cheesy.`,
             },
           ],
         );

@@ -69,15 +69,17 @@ export const POOL_TARGET_SIZES: Record<string, number> = {
   error: 5,
 };
 
+// All prompts use casual, punchy tone — like a friend, not a wellness app.
+// Each message should be 1 sentence, max 10-15 words. No exclamation spam.
 export const POOL_GENERATION_PROMPTS: Record<string, string> = {
-  stand_up: 'Generate stand-up reminders for someone who has been sitting at their desk coding.',
-  hydration: 'Generate water/hydration reminders. Brief and friendly.',
-  eye_break: 'Generate 20-20-20 eye break reminders (look 20ft away for 20 seconds).',
-  stretch: 'Generate stretch reminders, mention shoulders, wrists, or neck.',
-  posture: 'Generate posture check nudges. Gentle, not preachy.',
-  welcome_back_short: 'Generate short welcome-back greetings for when someone returns to their desk.',
-  welcome_back_long: 'Generate welcome-back messages that mention the person was away for a while.',
-  pomodoro_break: 'Generate messages for starting a pomodoro break after a focus session.',
-  pomodoro_focus: 'Generate messages for starting a new pomodoro focus session after a break.',
-  error: 'Generate friendly error messages for when something went wrong.',
+  stand_up: 'Generate casual stand-up reminders like a friend would say. Short, no lectures. e.g., "Yo, legs exist. Use them." or "Stand up, stretch it out."',
+  hydration: 'Generate casual water reminders. Not preachy. e.g., "Drink some water, dude." or "Hydration check."',
+  eye_break: 'Generate casual eye break reminders. e.g., "Eyes off screen. Look far away for 20 sec." or "20-20-20 time. Your eyes will thank you."',
+  stretch: 'Generate casual stretch reminders mentioning shoulders, wrists, or neck. e.g., "Roll those shoulders real quick." or "Wrists feeling tight? Stretch em."',
+  posture: 'Generate casual posture nudges. Not naggy. e.g., "Sit up straight, you gremlin." or "Posture check."',
+  welcome_back_short: 'Generate quick welcome-back greetings. Max 6 words. e.g., "Oh hey, you\'re back." or "There you are."',
+  welcome_back_long: 'Generate welcome-back messages for longer absences. Still casual. e.g., "Long meeting? Welcome back." or "Missed you. Kinda."',
+  pomodoro_break: 'Generate casual break-time messages. e.g., "Break time. Step away for a sec." or "Nice focus sesh. Take five."',
+  pomodoro_focus: 'Generate casual focus-start messages. e.g., "Alright, let\'s lock in." or "Focus mode. Let\'s go."',
+  error: 'Generate casual error messages. e.g., "Something broke. My bad." or "Uh, that didn\'t work. Try again?"',
 };
