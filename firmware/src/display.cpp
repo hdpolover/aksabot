@@ -82,7 +82,7 @@ static const Palette PAL[EXPR_COUNT] = {
     //             bg              iris              irisRing          accent            mouth             label             sclera
     /* IDLE */    { rgb(0,0,0),    rgb(0,200,220),   rgb(0,140,160),   rgb(0,255,255),   rgb(150,155,175), rgb(180,180,190), rgb(245,245,250) },
     /* LISTEN */  { rgb(0,0,0),    rgb(0,230,100),   rgb(0,160,70),    rgb(0,255,120),   rgb(190,230,200), rgb(0,220,100),   rgb(245,245,250) },
-    /* THINK */   { rgb(0,0,0),    rgb(240,180,40),  rgb(180,130,20),  rgb(255,200,60),  rgb(210,190,150), rgb(255,210,50),  rgb(245,245,250) },
+    /* THINK */   { rgb(0,0,0),    rgb(100,200,255), rgb(60,150,220),  rgb(130,220,255), rgb(180,210,240), rgb(120,210,255), rgb(245,245,250) },
     /* SPEAK */   { rgb(0,0,0),    rgb(0,230,180),   rgb(0,180,130),   rgb(0,255,200),   rgb(220,240,235), rgb(0,240,180),   rgb(245,245,250) },
     /* CONFUS */  { rgb(0,0,0),    rgb(255,160,40),  rgb(200,110,20),  rgb(255,180,60),  rgb(230,195,140), rgb(255,170,40),  rgb(245,245,250) },
     /* SLEEP */   { rgb(0,0,0),    rgb(80,80,150),   rgb(50,50,110),   rgb(60,60,120),   rgb(110,110,170), rgb(90,90,140),   rgb(200,200,220) },
@@ -103,7 +103,7 @@ struct EyeShape {
 static const EyeShape EYES[EXPR_COUNT] = {
     /* IDLE */    { 42, 12,   0,   2, true,  false },
     /* LISTEN */  { 46, 13,   0,   0, false, false },
-    /* THINK */   { 38, 12, -12, -10, false, false },
+    /* THINK */   { 40, 12,   0,   0, true,  false },
     /* SPEAK */   { 42, 12,   0,   4, true,  false },
     /* CONFUS */  { 40, 13,  12,  -5, false, false },
     /* SLEEP */   {  0,  0,   0,   0, false, false },
@@ -277,8 +277,18 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             break;
         }
         case face::Expression::THINKING: {
-            s.fillSmoothCircle(CX + 8, my, 4, pal.mouth);
-            s.fillSmoothCircle(CX + 8, my, 2, blendRGB565(pal.accent, pal.bg, 50));
+            // Animated pursed lip — shifts side-to-side like "hmm"
+            float thinkT = breathPhase * 6.28318f;
+            int mxOff = (int)(sinf(thinkT * 1.5f) * 10.0f);
+            // Pursed mouth that subtly opens and closes
+            float mOpen = (sinf(thinkT * 2.0f) * 0.5f + 0.5f) * 0.3f;
+            int mw = 8 + (int)(mOpen * 6);
+            int mh = 5 + (int)(mOpen * 8);
+            s.fillEllipse(CX + mxOff, my, mw, mh, pal.mouth);
+            if (mh > 6) {
+                s.fillEllipse(CX + mxOff, my, mw - 3, mh - 3,
+                              blendRGB565(pal.accent, pal.bg, 30));
+            }
             break;
         }
         case face::Expression::SPEAKING: {
@@ -528,16 +538,21 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     }
     skip_face:
 
-    // ── Thinking dots (bottom, bright white for visibility) ──
+    // ── Thinking dots (bottom, bouncing with accent color) ──
     if (fs.expression == face::Expression::THINKING) {
-        int dy = LCD_HEIGHT - 45;
-        uint16_t dotLit = TFT_WHITE;
-        uint16_t dotDim = blendRGB565(TFT_WHITE, pal.bg, 50);
+        int baseY = LCD_HEIGHT - 42;
         for (int i = 0; i < 3; i++) {
-            int dx = CX - 15 + i * 15;
+            int dx = CX - 18 + i * 18;
             bool lit = i < fs.thinkDots;
-            s.fillSmoothCircle(dx, dy, lit ? 5 : 3, lit ? dotLit : dotDim);
-            if (lit) drawGlow(s, dx, dy, 12, dotLit, pal.bg, 50);
+            // Bounce: active dot jumps up
+            float bounce = lit ? sinf(fs.glowPhase * 4.0f + i * 0.8f) * 6.0f : 0;
+            int dy = baseY - (int)(bounce > 0 ? bounce : 0);
+            int r = lit ? 6 : 4;
+            uint16_t col = lit ? pal.accent : blendRGB565(pal.accent, pal.bg, 60);
+            s.fillSmoothCircle(dx, dy, r, col);
+            if (lit) {
+                drawGlow(s, dx, dy, 14, pal.accent, pal.bg, 60);
+            }
         }
     }
 

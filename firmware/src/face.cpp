@@ -147,7 +147,28 @@ void face::tick(uint32_t nowMs) {
     }
 
     // ── Pupil drift ────────────────────────────────
-    if (active == Expression::CONFUSED) {
+    if (active == Expression::THINKING) {
+        // Thinking: eyes wander — look up-left, up-right, up, center (pondering)
+        state.driftX = flerp(state.driftX, driftTX, 0.05f);
+        state.driftY = flerp(state.driftY, driftTY, 0.05f);
+        if (nowMs >= nextDriftSwitch) {
+            // Cycle through "thinking" gaze positions: mostly upward
+            static uint8_t thinkGaze = 0;
+            const float gazePatterns[][2] = {
+                {-14, -12}, {12, -10}, {0, -14}, {-8, -6}, {10, -8}, {0, 0},
+            };
+            thinkGaze = (thinkGaze + 1) % 6;
+            driftTX = gazePatterns[thinkGaze][0];
+            driftTY = gazePatterns[thinkGaze][1];
+            nextDriftSwitch = nowMs + 800 + (esp_random() % 1200);
+        }
+        // Occasional eye squint while thinking
+        float thinkSquint = sinf(state.breathPhase * 6.28f * 2.0f);
+        if (thinkSquint > 0.7f) {
+            state.leftEyeScale = 0.85f;
+            state.rightEyeScale = 0.85f;
+        }
+    } else if (active == Expression::CONFUSED) {
         // Confused: faster, wider side-to-side look ("huh? what?")
         state.driftX = flerp(state.driftX, driftTX, 0.08f);
         state.driftY = flerp(state.driftY, driftTY, 0.04f);

@@ -57,8 +57,8 @@ export class DevicesController {
     @Body() dto: UpdateSettingsDto,
   ) {
     const device = await this.devicesService.updateSettings(id, user.userId, dto);
-    // Push updated settings to the ESP32 if it's online
-    this.gateway.sendToDevice(id, 'config:update', device.settingsJson);
+    // Push only the changed keys to the ESP32 (not the entire settings blob)
+    this.gateway.sendToDevice(id, 'config:update', dto);
     return device;
   }
 
