@@ -836,14 +836,10 @@ void setup() {
         Serial.println("[Main] Device token found — connecting to backend");
         ws_client::connect();
     } else if (wifi_manager::isConnected() && !hasToken) {
-        Serial.println("[Main] No device token — register via Aksabot app to enable AI features");
-        face::setExpression(face::Expression::CONFUSED, 200);
-
-        display::ReminderData rd = {};
-        strncpy(rd.text, "Almost there! Open the Aksabot app to finish setup.", sizeof(rd.text) - 1);
-        rd.durationMs = 10000;
-        strncpy(rd.icon, "setup", sizeof(rd.icon) - 1);
-        display::showReminder(rd);
+        Serial.println("[Main] No device token — waiting for app to complete setup");
+        // Show thinking/loading face while the app automatically registers
+        // and sends the token. No user action needed.
+        face::setExpression(face::Expression::THINKING, 200);
     }
 
     // ── 13. BLE presence scanning ──────────────────────────

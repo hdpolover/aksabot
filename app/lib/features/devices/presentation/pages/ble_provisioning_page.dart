@@ -1,15 +1,20 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:wifi_scan/wifi_scan.dart';
 
 import '../../../../core/ble/ble_constants.dart';
 import '../../../../core/ble/ble_provisioning_service.dart';
+import '../../../../core/constants/api.dart';
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/di/injection.dart';
 import '../../../../core/local/local_device_store.dart';
+import '../../../../core/local/mdns_discovery_service.dart';
 import '../../../../core/widgets/step_progress_bar.dart';
 import '../../../../core/widgets/success_screen.dart';
+import '../../domain/repositories/devices_repository.dart';
 
 /// 3-step BLE provisioning wizard.
 class BleProvisioningPage extends StatefulWidget {
@@ -229,6 +234,10 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
     }
   }
 
+  String _setupStatus = '';
+  bool _setupDone = false;
+  bool _setupError = false;
+
   Future<void> _onProvisioningSuccess(String ssid) async {
     final device = LocalDeviceStore.create(
       name: _connectedDeviceName,
@@ -239,6 +248,97 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
     if (!mounted) return;
     setState(() => _isConnectingWifi = false);
     _goToStep(2);
+
+    // Disconnect BLE — no longer needed
+    _ble.disconnect();
+
+    // Run the full cloud setup automatically
+    _autoSetup(device.name);
+  }
+
+  Future<void> _autoSetup(String deviceName) async {
+    try {
+      // Step 1: Wait for device to get its WiFi IP
+      setState(() => _setupStatus = 'Waiting for device to connect to WiFi...');
+      await Future.delayed(const Duration(seconds: 4));
+
+      if (!mounted) return;
+
+      // Step 2: Discover device on network
+      setState(() => _setupStatus = 'Finding device on network...');
+      final discovery = MdnsDiscoveryService();
+      String? deviceIp;
+
+      for (int attempt = 0; attempt < 3; attempt++) {
+        final found = await discovery.discoverFirst(
+          timeout: const Duration(seconds: 5),
+        );
+        if (found != null) {
+          deviceIp = found.ip;
+          break;
+        }
+        if (!mounted) return;
+        if (attempt < 2) {
+          setState(() => _setupStatus = 'Searching for device... (attempt ${attempt + 2})');
+        }
+      }
+
+      if (deviceIp == null) {
+        if (mounted) {
+          setState(() {
+            _setupStatus = 'Could not find device on network. You can set it up later from the home screen.';
+            _setupError = true;
+          });
+        }
+        return;
+      }
+
+      if (!mounted) return;
+
+      // Step 3: Register with backend
+      setState(() => _setupStatus = 'Registering with AI cloud...');
+      final result = await sl<DevicesRepository>().createDevice(name: deviceName);
+
+      String? token;
+      result.fold(
+        (failure) => throw Exception(failure.toString()),
+        (device) => token = device.deviceToken,
+      );
+
+      if (token == null || token!.isEmpty) {
+        throw Exception('No token received');
+      }
+
+      if (!mounted) return;
+
+      // Step 4: Send token + backend URL to device
+      setState(() => _setupStatus = 'Activating your Aksabot...');
+      final wsUrl = '${ApiConstants.baseUrl.replaceFirst('http', 'ws')}/ws';
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 5),
+        receiveTimeout: const Duration(seconds: 10),
+      ));
+      await dio.post('http://$deviceIp/token', data: {
+        'token': token,
+        'backendUrl': wsUrl,
+      });
+
+      // Clean up local device (now registered with backend)
+      await LocalDeviceStore.clear();
+
+      if (!mounted) return;
+      setState(() {
+        _setupStatus = 'All set! Your Aksabot is ready.';
+        _setupDone = true;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _setupStatus = 'Setup incomplete. You can finish from the home screen.';
+          _setupError = true;
+        });
+      }
+    }
   }
 
   Future<void> _showManualSsidDialog() async {
@@ -620,25 +720,70 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
     );
   }
 
-  // ── Step 3: Done ─────────────────────────────────────────────
+  // ── Step 3: Setting up ───────────────────────────────────────
 
   Widget _buildDoneStep() {
-    final ssid = _ssidController.text.trim();
+    if (_setupDone) {
+      return SuccessScreen(
+        title: '$_connectedDeviceName is ready!',
+        subtitle: 'Your Aksabot is connected and online.\nSay hi — it might greet you back!',
+        onPressed: () {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        },
+      );
+    }
 
-    return SuccessScreen(
-      title: '$_connectedDeviceName is connected!',
-      subtitle: ssid.isNotEmpty
-          ? 'Successfully joined "$ssid".\nYour Aksabot is online and ready.'
-          : 'Your Aksabot is connected to the internet and ready.',
-      hint: 'Connect to backend later to unlock AI features',
-      onPressed: () {
-        _ble.disconnect();
-        // Pop back through the navigation stack so the home page's
-        // _pushAndReload callback fires and refreshes the device list.
-        // Using go('/home') would recreate the shell with a race condition
-        // between DevicesBloc (empty from backend) and local device loading.
-        Navigator.of(context).popUntil((route) => route.isFirst);
-      },
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppConstants.spacingXxl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!_setupError) ...[
+              SizedBox(
+                width: 64,
+                height: 64,
+                child: CircularProgressIndicator(
+                  strokeWidth: 3,
+                  color: colors.primary,
+                ),
+              ),
+              const SizedBox(height: AppConstants.spacingXxl),
+              Text(
+                'Setting up your Aksabot',
+                style: theme.textTheme.titleMedium,
+              ),
+            ] else ...[
+              Icon(Icons.warning_amber_rounded, size: 64, color: colors.error),
+              const SizedBox(height: AppConstants.spacingXxl),
+              Text(
+                'Setup incomplete',
+                style: theme.textTheme.titleMedium,
+              ),
+            ],
+            const SizedBox(height: AppConstants.spacingMd),
+            Text(
+              _setupStatus,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: colors.onSurfaceVariant,
+              ),
+            ),
+            if (_setupError) ...[
+              const SizedBox(height: AppConstants.spacingXxl),
+              FilledButton(
+                onPressed: () {
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                },
+                child: const Text('Go to Home'),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
