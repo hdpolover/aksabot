@@ -136,21 +136,46 @@ class _ConversationCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      _formatDate(conversation.startedAt),
-                      style: theme.textTheme.titleSmall,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _formatDate(conversation.startedAt),
+                            style: theme.textTheme.titleSmall,
+                          ),
+                        ),
+                        Text(
+                          isOngoing
+                              ? 'Ongoing'
+                              : _formatDuration(duration!),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: isOngoing
+                                ? colors.primary
+                                : colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      isOngoing
-                          ? 'Ongoing'
-                          : _formatDuration(duration!),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: isOngoing
-                            ? colors.primary
-                            : colors.onSurfaceVariant,
+                    if (conversation.preview != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        conversation.preview!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
+                    ],
+                    if (conversation.messageCount > 0) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '${conversation.messageCount} messages',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colors.outline,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

@@ -665,6 +665,20 @@ export class AudioGateway
     let started = false;
     let fullResponseText = '';
     let cacheKeys: { hash: string; sentence: string }[] = [];
+    let lastEmotion: string | null = null;
+
+    // Emotion tag → ESP32 face expression mapping
+    const emotionToExpression: Record<string, string> = {
+      happy: 'happy',
+      excited: 'encouraging',
+      calm: 'calm',
+      sad: 'sad',
+      confused: 'confused',
+      focused: 'focused',
+      sarcastic: 'encouraging',
+      sympathetic: 'calm',
+      neutral: 'speaking',
+    };
 
     for await (const event of pipeline) {
       if (this.sessions.isInterrupted(deviceId)) break;
@@ -674,6 +688,15 @@ export class AudioGateway
           text: event.text,
           isFinal: false,
         });
+
+        // Send face expression when emotion changes between sentences
+        if (event.emotion && event.emotion !== lastEmotion) {
+          const expr = emotionToExpression[event.emotion] ?? 'speaking';
+          this.sendToDevice(deviceId, 'face:expression', {
+            expression: expr,
+          });
+          lastEmotion = event.emotion;
+        }
       } else if (event.type === 'audio') {
         if (!started) {
           this.sendToDevice(deviceId, 'response:start', { type: 'audio' });

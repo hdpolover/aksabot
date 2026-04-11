@@ -30,7 +30,10 @@ export class MemoryExtractorService {
     transcript: { role: string; content: string }[],
     existingMemories: { fact: string; category: string }[],
   ): Promise<ExtractedMemory[]> {
-    if (transcript.length === 0) return [];
+    if (transcript.length === 0) {
+      this.logger.debug('Skipping extraction: empty transcript');
+      return [];
+    }
 
     const conversationText = transcript
       .map((m) => `${m.role}: ${m.content}`)
@@ -41,7 +44,7 @@ export class MemoryExtractorService {
         ? existingMemories.map((m) => `- ${m.fact} (${m.category})`).join('\n')
         : 'None';
 
-    const systemPrompt = `You are a memory extraction system. You analyze conversations and extract facts about the user that are worth remembering for future conversations. Return ONLY valid JSON — no markdown, no code fences.`;
+    const systemPrompt = `You are a memory extraction system. You analyze conversations and extract facts about the user that are worth remembering for future conversations. Return ONLY a valid JSON array — no markdown, no code fences, no explanation text.`;
 
     const userMessage = `Given this conversation between a user and an AI assistant, extract any facts worth remembering about the user. Return a JSON array of objects with "fact" and "category" fields.
 
@@ -54,6 +57,9 @@ Only extract facts that are:
 
 If no new facts are found, return an empty array: []
 
+Example response format:
+[{"fact": "User is a software developer", "category": "work"}, {"fact": "User likes coffee", "category": "preference"}]
+
 Existing memories:
 ${existingText}
 
@@ -65,9 +71,23 @@ ${conversationText}`;
         { role: 'user', content: userMessage },
       ]);
 
+      if (!response.text || response.text.trim() === '') {
+        this.logger.warn(
+          `LLM returned empty response for extraction (${transcript.length} messages). ` +
+          `Likely blocked by safety filter or no content generated.`,
+        );
+        return [];
+      }
+
+      this.logger.debug(
+        `Extraction LLM response (${response.text.length} chars): ${response.text.slice(0, 300)}`,
+      );
+
       return this.parseExtraction(response.text);
     } catch (err: any) {
-      this.logger.error(`Memory extraction failed: ${err.message}`);
+      this.logger.error(
+        `Memory extraction LLM call failed: ${err.message}`,
+      );
       return [];
     }
   }
@@ -75,19 +95,33 @@ ${conversationText}`;
   private parseExtraction(raw: string): ExtractedMemory[] {
     try {
       // Strip markdown code fences if present
-      const cleaned = raw
+      let cleaned = raw
         .replace(/```json\s*/gi, '')
         .replace(/```\s*/g, '')
         .trim();
 
-      const parsed = JSON.parse(cleaned);
+      // If the response has preamble text before the JSON array, extract just the array
+      const arrayStart = cleaned.indexOf('[');
+      const arrayEnd = cleaned.lastIndexOf(']');
+      if (arrayStart !== -1 && arrayEnd !== -1 && arrayEnd > arrayStart) {
+        cleaned = cleaned.slice(arrayStart, arrayEnd + 1);
+      }
 
-      if (!Array.isArray(parsed)) {
-        this.logger.warn('Extraction response is not an array');
+      if (cleaned === '' || cleaned === '[]') {
+        this.logger.debug('Extraction returned empty array');
         return [];
       }
 
-      return parsed
+      const parsed = JSON.parse(cleaned);
+
+      if (!Array.isArray(parsed)) {
+        this.logger.warn(
+          `Extraction response is not an array (type=${typeof parsed}): ${raw.slice(0, 200)}`,
+        );
+        return [];
+      }
+
+      const valid = parsed
         .filter(
           (item: any) =>
             typeof item.fact === 'string' &&
@@ -99,9 +133,20 @@ ${conversationText}`;
           fact: item.fact.trim(),
           category: item.category,
         }));
+
+      const filtered = parsed.length - valid.length;
+      if (filtered > 0) {
+        this.logger.debug(
+          `Filtered ${filtered}/${parsed.length} items (invalid category or empty fact)`,
+        );
+      }
+
+      return valid;
     } catch (err: any) {
-      this.logger.warn(`Failed to parse extraction response: ${err.message}`);
-      this.logger.debug(`Raw response: ${raw.slice(0, 500)}`);
+      this.logger.warn(
+        `Failed to parse extraction response: ${err.message} | ` +
+        `Raw (${raw.length} chars): ${raw.slice(0, 300)}`,
+      );
       return [];
     }
   }

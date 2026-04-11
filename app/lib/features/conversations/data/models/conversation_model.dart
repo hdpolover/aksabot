@@ -6,6 +6,8 @@ class ConversationModel extends Conversation {
     required super.deviceId,
     required super.startedAt,
     super.endedAt,
+    super.preview,
+    super.messageCount,
   });
 
   factory ConversationModel.fromJson(Map<String, dynamic> json) {
@@ -16,6 +18,8 @@ class ConversationModel extends Conversation {
       endedAt: json['endedAt'] != null
           ? DateTime.parse(json['endedAt'] as String)
           : null,
+      preview: json['preview'] as String?,
+      messageCount: (json['messageCount'] as int?) ?? 0,
     );
   }
 }

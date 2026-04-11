@@ -34,7 +34,14 @@ export class PromptService {
         ? `\n\nYou know this about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
         : '';
 
-    return `${SYSTEM_PROMPT}${memoryBlock}\n\nRespond in whatever language the user speaks.`;
+    const emotionInstruction = `
+
+IMPORTANT — Emotion tags: End EVERY sentence with exactly one emotion tag in brackets. This controls your animated face on the device screen.
+Available tags: [happy] [sad] [excited] [calm] [confused] [focused] [sarcastic] [sympathetic] [neutral]
+Example: "Bruh that's actually sick! [excited] OK so basically here's how it works. [focused]"
+Always include the tag — never skip it. The tag is stripped before TTS, the user won't hear it.`;
+
+    return `${SYSTEM_PROMPT}${memoryBlock}${emotionInstruction}\n\nRespond in whatever language the user speaks.`;
   }
 
   buildMessages(

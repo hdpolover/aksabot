@@ -57,7 +57,7 @@ static QueueHandle_t playbackQueue = nullptr;
 static volatile bool playbackActive = false;  // true while audio task should drain queue
 static volatile bool playbackDone = false;    // set by response:end to signal no more frames
 static volatile bool playbackBuffering = true;  // jitter buffer: accumulate before playing
-static const int JITTER_BUFFER_FRAMES = 10;     // wait for 200ms of audio before starting
+static int JITTER_BUFFER_FRAMES = 15;           // wait for 300ms of audio before starting
 
 // ── Echo mode (hold-to-record, release-to-playback) ───
 // Records raw stereo I2S frames to PSRAM (same as audio-pipeline test firmware).
@@ -328,6 +328,14 @@ static void onWsJson(const char* event, const char* data) {
                 presCfg.gracePeriodSec = grace;
                 presence_detector::init(presCfg);
                 Serial.printf("[Main] Config: presence grace=%ds\n", grace);
+            }
+            // Audio jitter buffer (ms → frames at 20ms/frame)
+            if (doc.containsKey("audio_jitter_ms")) {
+                int ms = doc["audio_jitter_ms"] | 300;
+                if (ms < 100) ms = 100;
+                if (ms > 500) ms = 500;
+                JITTER_BUFFER_FRAMES = ms / 20;
+                Serial.printf("[Main] Config: jitter buffer=%dms (%d frames)\n", ms, JITTER_BUFFER_FRAMES);
             }
             // Idle animation speed
             if (doc.containsKey("idle_animation_speed")) {

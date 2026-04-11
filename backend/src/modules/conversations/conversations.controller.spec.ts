@@ -46,6 +46,7 @@ describe('ConversationsController', () => {
         'user-1',
         1,
         20,
+        undefined,
       );
       expect(result).toEqual(response);
     });
@@ -63,6 +64,7 @@ describe('ConversationsController', () => {
         'user-1',
         2,
         10,
+        undefined,
       );
     });
 
@@ -79,6 +81,7 @@ describe('ConversationsController', () => {
         'user-1',
         1,
         20,
+        undefined,
       );
     });
 

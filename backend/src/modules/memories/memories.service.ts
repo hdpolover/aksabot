@@ -63,7 +63,16 @@ export class MemoriesService {
       order: { createdAt: 'ASC' },
     });
 
-    if (messages.length === 0) return [];
+    if (messages.length === 0) {
+      this.logger.debug(
+        `No messages for conversation ${conversationId} — skipping extraction`,
+      );
+      return [];
+    }
+
+    this.logger.log(
+      `Extracting memories from conversation ${conversationId} (${messages.length} messages)`,
+    );
 
     const transcript = messages.map((m) => ({
       role: m.role,
@@ -82,7 +91,12 @@ export class MemoriesService {
       existing,
     );
 
-    if (extracted.length === 0) return [];
+    if (extracted.length === 0) {
+      this.logger.log(
+        `No new memories extracted from conversation ${conversationId}`,
+      );
+      return [];
+    }
 
     // Find the last user message to link as source
     const lastUserMessage = messages

@@ -22,9 +22,48 @@ export interface CacheEntry {
 }
 
 export type PipelineEvent =
-  | { type: 'text'; text: string }
-  | { type: 'audio'; data: Buffer; cacheKey?: string }
+  | { type: 'text'; text: string; emotion?: string }
+  | { type: 'audio'; data: Buffer; cacheKey?: string; emotion?: string }
   | { type: 'done'; fullText: string; cacheKeys: CacheEntry[] };
+
+// Parse "[emotion]" tag from end of sentence
+const EMOTION_TAG_RE = /\s*\[(\w+)\]\s*$/;
+
+function extractEmotion(sentence: string): { text: string; emotion?: string } {
+  const match = sentence.match(EMOTION_TAG_RE);
+  if (match) {
+    return { text: sentence.replace(EMOTION_TAG_RE, '').trim(), emotion: match[1] };
+  }
+  return { text: sentence };
+}
+
+// Per-emotion TTS voice adjustments (speed + stability modulation)
+const EMOTION_VOICE_MODS: Record<string, { speedMul: number; stabilityMul: number }> = {
+  excited:     { speedMul: 1.15, stabilityMul: 0.7 },   // Faster, more expressive
+  happy:       { speedMul: 1.05, stabilityMul: 0.8 },   // Slightly faster, lively
+  sarcastic:   { speedMul: 0.95, stabilityMul: 0.6 },   // Slightly slower, very variable
+  calm:        { speedMul: 0.90, stabilityMul: 1.0 },   // Slower, stable
+  sympathetic: { speedMul: 0.90, stabilityMul: 0.9 },   // Slower, gentle
+  sad:         { speedMul: 0.85, stabilityMul: 0.9 },   // Slowest, subdued
+  focused:     { speedMul: 1.00, stabilityMul: 1.0 },   // Normal, precise
+  confused:    { speedMul: 0.95, stabilityMul: 0.7 },   // Slightly slower, uncertain
+  neutral:     { speedMul: 1.00, stabilityMul: 1.0 },   // No change
+};
+
+function applyEmotionToVoice(base: TtsOptions | undefined, emotion?: string): TtsOptions {
+  const opts: TtsOptions = { ...base };
+  if (!emotion) return opts;
+  const mod = EMOTION_VOICE_MODS[emotion];
+  if (!mod) return opts;
+  opts.speed = (opts.speed ?? 0.7) * mod.speedMul;
+  opts.stability = (opts.stability ?? 0.6) * mod.stabilityMul;
+  // Clamp to ElevenLabs ranges
+  if (opts.speed! < 0.5) opts.speed = 0.5;
+  if (opts.speed! > 1.5) opts.speed = 1.5;
+  if (opts.stability! < 0.0) opts.stability = 0.0;
+  if (opts.stability! > 1.0) opts.stability = 1.0;
+  return opts;
+}
 
 @Injectable()
 export class AiService {
@@ -118,31 +157,35 @@ export class AiService {
     for await (const token of llmStream) {
       fullResponseText += token;
 
-      const sentence = sentenceBuffer.feed(token);
-      if (sentence) {
+      const rawSentence = sentenceBuffer.feed(token);
+      if (rawSentence) {
+        const { text: cleanText, emotion } = extractEmotion(rawSentence);
+        const emotionVoice = applyEmotionToVoice(voiceOptions, emotion);
         const { opusAudio, cacheKey } = await this.synthesizeWithCache(
-          sentence,
+          cleanText,
           undefined,
-          voiceOptions,
+          emotionVoice,
         );
-        cacheKeys.push({ hash: cacheKey, sentence });
+        cacheKeys.push({ hash: cacheKey, sentence: cleanText });
 
-        yield { type: 'text', text: sentence };
-        yield { type: 'audio', data: opusAudio, cacheKey };
+        yield { type: 'text', text: cleanText, emotion };
+        yield { type: 'audio', data: opusAudio, cacheKey, emotion };
       }
     }
 
     const remaining = sentenceBuffer.flush();
     if (remaining) {
+      const { text: cleanText, emotion } = extractEmotion(remaining);
+      const emotionVoice = applyEmotionToVoice(voiceOptions, emotion);
       const { opusAudio, cacheKey } = await this.synthesizeWithCache(
-        remaining,
+        cleanText,
         undefined,
-        voiceOptions,
+        emotionVoice,
       );
-      cacheKeys.push({ hash: cacheKey, sentence: remaining });
+      cacheKeys.push({ hash: cacheKey, sentence: cleanText });
 
-      yield { type: 'text', text: remaining };
-      yield { type: 'audio', data: opusAudio, cacheKey };
+      yield { type: 'text', text: cleanText, emotion };
+      yield { type: 'audio', data: opusAudio, cacheKey, emotion };
     }
 
     yield { type: 'done', fullText: fullResponseText, cacheKeys };

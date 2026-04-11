@@ -54,8 +54,27 @@ export class ConversationsService {
       take: limit,
     });
 
+    // Attach first user message as preview and message count
+    const data = await Promise.all(
+      conversations.map(async (c) => {
+        const [firstUserMsg, messageCount] = await Promise.all([
+          this.messagesRepo.findOne({
+            where: { conversationId: c.id, role: 'user' },
+            order: { createdAt: 'ASC' },
+            select: ['content'],
+          }),
+          this.messagesRepo.count({ where: { conversationId: c.id } }),
+        ]);
+        return {
+          ...c,
+          preview: firstUserMsg?.content?.slice(0, 100) ?? null,
+          messageCount,
+        };
+      }),
+    );
+
     return {
-      data: conversations,
+      data,
       meta: { page, limit, total },
     };
   }

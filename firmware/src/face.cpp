@@ -56,6 +56,8 @@ static uint32_t lastTearSpawnMs = 0;
 
 // Speaking
 static float currentAmplitude = 0.0f;
+static float prevAmplitude = 0.0f;       // For peak detection
+static uint32_t peakDecayMs = 0;         // When peak flag should clear
 
 // ── Helpers ────────────────────────────────────────────
 
@@ -97,6 +99,7 @@ void face::init() {
 
 void face::tick(uint32_t nowMs) {
     const float dt = 0.016f;  // ~60fps
+    bool isSpeechActive = currentAmplitude > 0.01f;
 
     // ── Transition ─────────────────────────────────
     if (state.transitionActive) {
@@ -127,7 +130,8 @@ void face::tick(uint32_t nowMs) {
             else                 state.blinkScale = (bt - 0.6f) / 0.4f;
             state.eyesOpen = (state.blinkScale > 0.05f);
         }
-    } else if (canBlink(active) && nowMs >= nextBlinkMs) {
+    } else if (canBlink(active) && nowMs >= nextBlinkMs && state.audioEnergy < 0.3f) {
+        // Suppress blinks during loud speech — eyes stay open for expressiveness
         state.blinking = true;
         blinkStartMs = nowMs;
     } else if (active == Expression::SLEEPING) {
@@ -148,12 +152,15 @@ void face::tick(uint32_t nowMs) {
             driftTY = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 8.0f;
             nextDriftSwitch = nowMs + 800 + (esp_random() % 1200);
         }
-    } else if (active == Expression::IDLE || active == Expression::CALM || active == Expression::SPEAKING) {
+    } else if (active == Expression::IDLE || active == Expression::CALM ||
+               active == Expression::SPEAKING || isSpeechActive) {
+        // Natural gaze drift: used during idle AND while speaking in any expression
         state.driftX = flerp(state.driftX, driftTX, 0.03f);
         state.driftY = flerp(state.driftY, driftTY, 0.03f);
         if (nowMs >= nextDriftSwitch) {
-            driftTX = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 16.0f;
-            driftTY = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 14.0f;
+            float range = isSpeechActive ? 10.0f : 16.0f;  // Smaller drift while talking
+            driftTX = ((float)(esp_random() % 100) / 100.0f - 0.5f) * range;
+            driftTY = ((float)(esp_random() % 100) / 100.0f - 0.5f) * (range * 0.7f);
             nextDriftSwitch = nowMs + 2500 + (esp_random() % 3000);
         }
     } else {
@@ -173,8 +180,31 @@ void face::tick(uint32_t nowMs) {
     if (state.breathPhase > 1.0f) state.breathPhase -= 1.0f;
 
     // ── Mouth amplitude smoothing ──────────────────
-    state.mouthAmp = flerp(state.mouthAmp, (active == Expression::SPEAKING) ? currentAmplitude : 0, 0.25f);
+    // Feed amplitude for ANY expression (not just SPEAKING) — enables emotion-aware speech
+    float targetAmp = isSpeechActive ? currentAmplitude : 0.0f;
+    state.mouthAmp = flerp(state.mouthAmp, targetAmp, 0.25f);
     state.mouthOpenness = state.mouthAmp;  // legacy alias
+
+    // ── Audio energy tracking (for eye/brow reactivity) ──
+    state.audioEnergy = flerp(state.audioEnergy, currentAmplitude, 0.15f);
+
+    // Peak detection: sudden amplitude spike
+    float ampDelta = currentAmplitude - prevAmplitude;
+    if (ampDelta > 0.25f && !state.energyPeak) {
+        state.energyPeak = true;
+        peakDecayMs = nowMs + 400;  // brow raise lasts 400ms
+    }
+    if (state.energyPeak && nowMs >= peakDecayMs) {
+        state.energyPeak = false;
+    }
+    prevAmplitude = currentAmplitude;
+
+    // Speaking nod: subtle vertical bounce from amplitude
+    if (isSpeechActive) {
+        state.speakingNodY = flerp(state.speakingNodY, -currentAmplitude * 2.0f, 0.2f);
+    } else {
+        state.speakingNodY = flerp(state.speakingNodY, 0.0f, 0.1f);
+    }
 
     // ── Listening pulse ────────────────────────────
     if (active == Expression::LISTENING) state.listenPhase += dt * 4.0f;
@@ -185,6 +215,16 @@ void face::tick(uint32_t nowMs) {
     state.rightEyeScale = 1.0f;
     state.yawnAmp = 0.0f;
     state.popScale = 1.0f;
+
+    // Audio-reactive eye scale during speech (any expression)
+    if (isSpeechActive && active != Expression::SLEEPING && active != Expression::THINKING) {
+        float eyeScale;
+        if (state.audioEnergy < 0.15f) eyeScale = 0.92f;
+        else if (state.audioEnergy > 0.4f) eyeScale = 1.10f;
+        else eyeScale = 1.0f;
+        state.leftEyeScale = eyeScale;
+        state.rightEyeScale = eyeScale;
+    }
 
     if (active == Expression::IDLE) {
         // Base fidget (subtle position jitter)

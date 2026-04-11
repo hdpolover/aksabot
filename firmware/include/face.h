@@ -69,6 +69,11 @@ struct FaceState {
     float yawnAmp;              // Mouth openness during yawn (0.0-1.0)
     float popScale;             // Overall face scale for pop effects (1.0 = normal)
 
+    // Audio-reactive speaking
+    float audioEnergy;          // Smoothed rolling energy (0.0-1.0)
+    bool  energyPeak;           // True when sudden amplitude spike detected
+    float speakingNodY;         // Subtle head nod driven by amplitude
+
     // Transition
     bool  transitionActive;
     float transitionProgress;
