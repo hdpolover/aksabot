@@ -46,9 +46,10 @@ export class PromptService {
         ? `\n\nYou know this about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
         : '';
 
-    // Time context — always included, uses server timezone by default
-    const serverTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    let tz = context?.timezone || serverTz;
+    // Time context — always included
+    // Default to Asia/Jakarta (server may run in UTC Docker container)
+    const defaultTz = process.env.TZ || 'Asia/Jakarta';
+    let tz = context?.timezone || defaultTz;
     let now: string;
     try {
       now = new Date().toLocaleString('en-US', {
@@ -62,8 +63,8 @@ export class PromptService {
         hour12: true,
       });
     } catch {
-      // Invalid timezone (e.g. "WIB" abbreviation) — fall back to server timezone
-      tz = serverTz;
+      // Invalid timezone (e.g. "WIB" abbreviation) — fall back to default
+      tz = defaultTz;
       now = new Date().toLocaleString('en-US', {
         timeZone: tz,
         weekday: 'long',

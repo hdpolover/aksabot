@@ -176,6 +176,7 @@ static void onWsJson(const char* event, const char* data) {
         face::setExpression(face::Expression::SHRUG, 200);
         scheduleFaceRevert(3000);
         appState.botState = BotState::IDLE;
+        display::setTranscriptText("", "");  // Clear stuck transcript
         // Don't call syncFaceToState() — let SHRUG play for 3s first
     }
     else if (strcmp(event, "state:update") == 0) {
@@ -187,6 +188,7 @@ static void onWsJson(const char* event, const char* data) {
                 Serial.println("[Main] Backend reset to idle");
                 appState.botState = BotState::IDLE;
                 syncFaceToState();
+                display::setTranscriptText("", "");
             }
         }
     }
