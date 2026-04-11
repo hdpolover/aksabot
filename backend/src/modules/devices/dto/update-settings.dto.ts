@@ -94,6 +94,10 @@ export class UpdateSettingsDto {
   @IsOptional()
   presence_enabled?: boolean;
 
+  @IsBoolean()
+  @IsOptional()
+  integrations_weather?: boolean;
+
   @IsString()
   @IsOptional()
   timezone?: string;
