@@ -97,4 +97,9 @@ void feedAudioAmplitude(float amplitude);
 /// Get the current face state for rendering.
 const FaceState& getState();
 
+/// Set idle micro-animation interval.
+/// minMs = minimum wait between animations, rangeMs = random range added on top.
+/// Default: minMs=8000, rangeMs=12000 (8-20s between animations).
+void setIdleInterval(uint32_t minMs, uint32_t rangeMs);
+
 }  // namespace face

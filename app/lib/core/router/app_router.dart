@@ -18,6 +18,7 @@ import '../../features/devices/presentation/pages/firmware_update_page.dart';
 import '../../features/devices/presentation/pages/diagnostics_page.dart';
 import '../../features/devices/presentation/pages/integrations_page.dart';
 import '../../features/devices/presentation/pages/motion_settings_page.dart';
+import '../../features/devices/presentation/pages/idle_personality_page.dart';
 import '../../features/devices/presentation/pages/mobility_settings_page.dart';
 import '../../features/conversations/presentation/pages/conversations_page.dart';
 import '../../features/memories/presentation/pages/memories_page.dart';
@@ -126,7 +127,7 @@ List<RouteBase> _deviceSubRoutes() {
   return [
     GoRoute(
       path: 'personality',
-      builder: (context, state) => DeviceDetailPage(
+      builder: (context, state) => IdlePersonalityPage(
         deviceId: state.pathParameters['deviceId']!,
       ),
     ),

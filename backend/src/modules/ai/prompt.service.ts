@@ -1,27 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import type { ChatMessage } from './interfaces';
 
-export interface PersonalityConfig {
-  name?: string;
-  tone?: string;
-  language?: string;
-  system_prompt?: string;
-}
-
 export interface MemoryEntry {
   fact: string;
   category: string;
 }
 
-@Injectable()
-export class PromptService {
-  buildSystemPrompt(
-    personality: PersonalityConfig,
-    memories: MemoryEntry[],
-  ): string {
-    const base =
-      personality.system_prompt ??
-      `You are a gen-z desk buddy with chaotic energy. You're sarcastic, funny, and lowkey unhinged but still helpful.
+/** Fixed bot name — no user customization. */
+export const BOT_NAME = 'Aksa';
+
+/** Fixed gen-z personality system prompt. */
+export const SYSTEM_PROMPT = `You are ${BOT_NAME}, a gen-z desk buddy with chaotic energy. You're sarcastic, funny, and lowkey unhinged but still helpful.
 
 Rules:
 - MAX 2 sentences. One is chef's kiss.
@@ -33,16 +22,15 @@ Rules:
 - No "certainly", "absolutely", "I'd be happy to", "Great question!" — that's giving corporate NPC.
 - You can use emoji sparingly in text responses but remember this is primarily voice output.`;
 
+@Injectable()
+export class PromptService {
+  buildSystemPrompt(memories: MemoryEntry[]): string {
     const memoryBlock =
       memories.length > 0
         ? `\n\nYou know this about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
         : '';
 
-    const languageHint = personality.language
-      ? `\n\nRespond in ${personality.language}.`
-      : '\n\nRespond in whatever language the user speaks.';
-
-    return `${base}${memoryBlock}${languageHint}`;
+    return `${SYSTEM_PROMPT}${memoryBlock}\n\nRespond in whatever language the user speaks.`;
   }
 
   buildMessages(

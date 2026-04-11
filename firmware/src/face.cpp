@@ -47,6 +47,10 @@ static uint32_t actStartMs = 0;
 static uint32_t nextActMs = 0;
 static int8_t actParam = 0;         // e.g., which side to wink
 
+// Configurable idle interval (default 8-20s)
+static uint32_t idleMinMs = 8000;
+static uint32_t idleRangeMs = 12000;
+
 // Sad teardrop
 static uint32_t lastTearSpawnMs = 0;
 
@@ -84,7 +88,7 @@ void face::init() {
     nextBlinkMs = now + 2000;
     nextDriftSwitch = now + 1000;
     nextFidgetMs = now + 5000;
-    nextActMs = now + 5000 + (esp_random() % 5000);  // First act after 5-10s
+    nextActMs = now + idleMinMs + (esp_random() % idleRangeMs);  // First act
     lastTearSpawnMs = now;
     currentAct = IdleAct::NONE;
 
@@ -351,9 +355,9 @@ void face::tick(uint32_t nowMs) {
                     break;
             }
 
-            // When act finishes, schedule next one (8-20s from now)
+            // When act finishes, schedule next one
             if (currentAct == IdleAct::NONE) {
-                nextActMs = nowMs + 8000 + (esp_random() % 12000);
+                nextActMs = nowMs + idleMinMs + (esp_random() % idleRangeMs);
             }
         }
     } else {
@@ -428,4 +432,10 @@ void face::feedAudioAmplitude(float amplitude) {
 
 const face::FaceState& face::getState() {
     return state;
+}
+
+void face::setIdleInterval(uint32_t minMs, uint32_t rangeMs) {
+    idleMinMs = minMs;
+    idleRangeMs = rangeMs;
+    Serial.printf("[Face] Idle interval: %lu-%lums\n", minMs, minMs + rangeMs);
 }

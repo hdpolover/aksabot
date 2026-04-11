@@ -72,25 +72,6 @@ export class DevicesService {
     return this.devicesRepo.save(device);
   }
 
-  async getPersonality(
-    id: string,
-    userId: string,
-  ): Promise<Record<string, any>> {
-    const device = await this.findById(id, userId);
-    return device.personalityJson;
-  }
-
-  async updatePersonality(
-    id: string,
-    userId: string,
-    dto: Record<string, any>,
-  ): Promise<Record<string, any>> {
-    const device = await this.findById(id, userId);
-    device.personalityJson = { ...device.personalityJson, ...dto };
-    const saved = await this.devicesRepo.save(device);
-    return saved.personalityJson;
-  }
-
   async claimByToken(
     userId: string,
     deviceToken: string,

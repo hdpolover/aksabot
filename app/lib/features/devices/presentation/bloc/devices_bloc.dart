@@ -52,15 +52,6 @@ class UpdateSettings extends DevicesEvent {
   List<Object?> get props => [deviceId, settings];
 }
 
-class UpdatePersonality extends DevicesEvent {
-  final String deviceId;
-  final Map<String, dynamic> personality;
-  const UpdatePersonality(this.deviceId, this.personality);
-
-  @override
-  List<Object?> get props => [deviceId, personality];
-}
-
 // ---------------------------------------------------------------------------
 // States
 // ---------------------------------------------------------------------------
@@ -117,7 +108,6 @@ class DevicesBloc extends Bloc<DevicesEvent, DevicesState> {
     on<CreateDevice>(_onCreateDevice);
     on<DeleteDevice>(_onDeleteDevice);
     on<UpdateSettings>(_onUpdateSettings);
-    on<UpdatePersonality>(_onUpdatePersonality);
   }
 
   Future<void> _onLoadDevices(
@@ -180,18 +170,4 @@ class DevicesBloc extends Bloc<DevicesEvent, DevicesState> {
     );
   }
 
-  Future<void> _onUpdatePersonality(
-    UpdatePersonality event,
-    Emitter<DevicesState> emit,
-  ) async {
-    emit(const DevicesLoading());
-    final result = await _repository.updatePersonality(
-      event.deviceId,
-      event.personality,
-    );
-    result.fold(
-      (failure) => emit(DevicesError(failure.message)),
-      (_) => add(LoadDevice(event.deviceId)),
-    );
-  }
 }

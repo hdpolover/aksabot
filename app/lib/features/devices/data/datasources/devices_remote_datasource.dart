@@ -40,19 +40,6 @@ class DevicesRemoteDatasource {
     return DeviceModel.fromJson(data as Map<String, dynamic>);
   }
 
-  Future<Map<String, dynamic>> getPersonality(String id) async {
-    final data = await _client.get('/devices/$id/personality');
-    return data as Map<String, dynamic>;
-  }
-
-  Future<Map<String, dynamic>> updatePersonality(
-    String id,
-    Map<String, dynamic> personality,
-  ) async {
-    final data = await _client.patch('/devices/$id/personality', data: personality);
-    return data as Map<String, dynamic>;
-  }
-
   Future<DeviceModel> claimByToken(String deviceToken) async {
     final data = await _client.post(
       '/devices/claim',

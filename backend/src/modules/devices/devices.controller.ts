@@ -22,7 +22,6 @@ import { AudioGateway } from '../gateway/audio.gateway';
 import { DevicesService } from './devices.service';
 import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
-import { UpdatePersonalityDto } from './dto/update-personality.dto';
 
 @Controller('devices')
 @UseGuards(JwtAuthGuard, RateLimitGuard)
@@ -61,23 +60,6 @@ export class DevicesController {
     // Push updated settings to the ESP32 if it's online
     this.gateway.sendToDevice(id, 'config:update', device.settingsJson);
     return device;
-  }
-
-  @Get(':id/personality')
-  getPersonality(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: RequestUser,
-  ) {
-    return this.devicesService.getPersonality(id, user.userId);
-  }
-
-  @Patch(':id/personality')
-  updatePersonality(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: RequestUser,
-    @Body() dto: UpdatePersonalityDto,
-  ) {
-    return this.devicesService.updatePersonality(id, user.userId, dto);
   }
 
   @Post('claim')

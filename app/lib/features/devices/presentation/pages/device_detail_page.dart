@@ -75,14 +75,13 @@ class _DeviceDetailView extends StatelessWidget {
                       ),
                     )
                   : DefaultTabController(
-                      length: 3,
+                      length: 2,
                       child: Column(
                         children: [
                           TabBar(
                             tabs: const [
                               Tab(text: 'Dashboard'),
                               Tab(text: 'Settings'),
-                              Tab(text: 'Personality'),
                             ],
                             labelColor: colors.primary,
                             unselectedLabelColor: colors.onSurfaceVariant,
@@ -93,7 +92,6 @@ class _DeviceDetailView extends StatelessWidget {
                               children: [
                                 _DashboardTab(device: device),
                                 _SettingsTab(device: device),
-                                _PersonalityTab(device: device),
                               ],
                             ),
                           ),
@@ -151,10 +149,7 @@ class _DashboardTab extends StatelessWidget {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final online = device.isOnline;
-    final botName =
-        (device.personalityJson['name'] as String?)?.isNotEmpty == true
-            ? device.personalityJson['name'] as String
-            : device.name;
+    const botName = 'Aksa';
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -644,255 +639,3 @@ class _SettingsTabState extends State<_SettingsTab> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Personality tab
-// ---------------------------------------------------------------------------
-
-class _PersonalityTab extends StatefulWidget {
-  final Device device;
-  const _PersonalityTab({required this.device});
-
-  @override
-  State<_PersonalityTab> createState() => _PersonalityTabState();
-}
-
-class _PersonalityTabState extends State<_PersonalityTab> {
-  late final TextEditingController _nameController;
-  late final TextEditingController _customToneController;
-  late final TextEditingController _systemPromptController;
-  bool _dirty = false;
-  String _selectedTone = 'friendly';
-  String _selectedLanguage = 'en';
-  bool _advancedExpanded = false;
-
-  static const _tonePresets = [
-    'professional',
-    'friendly',
-    'playful',
-    'sarcastic',
-    'custom',
-  ];
-
-  static const _languages = {
-    'en': 'English',
-    'id': 'Bahasa Indonesia',
-    'es': 'Spanish',
-    'fr': 'French',
-    'de': 'German',
-    'ja': 'Japanese',
-    'ko': 'Korean',
-    'zh': 'Chinese',
-  };
-
-  @override
-  void initState() {
-    super.initState();
-    final p = widget.device.personalityJson;
-    _nameController = TextEditingController(text: p['name'] as String? ?? '');
-    _systemPromptController =
-        TextEditingController(text: p['system_prompt'] as String? ?? '');
-    _customToneController = TextEditingController();
-
-    // Resolve tone — check if it matches a preset
-    final savedTone = p['tone'] as String? ?? 'friendly';
-    if (_tonePresets.contains(savedTone)) {
-      _selectedTone = savedTone;
-    } else {
-      _selectedTone = 'custom';
-      _customToneController.text = savedTone;
-    }
-
-    // Resolve language
-    final savedLang = p['language'] as String? ?? 'en';
-    _selectedLanguage = _languages.containsKey(savedLang) ? savedLang : 'en';
-
-    _nameController.addListener(_markDirty);
-    _customToneController.addListener(_markDirty);
-    _systemPromptController.addListener(_markDirty);
-  }
-
-  @override
-  void didUpdateWidget(covariant _PersonalityTab oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.device.id != widget.device.id) {
-      _syncFromDevice();
-    }
-  }
-
-  void _syncFromDevice() {
-    final p = widget.device.personalityJson;
-    _nameController.text = p['name'] as String? ?? '';
-    _systemPromptController.text = p['system_prompt'] as String? ?? '';
-    final savedTone = p['tone'] as String? ?? 'friendly';
-    if (_tonePresets.contains(savedTone)) {
-      _selectedTone = savedTone;
-      _customToneController.text = '';
-    } else {
-      _selectedTone = 'custom';
-      _customToneController.text = savedTone;
-    }
-    final savedLang = p['language'] as String? ?? 'en';
-    _selectedLanguage = _languages.containsKey(savedLang) ? savedLang : 'en';
-    _dirty = false;
-  }
-
-  void _markDirty() {
-    if (!_dirty) setState(() => _dirty = true);
-  }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _customToneController.dispose();
-    _systemPromptController.dispose();
-    super.dispose();
-  }
-
-  String get _effectiveTone => _selectedTone == 'custom'
-      ? _customToneController.text.trim()
-      : _selectedTone;
-
-  void _save() {
-    context.read<DevicesBloc>().add(
-          UpdatePersonality(widget.device.id, {
-            'name': _nameController.text.trim(),
-            'tone': _effectiveTone,
-            'language': _selectedLanguage,
-            'system_prompt': _systemPromptController.text.trim(),
-          }),
-        );
-    setState(() => _dirty = false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        // Bot name
-        Text('Bot name', style: theme.textTheme.labelLarge),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _nameController,
-          decoration: const InputDecoration(hintText: 'e.g. Aksa'),
-          textCapitalization: TextCapitalization.words,
-        ),
-        const SizedBox(height: 20),
-
-        // Tone presets
-        Text('Tone', style: theme.textTheme.labelLarge),
-        const SizedBox(height: 8),
-        Card(
-          clipBehavior: Clip.antiAlias,
-          child: RadioGroup<String>(
-            groupValue: _selectedTone,
-            onChanged: (v) {
-              if (v != null) {
-                setState(() {
-                  _selectedTone = v;
-                  _dirty = true;
-                });
-              }
-            },
-            child: Column(
-              children: [
-                for (final tone in _tonePresets)
-                  ListTile(
-                    leading: Radio<String>(value: tone),
-                    title: Text(
-                      tone == 'custom'
-                          ? 'Custom...'
-                          : tone[0].toUpperCase() + tone.substring(1),
-                    ),
-                    onTap: () => setState(() {
-                      _selectedTone = tone;
-                      _dirty = true;
-                    }),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        if (_selectedTone == 'custom') ...[
-          const SizedBox(height: 8),
-          TextField(
-            controller: _customToneController,
-            decoration: const InputDecoration(
-              hintText: 'Describe the tone...',
-            ),
-          ),
-        ],
-        const SizedBox(height: 20),
-
-        // Language dropdown
-        Text('Language', style: theme.textTheme.labelLarge),
-        const SizedBox(height: 8),
-        DropdownButtonFormField<String>(
-          initialValue: _selectedLanguage,
-          decoration: const InputDecoration(
-            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          ),
-          items: _languages.entries
-              .map((e) => DropdownMenuItem(
-                    value: e.key,
-                    child: Text(e.value),
-                  ))
-              .toList(),
-          onChanged: (v) {
-            if (v != null) {
-              setState(() {
-                _selectedLanguage = v;
-                _dirty = true;
-              });
-            }
-          },
-        ),
-        const SizedBox(height: 20),
-
-        // Advanced — system prompt (expandable)
-        Card(
-          clipBehavior: Clip.antiAlias,
-          child: ExpansionTile(
-            leading: Icon(Icons.code, color: colors.onSurfaceVariant),
-            title: const Text('Advanced'),
-            initiallyExpanded: _advancedExpanded,
-            onExpansionChanged: (v) => _advancedExpanded = v,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('System prompt (optional)',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.onSurfaceVariant,
-                        )),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _systemPromptController,
-                      decoration: const InputDecoration(
-                        hintText: 'Custom instructions for the AI...',
-                        alignLabelWithHint: true,
-                      ),
-                      maxLines: 5,
-                      minLines: 3,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-
-        FilledButton(
-          onPressed: _dirty ? _save : null,
-          child: const Text('Save Personality'),
-        ),
-      ],
-    );
-  }
-}

@@ -89,7 +89,7 @@ describe('AiService', () => {
       mockLlm.generateStream.mockReturnValue(fakeStream());
 
       const events = await collectEvents(
-        service.processTranscript('Hi', {}, [], []),
+        service.processTranscript('Hi', [], []),
       );
 
       // "Hello world." won't be emitted by feed() since there's no trailing space
@@ -112,7 +112,7 @@ describe('AiService', () => {
       mockLlm.generateStream.mockReturnValue(fakeStream());
 
       const events = await collectEvents(
-        service.processTranscript('Tell me', {}, [], []),
+        service.processTranscript('Tell me', [], []),
       );
 
       const textEvents = events.filter((e) => e.type === 'text');
@@ -129,13 +129,13 @@ describe('AiService', () => {
       mockLlm.generateStream.mockReturnValue(fakeStream());
 
       await collectEvents(
-        service.processTranscript('Hi', { language: 'en' }, [], []),
+        service.processTranscript('Hi', [], []),
       );
 
       // 2 sentences = 2 TTS calls + 2 codec encode calls
       expect(mockTts.synthesize).toHaveBeenCalledTimes(2);
       expect(mockCodec.encode).toHaveBeenCalledTimes(2);
-      expect(mockTts.synthesize).toHaveBeenCalledWith('Hello.', { language: 'en' });
+      expect(mockTts.synthesize).toHaveBeenCalledWith('Hello.', { language: undefined });
     });
 
     it('passes history and system prompt to LLM', async () => {
@@ -146,11 +146,11 @@ describe('AiService', () => {
 
       const history = [{ role: 'user', content: 'Previous' }];
       await collectEvents(
-        service.processTranscript('Current', { system_prompt: 'Be nice' }, [], history),
+        service.processTranscript('Current', [], history),
       );
 
       expect(mockLlm.generateStream).toHaveBeenCalledWith(
-        expect.stringContaining('Be nice'),
+        expect.stringContaining('gen-z desk buddy'),
         expect.arrayContaining([
           { role: 'user', content: 'Previous' },
           { role: 'user', content: 'Current' },
@@ -165,7 +165,7 @@ describe('AiService', () => {
       mockLlm.generateStream.mockReturnValue(fakeStream());
 
       const events = await collectEvents(
-        service.processTranscript('Hi', {}, [], []),
+        service.processTranscript('Hi', [], []),
       );
 
       expect(events).toEqual([{ type: 'done', fullText: '', cacheKeys: [] }]);

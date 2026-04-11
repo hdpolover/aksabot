@@ -329,6 +329,18 @@ static void onWsJson(const char* event, const char* data) {
                 presence_detector::init(presCfg);
                 Serial.printf("[Main] Config: presence grace=%ds\n", grace);
             }
+            // Idle animation speed
+            if (doc.containsKey("idle_animation_speed")) {
+                const char* speed = doc["idle_animation_speed"] | "normal";
+                if (strcmp(speed, "slow") == 0) {
+                    face::setIdleInterval(15000, 15000);  // 15-30s
+                } else if (strcmp(speed, "fast") == 0) {
+                    face::setIdleInterval(3000, 7000);    // 3-10s
+                } else {
+                    face::setIdleInterval(8000, 12000);   // 8-20s (default)
+                }
+                Serial.printf("[Main] Config: idle animation speed=%s\n", speed);
+            }
             // Idle timeout
             if (doc.containsKey("idle_timeout_seconds")) {
                 int timeout = doc["idle_timeout_seconds"] | 300;
@@ -708,15 +720,8 @@ void setup() {
     }
 
     // ── 5. Hardware init ───────────────────────────────────
-    // Fast path: configured device + no BOOT button = skip POST display
-    bool showPOST = bootButtonHeld || !isConfigured;
-
-    if (showPOST) boot_screen::showHardwareCheck("Display", 1);
 
     sd_storage::init();
-    if (showPOST) boot_screen::showHardwareCheck("MicroSD",
-        sd_storage::isMounted() ? 1 : 3);
-
     tts_cache::init();
     recording_buffer::init();
     resilience_audio::init();
@@ -754,14 +759,11 @@ void setup() {
 
     touch::init();
     touch::onEvent(onTouchEvent);
-    if (showPOST) boot_screen::showHardwareCheck("Touch", 1);
 
     audio_io::init();
     audioInitialized = true;
-    if (showPOST) boot_screen::showHardwareCheck("Audio (ES8311)", 1);
 
     bool opusOk = opus_codec::init();
-    if (showPOST) boot_screen::showHardwareCheck("Opus Codec", opusOk ? 1 : 2);
     if (!opusOk) {
         Serial.println("[Main] FATAL: Opus init failed");
         while (true) { delay(1000); }
@@ -779,8 +781,6 @@ void setup() {
         display::setBrightness(savedBrightness);
         power_manager::init(pwrCfg);
     }
-
-    if (showPOST) delay(1500);  // Let user see POST results
 
     // ── 6. BIOS menu (only if BOOT button was held) ───────
     bool enterSetupFromBios = false;

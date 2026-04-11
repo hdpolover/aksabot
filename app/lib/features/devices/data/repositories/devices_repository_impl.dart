@@ -55,29 +55,6 @@ class DevicesRepositoryImpl implements DevicesRepository {
   }
 
   @override
-  Future<Either<Failure, Map<String, dynamic>>> getPersonality(String id) async {
-    try {
-      final personality = await _datasource.getPersonality(id);
-      return Right(personality);
-    } on ServerException catch (e) {
-      return Left(ServerFailure(e.message, statusCode: e.statusCode));
-    }
-  }
-
-  @override
-  Future<Either<Failure, Map<String, dynamic>>> updatePersonality(
-    String id,
-    Map<String, dynamic> personality,
-  ) async {
-    try {
-      final updated = await _datasource.updatePersonality(id, personality);
-      return Right(updated);
-    } on ServerException catch (e) {
-      return Left(ServerFailure(e.message, statusCode: e.statusCode));
-    }
-  }
-
-  @override
   Future<Either<Failure, Device>> claimByToken(String deviceToken) async {
     try {
       final device = await _datasource.claimByToken(deviceToken);

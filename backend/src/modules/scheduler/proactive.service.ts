@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { Device } from '../../core/database/entities';
 import { LLM_PROVIDER } from '../ai/interfaces/tokens';
 import type { ILlmProvider } from '../ai/interfaces';
+import { BOT_NAME } from '../ai/prompt.service';
 import { MemoriesService } from '../memories/memories.service';
 import { SessionManager } from '../gateway/session.manager';
 
@@ -19,6 +20,29 @@ export class ProactiveService {
   // Work hours config (default 9-18)
   private workHoursStart = 9;
   private workHoursEnd = 18;
+
+  // ── Idle personality chat ────────────────────────────
+  private idleChatTimers = new Map<string, NodeJS.Timeout>();
+
+  // Frequency presets: [minMs, maxMs]
+  private static readonly IDLE_FREQ: Record<string, [number, number]> = {
+    rare:     [15 * 60_000, 25 * 60_000],
+    normal:   [8 * 60_000,  15 * 60_000],
+    frequent: [3 * 60_000,  8 * 60_000],
+  };
+
+  private static readonly IDLE_PROMPTS = [
+    'Tell a weird or surprising fun fact in 1 sentence. Max 12 words.',
+    'Comment on the current time of day in a funny way. 1 sentence, max 12 words.',
+    'Share a random funny thought or shower thought. 1 sentence, max 12 words.',
+    'Lightly roast the user for being so quiet. 1 sentence, max 10 words.',
+    'Say something encouraging or hype. 1 sentence, max 10 words.',
+    'Make a sarcastic observation about desk life. 1 sentence, max 12 words.',
+  ];
+
+  private static readonly IDLE_EXPRESSIONS = [
+    'encouraging', 'happy', 'calm', 'idle',
+  ];
 
   private sendToDevice: (
     deviceId: string,
@@ -64,7 +88,7 @@ export class ProactiveService {
       const device = await this.devicesRepo.findOne({
         where: { id: deviceId },
       });
-      const name = device?.personalityJson?.name ?? 'buddy';
+      const name = BOT_NAME;
 
       const memoryContext =
         memories.length > 0
@@ -123,7 +147,7 @@ export class ProactiveService {
       const device = await this.devicesRepo.findOne({
         where: { id: deviceId },
       });
-      const name = device?.personalityJson?.name ?? 'buddy';
+      const name = BOT_NAME;
 
       const memories = await this.memoriesService.getRelevant(deviceId, 3);
       const memoryContext =
@@ -204,7 +228,7 @@ export class ProactiveService {
         const device = await this.devicesRepo.findOne({
           where: { id: deviceId },
         });
-        const name = device?.personalityJson?.name ?? 'buddy';
+        const name = BOT_NAME;
         const memories = await this.memoriesService.getRelevant(deviceId, 3);
 
         const memoryHint =
@@ -239,11 +263,111 @@ export class ProactiveService {
     }
   }
 
+  // ── Idle personality chat ──────────────────────────────
+
+  /**
+   * Callback set by AudioGateway to send TTS audio to device.
+   * Separated from sendToDevice (JSON events) because audio needs
+   * the full greeting pipeline (TTS synthesis + Opus framing).
+   */
+  private sendIdleAudio: (
+    deviceId: string,
+    text: string,
+    expression: string,
+  ) => Promise<void> = async () => {};
+
+  setSendIdleAudio(
+    fn: (deviceId: string, text: string, expression: string) => Promise<void>,
+  ) {
+    this.sendIdleAudio = fn;
+  }
+
+  /**
+   * Start the idle personality chat timer for a device.
+   * Reads frequency from device settings. Call after greeting completes
+   * and whenever device returns to idle.
+   */
+  async startIdleChat(deviceId: string) {
+    this.stopIdleChat(deviceId);
+
+    const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+    const settings = device?.settingsJson ?? {};
+
+    if (settings.idle_chat_enabled === false) return;
+
+    const freq = (settings.idle_chat_frequency as string) ?? 'normal';
+    const [minMs, maxMs] = ProactiveService.IDLE_FREQ[freq] ?? ProactiveService.IDLE_FREQ.normal;
+    const delayMs = minMs + Math.floor(Math.random() * (maxMs - minMs));
+
+    this.logger.debug(
+      `Idle chat for ${deviceId}: next in ${Math.round(delayMs / 1000)}s (freq=${freq})`,
+    );
+
+    const timer = setTimeout(() => this.fireIdleChat(deviceId), delayMs);
+    this.idleChatTimers.set(deviceId, timer);
+  }
+
+  stopIdleChat(deviceId: string) {
+    const timer = this.idleChatTimers.get(deviceId);
+    if (timer) {
+      clearTimeout(timer);
+      this.idleChatTimers.delete(deviceId);
+    }
+  }
+
+  private async fireIdleChat(deviceId: string) {
+    this.idleChatTimers.delete(deviceId);
+
+    const session = this.sessions.get(deviceId);
+    if (!session || session.state !== 'idle') {
+      this.logger.debug(`Idle chat skipped for ${deviceId} — not idle`);
+      return;
+    }
+
+    try {
+      const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+      const name = BOT_NAME;
+      const memories = await this.memoriesService.getRelevant(deviceId, 3);
+
+      const memoryContext =
+        memories.length > 0
+          ? `You know these things about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
+          : '';
+
+      const hour = new Date().getHours();
+      const promptIdx = Math.floor(Math.random() * ProactiveService.IDLE_PROMPTS.length);
+      const prompt = ProactiveService.IDLE_PROMPTS[promptIdx];
+
+      const { text } = await this.llm.generate(
+        `You are ${name}, a gen-z desk buddy. Sarcastic, funny, uses slang. Keep it short and punchy.`,
+        [
+          {
+            role: 'user',
+            content: `${memoryContext}\n\nCurrent time: ${hour}:00. ${prompt}`,
+          },
+        ],
+      );
+
+      const exprIdx = Math.floor(Math.random() * ProactiveService.IDLE_EXPRESSIONS.length);
+      const expression = ProactiveService.IDLE_EXPRESSIONS[exprIdx];
+
+      this.logger.log(`Idle chat for ${deviceId}: "${text.slice(0, 50)}..." (expr=${expression})`);
+
+      await this.sendIdleAudio(deviceId, text, expression);
+    } catch (err: any) {
+      this.logger.warn(`Idle chat failed for ${deviceId}: ${err.message}`);
+    }
+
+    // Schedule next quip (re-reads settings in case they changed)
+    this.startIdleChat(deviceId).catch(() => {});
+  }
+
   // ── Cleanup on device disconnect ──────────────────────
 
   clearDevice(deviceId: string) {
     // Keep lastGreetingDate — daily dedup must survive disconnect/reconnect cycles.
     // Only cleared at midnight via the date check in checkGreeting().
     this.lastActivity.delete(deviceId);
+    this.stopIdleChat(deviceId);
   }
 }

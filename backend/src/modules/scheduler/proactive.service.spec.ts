@@ -87,8 +87,8 @@ describe('ProactiveService', () => {
 
       await service.checkGreeting(DEVICE_ID);
 
-      const promptArg: string = mockLlm.generate.mock.calls[0][0];
-      expect(promptArg).toContain('morning');
+      const userContent: string = mockLlm.generate.mock.calls[0][1][0].content;
+      expect(userContent).toContain('morning');
     });
 
     it('includes "afternoon" in prompt between 12 and 17', async () => {
@@ -96,8 +96,8 @@ describe('ProactiveService', () => {
 
       await service.checkGreeting(DEVICE_ID);
 
-      const promptArg: string = mockLlm.generate.mock.calls[0][0];
-      expect(promptArg).toContain('afternoon');
+      const userContent: string = mockLlm.generate.mock.calls[0][1][0].content;
+      expect(userContent).toContain('afternoon');
     });
 
     it('includes "evening" in prompt between 17 and 21', async () => {
@@ -105,8 +105,8 @@ describe('ProactiveService', () => {
 
       await service.checkGreeting(DEVICE_ID);
 
-      const promptArg: string = mockLlm.generate.mock.calls[0][0];
-      expect(promptArg).toContain('evening');
+      const userContent: string = mockLlm.generate.mock.calls[0][1][0].content;
+      expect(userContent).toContain('evening');
     });
 
     it('includes "night" in prompt after 21:00', async () => {
@@ -114,8 +114,8 @@ describe('ProactiveService', () => {
 
       await service.checkGreeting(DEVICE_ID);
 
-      const promptArg: string = mockLlm.generate.mock.calls[0][0];
-      expect(promptArg).toContain('night');
+      const userContent: string = mockLlm.generate.mock.calls[0][1][0].content;
+      expect(userContent).toContain('night');
     });
 
     it('passes memory context to LLM when memories exist', async () => {
@@ -130,22 +130,11 @@ describe('ProactiveService', () => {
       expect(userContent).toContain('working on Aksabot');
     });
 
-    it('uses device personality name in the prompt', async () => {
-      devicesRepo.findOne.mockResolvedValue(makeDevice('Aria'));
-
+    it('uses hardcoded bot name "Aksa" in the prompt', async () => {
       await service.checkGreeting(DEVICE_ID);
 
       const promptArg: string = mockLlm.generate.mock.calls[0][0];
-      expect(promptArg).toContain('Aria');
-    });
-
-    it('falls back to "buddy" when device has no personality name', async () => {
-      devicesRepo.findOne.mockResolvedValue({ id: DEVICE_ID, personalityJson: {} });
-
-      await service.checkGreeting(DEVICE_ID);
-
-      const promptArg: string = mockLlm.generate.mock.calls[0][0];
-      expect(promptArg).toContain('buddy');
+      expect(promptArg).toContain('Aksa');
     });
 
     it('returns null when LLM throws', async () => {
@@ -291,13 +280,11 @@ describe('ProactiveService', () => {
       expect(userContent).toContain('working on NestJS backend');
     });
 
-    it('uses device personality name in the prompt', async () => {
-      devicesRepo.findOne.mockResolvedValue(makeDevice('Aria'));
-
+    it('uses hardcoded bot name "Aksa" in the prompt', async () => {
       await service.handleEndOfDay();
 
       const promptArg: string = mockLlm.generate.mock.calls[0][0];
-      expect(promptArg).toContain('Aria');
+      expect(promptArg).toContain('Aksa');
     });
 
     it('skips devices where session is not idle', async () => {
@@ -326,16 +313,16 @@ describe('ProactiveService', () => {
   // ── clearDevice ───────────────────────────────────────
 
   describe('clearDevice', () => {
-    it('removes greeting state so the greeting fires again', async () => {
+    it('preserves greeting dedup across disconnect — no repeat greeting same day', async () => {
       jest.setSystemTime(ts('2026-04-10T09:00:00'));
       await service.checkGreeting(DEVICE_ID);
 
       service.clearDevice(DEVICE_ID);
 
-      // Greeting should fire again since state was cleared
+      // Same day — greeting should NOT fire again (daily dedup preserved)
       const result = await service.checkGreeting(DEVICE_ID);
-      expect(result).not.toBeNull();
-      expect(mockLlm.generate).toHaveBeenCalledTimes(2);
+      expect(result).toBeNull();
+      expect(mockLlm.generate).toHaveBeenCalledTimes(1);
     });
 
     it('removes activity tracking so idle nudge is not fired', async () => {

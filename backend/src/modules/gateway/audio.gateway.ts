@@ -59,6 +59,11 @@ export class AudioGateway
     this.scheduler.setSendToDevice(sender);
     this.proactive.setSendToDevice(sender);
 
+    // Give proactive service the ability to send TTS audio for idle chat
+    this.proactive.setSendIdleAudio(
+      (deviceId, text, expression) => this.sendIdleChatAudio(deviceId, text, expression),
+    );
+
     // Server-side heartbeat: ping all devices every 10s, close dead ones after 20s
     this.heartbeatTimer = setInterval(() => this.heartbeat(), AudioGateway.HEARTBEAT_INTERVAL_MS);
   }
@@ -208,6 +213,63 @@ export class AudioGateway
       cacheKeys: [],
     });
     this.logger.log(`Sent response:end to ${deviceId} — greeting complete`);
+
+    // Start idle personality chat timer after greeting
+    this.proactive.startIdleChat(deviceId).catch((err) =>
+      this.logger.warn(`Idle chat start failed: ${err.message}`),
+    );
+  }
+
+  // ── Idle personality chat (TTS audio for random quips) ──────────
+
+  private async sendIdleChatAudio(
+    deviceId: string,
+    text: string,
+    expression: string,
+  ) {
+    const socket = this.deviceToSocket.get(deviceId);
+    if (!socket || socket.readyState !== 1) return;
+
+    const session = this.sessions.get(deviceId);
+    if (!session || session.state !== 'idle') return;
+
+    this.sendToDevice(deviceId, 'face:expression', {
+      expression,
+      durationMs: 5000,
+    });
+
+    const sentences = this.splitSentences(text);
+
+    this.sendToDevice(deviceId, 'response:start', { type: 'idle_chat' });
+
+    for (const sentence of sentences) {
+      const sock = this.deviceToSocket.get(deviceId);
+      if (!sock || sock.readyState !== 1) return;
+
+      const device = await this.persistence.getDevice(deviceId);
+      const s = device?.settingsJson ?? {};
+      const voiceOpts = {
+        voice: s.voice_preset,
+        speed: s.voice_speed,
+        stability: s.voice_stability,
+      };
+      const { opusAudio } = await this.aiService.synthesizeWithCache(
+        sentence,
+        undefined,
+        voiceOpts,
+      );
+      this.sendToDevice(deviceId, 'response:text', {
+        text: sentence,
+        isFinal: false,
+      });
+      await this.sendFramedOpusToDevice(deviceId, opusAudio);
+    }
+
+    this.sendToDevice(deviceId, 'response:end', {
+      fullText: text,
+      cacheKeys: [],
+    });
+    this.logger.log(`Idle chat audio sent to ${deviceId}`);
   }
 
   // ── Presence handlers ──────────────────────────────────────────
@@ -395,6 +457,9 @@ export class AudioGateway
       });
     }
 
+    // Pause idle chat while user is talking
+    this.proactive.stopIdleChat(deviceId);
+
     session.interrupted = false;
     session.state = 'listening';
     this.chunkCount.set(deviceId, 0);  // Reset chunk counter
@@ -527,9 +592,8 @@ export class AudioGateway
     session.state = 'thinking';
     this.sendToDevice(deviceId, 'state:update', { state: 'thinking' });
 
-    // Get personality and history
+    // Get history and settings
     const device = await this.persistence.getDevice(deviceId);
-    const personality = device?.personalityJson ?? {};
 
     const allHistory = session.conversationId
       ? await this.persistence.getRecentHistory(session.conversationId)
@@ -559,7 +623,7 @@ export class AudioGateway
 
     // Run streaming pipeline
     try {
-      await this.runPipeline(deviceId, result.transcript, personality, memories, history, voiceOptions);
+      await this.runPipeline(deviceId, result.transcript, memories, history, voiceOptions);
     } catch (err: any) {
       this.logger.error(`Pipeline error for ${deviceId}: ${err.message}`, err.stack);
       this.sendToDevice(deviceId, 'error', {
@@ -573,6 +637,9 @@ export class AudioGateway
     this.sessions.clearInterrupted(deviceId);
     this.sendToDevice(deviceId, 'state:update', { state: 'idle' });
 
+    // Resume idle personality chat
+    this.proactive.startIdleChat(deviceId).catch(() => {});
+
     this.sessions.resetIdleTimer(deviceId, () => {
       this.endConversation(deviceId);
     });
@@ -581,7 +648,6 @@ export class AudioGateway
   private async runPipeline(
     deviceId: string,
     transcript: string,
-    personality: Record<string, any>,
     memories: { fact: string; category: string }[],
     history: { role: string; content: string }[],
     voiceOptions?: { voice?: string; speed?: number; stability?: number },
@@ -591,7 +657,6 @@ export class AudioGateway
 
     const pipeline = this.aiService.processTranscript(
       transcript,
-      personality,
       memories,
       history,
       voiceOptions,

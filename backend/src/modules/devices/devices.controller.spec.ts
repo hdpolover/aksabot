@@ -23,8 +23,6 @@ describe('DevicesController', () => {
       findAllByUser: jest.fn(),
       findById: jest.fn(),
       updateSettings: jest.fn(),
-      getPersonality: jest.fn(),
-      updatePersonality: jest.fn(),
       claimByToken: jest.fn(),
       getStats: jest.fn(),
       remove: jest.fn(),
@@ -107,37 +105,6 @@ describe('DevicesController', () => {
         { brightness: 50 },
       );
       expect(result.settingsJson).toEqual({ volume: 80, brightness: 50 });
-    });
-  });
-
-  describe('getPersonality', () => {
-    it('returns personality json for the device', async () => {
-      devicesService.getPersonality.mockResolvedValue({ tone: 'friendly' });
-
-      const result = await controller.getPersonality('device-1', mockUser);
-
-      expect(devicesService.getPersonality).toHaveBeenCalledWith('device-1', 'user-1');
-      expect(result).toEqual({ tone: 'friendly' });
-    });
-  });
-
-  describe('updatePersonality', () => {
-    it('merges personality and returns updated personality', async () => {
-      const updated = { tone: 'friendly', humor: 'high' };
-      devicesService.updatePersonality.mockResolvedValue(updated);
-
-      const result = await controller.updatePersonality(
-        'device-1',
-        mockUser,
-        { humor: 'high' } as any,
-      );
-
-      expect(devicesService.updatePersonality).toHaveBeenCalledWith(
-        'device-1',
-        'user-1',
-        { humor: 'high' },
-      );
-      expect(result).toEqual(updated);
     });
   });
 

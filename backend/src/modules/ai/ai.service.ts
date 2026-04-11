@@ -13,7 +13,7 @@ import type { ITtsProvider, TtsOptions } from './interfaces';
 import type { IAudioCodec } from './interfaces';
 import type { ITtsCache } from './interfaces/tts-cache.interface';
 import { PromptService } from './prompt.service';
-import type { PersonalityConfig, MemoryEntry } from './prompt.service';
+import type { MemoryEntry } from './prompt.service';
 import { SentenceBuffer } from './sentence-buffer';
 
 export interface CacheEntry {
@@ -103,12 +103,11 @@ export class AiService {
    */
   async *processTranscript(
     transcript: string,
-    personality: PersonalityConfig,
     memories: MemoryEntry[],
     history: { role: string; content: string }[],
     voiceOptions?: TtsOptions,
   ): AsyncGenerator<PipelineEvent> {
-    const systemPrompt = this.prompt.buildSystemPrompt(personality, memories);
+    const systemPrompt = this.prompt.buildSystemPrompt(memories);
     const messages = this.prompt.buildMessages(history, transcript);
 
     const sentenceBuffer = new SentenceBuffer();
@@ -123,7 +122,7 @@ export class AiService {
       if (sentence) {
         const { opusAudio, cacheKey } = await this.synthesizeWithCache(
           sentence,
-          personality.language,
+          undefined,
           voiceOptions,
         );
         cacheKeys.push({ hash: cacheKey, sentence });
@@ -137,7 +136,7 @@ export class AiService {
     if (remaining) {
       const { opusAudio, cacheKey } = await this.synthesizeWithCache(
         remaining,
-        personality.language,
+        undefined,
         voiceOptions,
       );
       cacheKeys.push({ hash: cacheKey, sentence: remaining });

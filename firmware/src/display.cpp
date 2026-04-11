@@ -438,15 +438,16 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     }
     skip_face:
 
-    // ── Thinking dots ────────────────────────────────
+    // ── Thinking dots (bottom, matching listening indicator) ──
     if (fs.expression == face::Expression::THINKING) {
-        int dy = MOUTH_Y + 5;
+        int dy = LCD_HEIGHT - 45;
         for (int i = 0; i < 3; i++) {
             int dx = CX - 15 + i * 15;
             bool lit = i < fs.thinkDots;
-            uint16_t col = lit ? pal.accent : blendRGB565(pal.accent, pal.bg, 30);
-            s.fillSmoothCircle(dx, dy, lit ? 4 : 3, col);
-            if (lit) drawGlow(s, dx, dy, 8, pal.accent, pal.bg, 30);
+            uint16_t dotCol = lit ? pal.iris : blendRGB565(pal.iris, pal.bg, 40);
+            int r = lit ? 5 : 3;
+            s.fillSmoothCircle(dx, dy, r, dotCol);
+            if (lit) drawGlow(s, dx, dy, 10, pal.iris, pal.bg, 40);
         }
     }
 

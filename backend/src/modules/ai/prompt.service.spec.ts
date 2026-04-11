@@ -1,5 +1,5 @@
-import { PromptService } from './prompt.service';
-import type { PersonalityConfig, MemoryEntry } from './prompt.service';
+import { PromptService, BOT_NAME, SYSTEM_PROMPT } from './prompt.service';
+import type { MemoryEntry } from './prompt.service';
 
 describe('PromptService', () => {
   let service: PromptService;
@@ -9,29 +9,15 @@ describe('PromptService', () => {
   });
 
   describe('buildSystemPrompt', () => {
-    it('uses default base prompt when no system_prompt is set', () => {
-      const result = service.buildSystemPrompt({}, []);
-      expect(result).toContain('helpful AI desk companion');
+    it('uses fixed gen-z personality prompt with bot name', () => {
+      const result = service.buildSystemPrompt([]);
+      expect(result).toContain(BOT_NAME);
+      expect(result).toContain('gen-z desk buddy');
     });
 
-    it('uses custom system_prompt when provided', () => {
-      const personality: PersonalityConfig = {
-        system_prompt: 'You are a pirate.',
-      };
-      const result = service.buildSystemPrompt(personality, []);
-      expect(result).toContain('You are a pirate.');
-      expect(result).not.toContain('helpful AI desk companion');
-    });
-
-    it('appends language hint when language is set', () => {
-      const personality: PersonalityConfig = { language: 'Indonesian' };
-      const result = service.buildSystemPrompt(personality, []);
-      expect(result).toContain('Respond in Indonesian');
-    });
-
-    it('uses default language hint when no language is set', () => {
-      const result = service.buildSystemPrompt({}, []);
-      expect(result).toContain('Respond in the same language the user uses');
+    it('includes auto-detect language hint', () => {
+      const result = service.buildSystemPrompt([]);
+      expect(result).toContain('Respond in whatever language the user speaks');
     });
 
     it('includes memory entries', () => {
@@ -39,14 +25,14 @@ describe('PromptService', () => {
         { fact: 'User is a developer', category: 'profession' },
         { fact: 'User likes coffee', category: 'preference' },
       ];
-      const result = service.buildSystemPrompt({}, memories);
-      expect(result).toContain('User is a developer (profession)');
-      expect(result).toContain('User likes coffee (preference)');
+      const result = service.buildSystemPrompt(memories);
+      expect(result).toContain('User is a developer');
+      expect(result).toContain('User likes coffee');
     });
 
     it('omits memory block when memories is empty', () => {
-      const result = service.buildSystemPrompt({}, []);
-      expect(result).not.toContain('You know the following');
+      const result = service.buildSystemPrompt([]);
+      expect(result).not.toContain('You know this about the user');
     });
   });
 
