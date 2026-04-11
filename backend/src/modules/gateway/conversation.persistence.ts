@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { Conversation, Message, Device } from '../../core/database/entities';
 
 @Injectable()
 export class ConversationPersistence {
+  private readonly logger = new Logger(ConversationPersistence.name);
+
   constructor(
     @InjectRepository(Conversation)
     private readonly conversationsRepo: Repository<Conversation>,
@@ -15,6 +17,15 @@ export class ConversationPersistence {
   ) {}
 
   async createConversation(deviceId: string): Promise<Conversation> {
+    // End any stale open conversations for this device before creating a new one
+    const stale = await this.conversationsRepo.update(
+      { deviceId, endedAt: IsNull() },
+      { endedAt: new Date() },
+    );
+    if (stale.affected && stale.affected > 0) {
+      this.logger.log(`Closed ${stale.affected} stale conversation(s) for device ${deviceId}`);
+    }
+
     const conversation = this.conversationsRepo.create({ deviceId });
     return this.conversationsRepo.save(conversation);
   }
