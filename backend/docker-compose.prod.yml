@@ -3,7 +3,7 @@ name: aksabot
 services:
   app:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
     container_name: aksabot-app
     restart: unless-stopped
