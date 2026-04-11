@@ -29,8 +29,6 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
   bool _reminderChime = true;
   double _vadSensitivity = 0.5;
 
-  // Full settings snapshot so we don't clobber unrelated keys on PATCH.
-  Map<String, dynamic> _rawSettings = {};
 
   @override
   void initState() {
@@ -51,7 +49,6 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
   void _applySettings(Device device) {
     final s = device.settingsJson;
     setState(() {
-      _rawSettings = Map<String, dynamic>.from(s);
       _voicePreset = s['voice_preset'] as String? ?? 'ziggy';
       _speed = (s['voice_speed'] as num?)?.toDouble() ?? 0.8;
       _stability = (s['voice_stability'] as num?)?.toDouble() ?? 0.6;

@@ -30,8 +30,6 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
   bool _showTranscript = false;
   String _idleTimeout = '30';
 
-  // Track which fields the user actually touched on this page visit
-  final _dirty = <String>{};
 
   @override
   void initState() {
@@ -67,7 +65,6 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
               const ['1', '5', '10', '30'].contains(minutes.toString())
                   ? minutes.toString()
                   : '30';
-          _dirty.clear();
           _loading = false;
         });
       },
@@ -75,22 +72,17 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
   }
 
   Future<void> _save() async {
-    if (_saving || _dirty.isEmpty) return;
+    if (_saving) return;
     setState(() => _saving = true);
 
-    // Only send fields the user actually changed on this page
-    final patch = <String, dynamic>{};
-    if (_dirty.contains('volume')) patch['volume'] = _volume.round();
-    if (_dirty.contains('brightness')) patch['brightness'] = _brightness.round();
-    if (_dirty.contains('display_transcript')) patch['display_transcript'] = _showTranscript;
-    if (_dirty.contains('idle_timeout')) patch['idle_timeout_seconds'] = int.parse(_idleTimeout) * 60;
-
-    if (patch.isEmpty) {
-      setState(() => _saving = false);
-      return;
-    }
-
-    final result = await _devicesRepo.updateSettings(widget.deviceId, patch);
+    // Always send all settings from this page — backend merges per-key,
+    // so this only touches volume/brightness/transcript/timeout.
+    final result = await _devicesRepo.updateSettings(widget.deviceId, {
+      'volume': _volume.round(),
+      'brightness': _brightness.round(),
+      'display_transcript': _showTranscript,
+      'idle_timeout_seconds': int.parse(_idleTimeout) * 60,
+    });
     if (!mounted) return;
 
     result.fold(
@@ -190,7 +182,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
                     min: 0,
                     max: 100,
                     divisions: 20,
-                    onChanged: (v) => setState(() { _volume = v; _dirty.add('volume'); }),
+                    onChanged: (v) => setState(() => _volume = v),
                   ),
                   Row(
                     children: [
@@ -205,7 +197,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
                     min: 0,
                     max: 100,
                     divisions: 20,
-                    onChanged: (v) => setState(() { _brightness = v; _dirty.add('brightness'); }),
+                    onChanged: (v) => setState(() => _brightness = v),
                   ),
                   const SizedBox(height: 8),
                   Row(
@@ -216,7 +208,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
                       Switch(
                         value: _showTranscript,
                         onChanged: (v) =>
-                            setState(() { _showTranscript = v; _dirty.add('display_transcript'); }),
+                            setState(() => _showTranscript = v),
                       ),
                     ],
                   ),
@@ -239,7 +231,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
                               value: '30', child: Text('30 min')),
                         ],
                         onChanged: (v) {
-                          if (v != null) setState(() { _idleTimeout = v; _dirty.add('idle_timeout'); });
+                          if (v != null) setState(() => _idleTimeout = v);
                         },
                       ),
                     ],

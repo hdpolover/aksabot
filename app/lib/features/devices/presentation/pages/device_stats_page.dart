@@ -196,10 +196,17 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
                             const Divider(height: 1),
                             ListTile(
                               title: const Text('Refill pool'),
-                              trailing: FilledButton.tonal(
-                                onPressed: _isRefilling ? null : _refillPool,
-                                child: Text(
-                                    _isRefilling ? 'Refilling...' : 'Refill'),
+                              trailing: SizedBox(
+                                width: 90,
+                                height: 36,
+                                child: FilledButton.tonal(
+                                  onPressed: _isRefilling ? null : _refillPool,
+                                  style: FilledButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                                  ),
+                                  child: Text(
+                                      _isRefilling ? 'Refilling...' : 'Refill'),
+                                ),
                               ),
                             ),
                           ],
