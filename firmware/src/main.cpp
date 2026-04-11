@@ -529,8 +529,12 @@ static void onTouchEvent(touch::Event event) {
             // recordInteraction() already called at top of onTouchEvent
             appState.botState = BotState::IDLE;
             syncFaceToState();
-            face::setExpression(face::Expression::ENCOURAGING, 200);
-            scheduleFaceRevert(1500);
+            face::setExpression(face::Expression::HAPPY, 200);
+            scheduleFaceRevert(2000);
+            // Ask backend for a wake-up greeting with TTS
+            if (appState.wsConnected) {
+                ws_client::sendEvent("wake:touch");
+            }
             Serial.println("[Main] Woke from touch");
             break;
     }

@@ -355,6 +355,62 @@ export class AudioGateway
     });
   }
 
+  private async onWakeTouch(deviceId: string) {
+    const session = this.sessions.get(deviceId);
+    if (!session || session.state !== 'idle') return;
+
+    this.logger.log(`Device ${deviceId} wake:touch — generating greeting`);
+
+    // Generate a short wake-up greeting via LLM
+    const wakePrompts = [
+      'The user just tapped the screen to wake you up from sleep mode. Say a very brief, casual wake-up greeting — like you just woke up too. One short sentence max.',
+      'You were sleeping and the user tapped to wake you. React like you just got woken up — groggy, funny, or surprised. One short sentence.',
+      'The user poked your screen to wake you up. Give a quick sleepy/funny reaction. Keep it to one sentence.',
+    ];
+    const prompt = wakePrompts[Math.floor(Math.random() * wakePrompts.length)];
+
+    const memories = await this.memoriesService.getRelevant(deviceId);
+    const systemPrompt = this.aiService['prompt'].buildSystemPrompt(memories);
+
+    let wakeText = '';
+    const stream = this.aiService['llm'].generateStream(systemPrompt, [
+      { role: 'user', content: prompt },
+    ]);
+    for await (const token of stream) {
+      wakeText += token;
+    }
+
+    // Strip emotion tags
+    wakeText = wakeText.replace(/\[\s*\w+\s*\]/g, '').trim();
+    if (!wakeText) return;
+
+    // Send as TTS audio
+    const device = await this.persistence.getDevice(deviceId);
+    const s = device?.settingsJson ?? {};
+    const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability };
+
+    const sentences = this.splitSentences(wakeText);
+
+    this.sendToDevice(deviceId, 'response:start', { type: 'wake' });
+
+    for (const sentence of sentences) {
+      const sock = this.deviceToSocket.get(deviceId);
+      if (!sock || sock.readyState !== 1) return;
+
+      const { opusAudio } = await this.aiService.synthesizeWithCache(
+        sentence, undefined, voiceOpts,
+      );
+      this.sendToDevice(deviceId, 'response:text', { text: sentence, isFinal: false });
+      await this.sendFramedOpusToDevice(deviceId, opusAudio);
+    }
+
+    this.sendToDevice(deviceId, 'response:end', {
+      fullText: wakeText,
+      cacheKeys: [],
+    });
+    this.logger.log(`Wake greeting sent to ${deviceId}: "${wakeText.slice(0, 60)}..."`);
+  }
+
   /** Split text into sentences for per-sentence TTS (matches processTranscript behavior). */
   private splitSentences(text: string): string[] {
     const parts = text.split(/(?<=[.!?])\s+/);
@@ -426,6 +482,11 @@ export class AudioGateway
           break;
         case 'device:info':
           this.onDeviceInfo(deviceId, msg.data);
+          break;
+        case 'wake:touch':
+          this.onWakeTouch(deviceId).catch((err) =>
+            this.logger.error(`onWakeTouch error: ${err.message}`),
+          );
           break;
         default:
           this.logger.warn(`Unknown event: ${msg.event}`);
