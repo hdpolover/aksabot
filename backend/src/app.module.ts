@@ -1,4 +1,12 @@
-import { Module } from '@nestjs/common';
+import { Controller, Get, Module } from '@nestjs/common';
+
+@Controller()
+class HealthController {
+  @Get()
+  health() {
+    return { status: 'ok', service: 'aksabot-backend' };
+  }
+}
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppConfigModule } from './core/config/config.module';
 import { CacheModule } from './core/cache/cache.module';
@@ -12,6 +20,7 @@ import { MemoriesModule } from './modules/memories/memories.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
 
 @Module({
+  controllers: [HealthController],
   imports: [
     AppConfigModule,
     ScheduleModule.forRoot(),
