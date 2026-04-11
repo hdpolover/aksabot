@@ -150,7 +150,7 @@ describe('AiService', () => {
       );
 
       expect(mockLlm.generateStream).toHaveBeenCalledWith(
-        expect.stringContaining('gen-z desk buddy'),
+        expect.stringContaining('gen-z energy'),
         expect.arrayContaining([
           { role: 'user', content: 'Previous' },
           { role: 'user', content: 'Current' },

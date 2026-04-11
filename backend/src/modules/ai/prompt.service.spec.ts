@@ -12,7 +12,7 @@ describe('PromptService', () => {
     it('uses fixed gen-z personality prompt with bot name', () => {
       const result = service.buildSystemPrompt([]);
       expect(result).toContain(BOT_NAME);
-      expect(result).toContain('gen-z desk buddy');
+      expect(result).toContain('gen-z energy');
     });
 
     it('includes auto-detect language hint', () => {
