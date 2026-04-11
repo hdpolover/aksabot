@@ -3,7 +3,6 @@
 #include "config.h"
 #include "lgfx_config.h"
 #include <Arduino.h>
-#include <Wire.h>
 
 // ── Configuration ──────────────────────────────────────
 static const uint16_t DEBOUNCE_MS = 30;
@@ -45,15 +44,12 @@ static uint32_t lastKeepaliveMs = 0;
 
 // ── Helpers ────────────────────────────────────────────
 
-/// Read a single FT6336G register via I2C to keep the IC in Monitor mode.
+/// Ping FT6336G via LovyanGFX's I2C path to keep the IC in Monitor mode.
 /// The FT6336G transitions Active → Monitor → Hibernate when idle.
 /// Any I2C transaction resets the hibernate timer, keeping INT responsive.
 static void touchKeepalive() {
-    Wire.beginTransmission(TOUCH_I2C_ADDR);
-    Wire.write(0x00);  // register 0x00 = device mode
-    Wire.endTransmission(false);
-    Wire.requestFrom((uint8_t)TOUCH_I2C_ADDR, (uint8_t)1);
-    if (Wire.available()) Wire.read();  // discard — we just need the I2C traffic
+    lgfx::touch_point_t tp;
+    tft.getTouch(&tp, 1);  // result ignored — just need the I2C traffic
 }
 
 static void fireEvent(touch::Event event) {
@@ -133,8 +129,10 @@ void touch::tick(uint32_t nowMs) {
     if (nowMs < bootReadyMs) goto check_hold;
     if (nowMs < wakeCooldownUntil) goto check_hold;
 
-    // Keep FT6336G alive while sleeping — prevent hibernate (INT pin goes dead)
-    if (display::isSleeping() && (nowMs - lastKeepaliveMs) >= KEEPALIVE_INTERVAL_MS) {
+    // Keep FT6336G alive — prevent hibernate (INT pin goes dead).
+    // The IC enters hibernate after ~10-15s with no I2C traffic OR no touch.
+    // This affects both sleep (tap-to-wake) and idle screens (BIOS menu).
+    if (!currentlyTouched && (nowMs - lastKeepaliveMs) >= KEEPALIVE_INTERVAL_MS) {
         lastKeepaliveMs = nowMs;
         touchKeepalive();
     }

@@ -141,7 +141,9 @@ void ws_client::init(JsonCallback onJson, BinaryCallback onBinary) {
         strncpy(tokenBuf, DEVICE_TOKEN, sizeof(tokenBuf) - 1);
     }
 
-    // Enable SSL for wss:// URLs (skip certificate validation for now)
+    // Enable SSL for wss:// URLs (skip certificate validation).
+    // The ArduinoWebsockets library was patched to call WiFiClientSecure::setInsecure()
+    // on ESP32 when no CA cert is set (upstream only did this for ESP8266).
     if (strncmp(wsUrlBuf, "wss://", 6) == 0) {
         client.setInsecure();
         Serial.println("[WS] SSL enabled (insecure mode)");

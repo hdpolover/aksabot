@@ -75,41 +75,29 @@ static void waitBootRelease() {
     delay(80);
 }
 
-// Poll touch driver and wait for a tap. Returns tap Y coordinate, or -1 for BOOT.
+// Poll touch via direct I2C (tft.getTouch) — bypasses the INT-pin debounce
+// pipeline which is unreliable for several seconds after FT6336G reset.
 static int waitTapY() {
-    // Wait for no-touch state first (debounce from previous tap)
-    while (touch::isTouched()) {
-        touch::processSerial(millis());
-        touch::tick(millis());
-        delay(15);
-    }
+    // Wait for finger-up first (debounce from previous tap)
+    lgfx::touch_point_t tp;
+    while (tft.getTouch(&tp, 1) > 0) delay(15);
 
     for (;;) {
+        // Also accept serial simulation + BOOT button
         touch::processSerial(millis());
         touch::tick(millis());
-
         if (bootPressed()) { waitBootRelease(); return -1; }
 
-        if (touch::isTouched()) {
-            // Finger is down — read coordinates
-            lgfx::touch_point_t tp;
-            int tapY = -2;
-            if (tft.getTouch(&tp, 1) > 0) {
-                // Y axis is inverted on this panel
-                tapY = (LCD_HEIGHT - 1) - tp.y;
-                Serial.printf("[BIOS] Touch raw y=%d → mapped y=%d\n", tp.y, tapY);
-            }
+        if (tft.getTouch(&tp, 1) > 0) {
+            // Y axis is inverted on this panel
+            int tapY = (LCD_HEIGHT - 1) - tp.y;
+            Serial.printf("[BIOS] Touch raw y=%d → mapped y=%d\n", tp.y, tapY);
 
             // Wait for release
-            while (touch::isTouched()) {
-                touch::processSerial(millis());
-                touch::tick(millis());
-                delay(15);
-            }
+            while (tft.getTouch(&tp, 1) > 0) delay(15);
             delay(50);  // debounce after release
 
             if (tapY >= 0) return tapY;
-            // If coordinate read failed, ignore and retry
         }
 
         delay(20);
@@ -192,10 +180,9 @@ static void audioTestScreen() {
             const int barX = 20, barY = 130, barW = LCD_WIDTH - 40, barH = 16;
             tft.drawRect(barX - 1, barY - 1, barW + 2, barH + 2, DIM);
 
+            lgfx::touch_point_t tp2;
             int16_t micBuf[320];
-            while (!touch::isTouched() && !bootPressed()) {
-                touch::processSerial(millis());
-                touch::tick(millis());
+            while (tft.getTouch(&tp2, 1) == 0 && !bootPressed()) {
                 size_t samples = audio_io::readMic(micBuf, 320);
                 if (samples > 0) {
                     int64_t sum = 0;
@@ -213,8 +200,7 @@ static void audioTestScreen() {
                     drawSmall(db, 155, WHITE);
                 }
             }
-            // Wait for release
-            while (touch::isTouched()) { touch::tick(millis()); delay(15); }
+            while (tft.getTouch(&tp2, 1) > 0) delay(15);
             if (bootPressed()) waitBootRelease();
         }
         else if (sel == 2) {
@@ -223,14 +209,13 @@ static void audioTestScreen() {
             drawSmall("Speak — you'll hear yourself", 120, WHITE);
             drawSmall("Tap or BOOT to stop", 145, DIM);
 
+            lgfx::touch_point_t tp3;
             int16_t echoBuf[320];
-            while (!touch::isTouched() && !bootPressed()) {
-                touch::processSerial(millis());
-                touch::tick(millis());
+            while (tft.getTouch(&tp3, 1) == 0 && !bootPressed()) {
                 size_t samples = audio_io::readMic(echoBuf, 320);
                 if (samples > 0) audio_io::writeSpeaker(echoBuf, samples);
             }
-            while (touch::isTouched()) { touch::tick(millis()); delay(15); }
+            while (tft.getTouch(&tp3, 1) > 0) delay(15);
             if (bootPressed()) waitBootRelease();
         }
     }
@@ -452,13 +437,10 @@ static void drawStatusDashboard() {
 // ── Main BIOS menu ────────────────────────────────────────
 
 bool bios_menu::show() {
-    // Let the FT6336G settle, then clear any phantom touches
-    delay(300);
-    touch::clearBootDelay();
-    for (int i = 0; i < 10; i++) {
-        touch::tick(millis());
-        delay(15);
-    }
+    // Wait for any residual touch to clear (finger still on screen from BOOT press)
+    lgfx::touch_point_t tp0;
+    while (tft.getTouch(&tp0, 1) > 0) delay(15);
+    delay(100);
 
     const char* items[] = { "Continue Boot", "Audio Test", "WiFi Scan", "System Info", "Setup WiFi", "Factory Reset" };
     const int statusAreaEnd = 115;  // Status dashboard takes y 30-110

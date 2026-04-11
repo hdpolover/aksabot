@@ -119,12 +119,13 @@ export class AudioGateway
       this.logger.warn(`Scheduler start failed: ${err.message}`),
     );
 
-    // Greeting: wait 2s for device to settle, then send TTS greeting
+    // Greeting: wait 5s for device to settle, then send TTS greeting
+    // Longer delay to let SSL stabilize before sending audio frames
     setTimeout(() => {
       this.sendConnectionGreeting(device.id).catch((err) =>
         this.logger.warn(`Connection greeting failed: ${err.message}`),
       );
-    }, 2000);
+    }, 5000);
   }
 
   handleDisconnect(client: WebSocket) {
