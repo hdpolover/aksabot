@@ -9,7 +9,8 @@ import {
   Memory,
   ResponsePool,
 } from './entities';
-import { Init1775743820807 } from './migrations/1775743820807-Init';
+// Migrations imported for migrationsRun (disabled — using synchronize for now)
+// import { Init1775743820807 } from './migrations/1775743820807-Init';
 
 @Module({
   imports: [
@@ -23,9 +24,7 @@ import { Init1775743820807 } from './migrations/1775743820807-Init';
         password: config.get('DB_PASSWORD'),
         database: config.get('DB_NAME', 'aksabot'),
         entities: [User, Device, Conversation, Message, Memory, ResponsePool],
-        synchronize: false,
-        migrationsRun: true,
-        migrations: [Init1775743820807],
+        synchronize: true,
       }),
     }),
   ],
