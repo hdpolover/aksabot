@@ -7,6 +7,9 @@ class DeviceModel extends Device {
     super.lastSeenAt,
     super.settingsJson,
     super.personalityJson,
+    super.firmwareVersion,
+    super.wifiSsid,
+    super.wifiRssi,
     super.deviceToken,
   });
 
@@ -19,6 +22,10 @@ class DeviceModel extends Device {
           : null,
       settingsJson: (json['settingsJson'] as Map<String, dynamic>?) ?? {},
       personalityJson: (json['personalityJson'] as Map<String, dynamic>?) ?? {},
+      firmwareVersion: json['firmwareVersion'] as String?,
+      wifiSsid: json['wifiSsid'] as String?,
+      wifiRssi: (json['wifiRssi'] as int?) ??
+          (json['settingsJson'] is Map ? (json['settingsJson']['wifi_rssi'] as int?) : null),
       deviceToken: json['deviceToken'] as String?,
     );
   }

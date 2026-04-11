@@ -75,11 +75,12 @@ class _DeviceDetailView extends StatelessWidget {
                       ),
                     )
                   : DefaultTabController(
-                      length: 2,
+                      length: 3,
                       child: Column(
                         children: [
                           TabBar(
                             tabs: const [
+                              Tab(text: 'Dashboard'),
                               Tab(text: 'Settings'),
                               Tab(text: 'Personality'),
                             ],
@@ -90,6 +91,7 @@ class _DeviceDetailView extends StatelessWidget {
                           Expanded(
                             child: TabBarView(
                               children: [
+                                _DashboardTab(device: device),
                                 _SettingsTab(device: device),
                                 _PersonalityTab(device: device),
                               ],
@@ -131,6 +133,165 @@ class _DeviceDetailView extends StatelessWidget {
             child: const Text('Delete'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard tab
+// ---------------------------------------------------------------------------
+
+class _DashboardTab extends StatelessWidget {
+  final Device device;
+  const _DashboardTab({required this.device});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final online = device.isOnline;
+    final botName =
+        (device.personalityJson['name'] as String?)?.isNotEmpty == true
+            ? device.personalityJson['name'] as String
+            : device.name;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        // Hero header
+        Center(
+          child: Column(
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: online
+                        ? [colors.primary, colors.tertiary]
+                        : [colors.surfaceContainerHighest, colors.surfaceContainerHigh],
+                  ),
+                  borderRadius: BorderRadius.circular(AppConstants.radiusXl),
+                ),
+                child: Icon(
+                  Icons.smart_toy_rounded,
+                  size: 36,
+                  color: online ? colors.onPrimary : colors.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: AppConstants.spacingMd),
+              Text(botName, style: theme.textTheme.headlineSmall),
+              const SizedBox(height: AppConstants.spacingXs),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  StatusDot(
+                    variant: online
+                        ? StatusDotVariant.online
+                        : StatusDotVariant.offline,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    online ? 'Online' : 'Offline',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppConstants.spacingXxl),
+
+        // Quick actions
+        Text('Quick Actions', style: theme.textTheme.titleMedium),
+        const SizedBox(height: AppConstants.spacingMd),
+        GridView.count(
+          crossAxisCount: 3,
+          mainAxisSpacing: AppConstants.spacingSm,
+          crossAxisSpacing: AppConstants.spacingSm,
+          childAspectRatio: 1.0,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          children: [
+            for (final action in [
+              (Icons.face, 'Personality', 'personality'),
+              (Icons.notifications_active, 'Reminders', 'reminders'),
+              (Icons.timer, 'Pomodoro', 'pomodoro'),
+              (Icons.center_focus_strong, 'Focus', 'focus'),
+              (Icons.bluetooth_searching, 'Presence', 'presence'),
+              (Icons.monitor, 'Display', 'display'),
+              (Icons.graphic_eq, 'Audio', 'voice'),
+              (Icons.bar_chart, 'Stats', 'stats'),
+              (Icons.settings, 'Settings', 'settings'),
+            ])
+              _QuickActionTile(
+                icon: action.$1,
+                label: action.$2,
+                onTap: () =>
+                    context.push('/devices/${device.id}/${action.$3}'),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _QuickActionTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _QuickActionTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Material(
+      color: colors.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+        child: Padding(
+          padding: const EdgeInsets.all(AppConstants.spacingMd),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: colors.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+                ),
+                child: Icon(icon, color: colors.primary, size: AppConstants.iconMd),
+              ),
+              const SizedBox(height: AppConstants.spacingSm),
+              Text(
+                label,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -357,12 +518,30 @@ class _SettingsTabState extends State<_SettingsTab> {
               const Divider(height: 1),
               ListTile(
                 title: const Text('Wi-Fi signal'),
-                trailing: Text(
-                  'Requires BLE',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colors.onSurfaceVariant,
-                  ),
-                ),
+                trailing: widget.device.wifiRssi != null
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _wifiIcon(widget.device.wifiRssi!),
+                            size: 18,
+                            color: _wifiColor(widget.device.wifiRssi!, colors),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _wifiLabel(widget.device.wifiRssi!),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: _wifiColor(widget.device.wifiRssi!, colors),
+                            ),
+                          ),
+                        ],
+                      )
+                    : Text(
+                        widget.device.isOnline ? 'Connected' : 'N/A',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ),
               ),
               const Divider(height: 1),
               ListTile(
@@ -381,7 +560,7 @@ class _SettingsTabState extends State<_SettingsTab> {
               ListTile(
                 title: const Text('Firmware'),
                 trailing: Text(
-                  'Requires BLE',
+                  widget.device.firmwareVersion ?? 'N/A',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colors.onSurfaceVariant,
                   ),
@@ -411,6 +590,26 @@ class _SettingsTabState extends State<_SettingsTab> {
     if (d.inDays > 0) return '${d.inDays}d ${d.inHours % 24}h';
     if (d.inHours > 0) return '${d.inHours}h ${d.inMinutes % 60}m';
     return '${d.inMinutes}m';
+  }
+
+  static String _wifiLabel(int rssi) {
+    if (rssi > -50) return 'Excellent';
+    if (rssi > -60) return 'Good';
+    if (rssi > -70) return 'Fair';
+    if (rssi > -80) return 'Weak';
+    return 'Poor';
+  }
+
+  static IconData _wifiIcon(int rssi) {
+    if (rssi > -60) return Icons.wifi;
+    if (rssi > -70) return Icons.wifi_2_bar;
+    return Icons.wifi_1_bar;
+  }
+
+  static Color _wifiColor(int rssi, ColorScheme colors) {
+    if (rssi > -60) return colors.primary;
+    if (rssi > -70) return colors.tertiary;
+    return colors.error;
   }
 
   void _confirmDelete(BuildContext context) {

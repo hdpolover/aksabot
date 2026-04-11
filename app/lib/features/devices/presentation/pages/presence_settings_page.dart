@@ -67,6 +67,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
       final started = await _presence.startAdvertising();
       if (started) {
         await _presence.saveEnabled(true);
+        _syncToBackend({'presence_enabled': true});
       } else {
         await _presence.saveEnabled(false);
         if (!mounted) return;
@@ -78,6 +79,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
     } else {
       await _presence.stopAdvertising();
       await _presence.saveEnabled(false);
+      _syncToBackend({'presence_enabled': false});
     }
   }
 

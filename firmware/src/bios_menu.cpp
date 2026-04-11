@@ -406,9 +406,11 @@ static void drawStatusDashboard() {
     // WiFi
     if (WiFi.isConnected()) {
         int rssi = WiFi.RSSI();
-        char rssiStr[16];
-        snprintf(rssiStr, sizeof(rssiStr), "%d dBm", rssi);
-        uint16_t col = (rssi > -50) ? GREEN : (rssi > -70) ? YELLOW : RED;
+        const char* label = (rssi > -50) ? "Excellent" : (rssi > -60) ? "Good" :
+                            (rssi > -70) ? "Fair" : (rssi > -80) ? "Weak" : "Poor";
+        uint16_t col = (rssi > -60) ? GREEN : (rssi > -70) ? YELLOW : RED;
+        char rssiStr[24];
+        snprintf(rssiStr, sizeof(rssiStr), "%s (%d)", label, rssi);
         statusLine("WiFi", rssiStr, col);
 
         char ipStr[20];

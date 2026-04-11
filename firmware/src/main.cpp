@@ -52,10 +52,12 @@ struct PlaybackFrame {
     int16_t samples[OPUS_FRAME_SAMPLES];  // 320 mono samples (20ms)
     int count;                             // actual sample count
 };
-static const size_t PLAYBACK_QUEUE_SIZE = 30;  // ~600ms buffer at 20ms/frame
+static const size_t PLAYBACK_QUEUE_SIZE = 40;  // ~800ms buffer at 20ms/frame
 static QueueHandle_t playbackQueue = nullptr;
 static volatile bool playbackActive = false;  // true while audio task should drain queue
 static volatile bool playbackDone = false;    // set by response:end to signal no more frames
+static volatile bool playbackBuffering = true;  // jitter buffer: accumulate before playing
+static const int JITTER_BUFFER_FRAMES = 10;     // wait for 200ms of audio before starting
 
 // ── Echo mode (hold-to-record, release-to-playback) ───
 // Records raw stereo I2S frames to PSRAM (same as audio-pipeline test firmware).
@@ -135,9 +137,10 @@ static void onWsJson(const char* event, const char* data) {
         syncFaceToState();
         cacheAccumLen = 0;
         playbackDone = false;
+        playbackBuffering = true;  // accumulate frames before playing
         playbackActive = true;
         audio_io::flushSpeaker();  // Clear stale DMA data
-        Serial.println("[Main] Response start — playing audio");
+        Serial.println("[Main] Response start — buffering audio");
     }
     else if (strcmp(event, "response:text") == 0) {
         Serial.printf("[Main] LLM: %s\n", data);
@@ -494,9 +497,21 @@ static void audioCaptureLoop(void* param) {
 
         // ── Backend audio playback — drain queue with blocking I2S writes ──
         if (playbackActive && playbackQueue) {
+            // Jitter buffer: wait for enough frames before starting playback.
+            // This absorbs network jitter and prevents stuttery audio.
+            if (playbackBuffering) {
+                int queued = uxQueueMessagesWaiting(playbackQueue);
+                if (queued >= JITTER_BUFFER_FRAMES || playbackDone) {
+                    playbackBuffering = false;
+                    Serial.printf("[Main] Jitter buffer ready — %d frames queued\n", queued);
+                } else {
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                    continue;
+                }
+            }
+
             PlaybackFrame frame;
-            // Wait up to 100ms for a frame — gives WS time to enqueue more
-            if (xQueueReceive(playbackQueue, &frame, pdMS_TO_TICKS(100)) == pdTRUE) {
+            if (xQueueReceive(playbackQueue, &frame, pdMS_TO_TICKS(150)) == pdTRUE) {
                 audio_io::writeSpeaker(frame.samples, frame.count);
 
                 // Feed amplitude to face for mouth animation
@@ -509,6 +524,7 @@ static void audioCaptureLoop(void* param) {
                 // Queue empty and no more frames coming — finish playback
                 playbackActive = false;
                 playbackDone = false;
+                playbackBuffering = true;
                 face::feedAudioAmplitude(0);
                 appState.botState = BotState::IDLE;
                 syncFaceToState();
@@ -1019,10 +1035,17 @@ void loop() {
     static bool prevWifi = false;
     static bool prevWs = false;
     if (appState.wifiConnected != prevWifi || appState.wsConnected != prevWs) {
-        // WS just connected — ensure face is IDLE (clears stuck CONFUSED from setup)
+        // WS just connected — send device info and ensure face is IDLE
         if (appState.wsConnected && !prevWs) {
             appState.botState = BotState::IDLE;
             syncFaceToState();
+
+            // Report device info to backend
+            char infoPayload[128];
+            snprintf(infoPayload, sizeof(infoPayload),
+                "{\"firmwareVersion\":\"%s\",\"wifiSsid\":\"%s\",\"wifiRssi\":%d}",
+                FIRMWARE_VERSION, WiFi.SSID().c_str(), WiFi.RSSI());
+            ws_client::sendEvent("device:info", infoPayload);
         }
         prevWifi = appState.wifiConnected;
         prevWs = appState.wsConnected;

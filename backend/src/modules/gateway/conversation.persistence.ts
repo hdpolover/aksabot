@@ -68,4 +68,20 @@ export class ConversationPersistence {
   async updateLastSeen(deviceId: string): Promise<void> {
     await this.devicesRepo.update(deviceId, { lastSeenAt: new Date() });
   }
+
+  async updateDeviceInfo(
+    deviceId: string,
+    info: { firmwareVersion?: string; wifiSsid?: string; wifiRssi?: number },
+  ): Promise<void> {
+    const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+    if (!device) return;
+
+    if (info.firmwareVersion) device.firmwareVersion = info.firmwareVersion;
+    if (info.wifiSsid) device.wifiSsid = info.wifiSsid;
+    // RSSI stored in settingsJson (no dedicated column — avoids migration)
+    if (info.wifiRssi !== undefined) {
+      device.settingsJson = { ...device.settingsJson, wifi_rssi: info.wifiRssi };
+    }
+    await this.devicesRepo.save(device);
+  }
 }

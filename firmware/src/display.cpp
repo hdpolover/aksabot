@@ -674,8 +674,10 @@ void renderStatus(const display::StatusBar& status) {
     tft.drawString(status.wsConnected ? "Backend: Online" : "Backend: Offline", 10, y);
     y += lineH;
 
-    char rssBuf[24];
-    snprintf(rssBuf, sizeof(rssBuf), "Signal: %d dBm", status.wifiRssi);
+    const char* sigLabel = (status.wifiRssi > -50) ? "Excellent" : (status.wifiRssi > -60) ? "Good" :
+                           (status.wifiRssi > -70) ? "Fair" : (status.wifiRssi > -80) ? "Weak" : "Poor";
+    char rssBuf[32];
+    snprintf(rssBuf, sizeof(rssBuf), "Signal: %s (%d)", sigLabel, status.wifiRssi);
     tft.drawString(rssBuf, 10, y); y += lineH;
 
     if (status.batteryPercent == 255) {

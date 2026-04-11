@@ -270,6 +270,20 @@ export class AudioGateway
     this.logger.log(`Welcome-back greeting sent to ${deviceId}`);
   }
 
+  private onDeviceInfo(deviceId: string, data: any) {
+    if (!data) return;
+    this.persistence.updateDeviceInfo(deviceId, {
+      firmwareVersion: data.firmwareVersion,
+      wifiSsid: data.wifiSsid,
+      wifiRssi: data.wifiRssi,
+    }).catch((err) =>
+      this.logger.warn(`Failed to save device info: ${err.message}`),
+    );
+    this.logger.log(
+      `Device ${deviceId} info: fw=${data.firmwareVersion} wifi=${data.wifiSsid} rssi=${data.wifiRssi}`,
+    );
+  }
+
   private onPresenceDeparted(deviceId: string) {
     this.logger.log(`Device ${deviceId} presence:departed`);
     // Send sad expression — firmware handles display sleep
@@ -347,6 +361,9 @@ export class AudioGateway
           break;
         case 'proactive:dismiss':
           this.logger.debug(`Proactive dismissed by device ${deviceId}`);
+          break;
+        case 'device:info':
+          this.onDeviceInfo(deviceId, msg.data);
           break;
         default:
           this.logger.warn(`Unknown event: ${msg.event}`);

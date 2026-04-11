@@ -6,6 +6,9 @@ class Device extends Equatable {
   final DateTime? lastSeenAt;
   final Map<String, dynamic> settingsJson;
   final Map<String, dynamic> personalityJson;
+  final String? firmwareVersion;
+  final String? wifiSsid;
+  final int? wifiRssi;
 
   /// Only populated once, from the create-device API response.
   /// Used during provisioning to write the token to the ESP32.
@@ -17,6 +20,9 @@ class Device extends Equatable {
     this.lastSeenAt,
     this.settingsJson = const {},
     this.personalityJson = const {},
+    this.firmwareVersion,
+    this.wifiSsid,
+    this.wifiRssi,
     this.deviceToken,
   });
 
@@ -26,5 +32,5 @@ class Device extends Equatable {
   }
 
   @override
-  List<Object?> get props => [id, name, lastSeenAt, settingsJson, personalityJson, deviceToken];
+  List<Object?> get props => [id, name, lastSeenAt, settingsJson, personalityJson, firmwareVersion, wifiSsid, wifiRssi, deviceToken];
 }
