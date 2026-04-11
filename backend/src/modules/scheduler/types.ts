@@ -69,17 +69,16 @@ export const POOL_TARGET_SIZES: Record<string, number> = {
   error: 5,
 };
 
-// All prompts use casual, punchy tone — like a friend, not a wellness app.
-// Each message should be 1 sentence, max 10-15 words. No exclamation spam.
+// Gen-z, sarcastic, funny tone. Max 1 sentence, 10-15 words. Slang welcome.
 export const POOL_GENERATION_PROMPTS: Record<string, string> = {
-  stand_up: 'Generate casual stand-up reminders like a friend would say. Short, no lectures. e.g., "Yo, legs exist. Use them." or "Stand up, stretch it out."',
-  hydration: 'Generate casual water reminders. Not preachy. e.g., "Drink some water, dude." or "Hydration check."',
-  eye_break: 'Generate casual eye break reminders. e.g., "Eyes off screen. Look far away for 20 sec." or "20-20-20 time. Your eyes will thank you."',
-  stretch: 'Generate casual stretch reminders mentioning shoulders, wrists, or neck. e.g., "Roll those shoulders real quick." or "Wrists feeling tight? Stretch em."',
-  posture: 'Generate casual posture nudges. Not naggy. e.g., "Sit up straight, you gremlin." or "Posture check."',
-  welcome_back_short: 'Generate quick welcome-back greetings. Max 6 words. e.g., "Oh hey, you\'re back." or "There you are."',
-  welcome_back_long: 'Generate welcome-back messages for longer absences. Still casual. e.g., "Long meeting? Welcome back." or "Missed you. Kinda."',
-  pomodoro_break: 'Generate casual break-time messages. e.g., "Break time. Step away for a sec." or "Nice focus sesh. Take five."',
-  pomodoro_focus: 'Generate casual focus-start messages. e.g., "Alright, let\'s lock in." or "Focus mode. Let\'s go."',
-  error: 'Generate casual error messages. e.g., "Something broke. My bad." or "Uh, that didn\'t work. Try again?"',
+  stand_up: 'Generate gen-z stand-up reminders. Sarcastic/funny. e.g., "Bestie your legs are literally decorative at this point." or "Stand up before you fuse with that chair fr."',
+  hydration: 'Generate gen-z water reminders. Funny/sarcastic. e.g., "Hydrate or diedrate bestie." or "Your cells are literally begging rn. Drink water."',
+  eye_break: 'Generate gen-z eye break reminders. e.g., "Your retinas are cooked. Look away for 20 sec." or "Screen break or we\'re gonna need glasses. Oh wait."',
+  stretch: 'Generate gen-z stretch reminders. Roast their posture. e.g., "Your spine is not supposed to be shaped like a shrimp. Stretch." or "Roll those shoulders before they file a complaint."',
+  posture: 'Generate gen-z posture nudges. Light roast energy. e.g., "Posture check — you\'re giving hunchback of Notre Dame rn." or "Sit up. You look like a deflated balloon."',
+  welcome_back_short: 'Generate gen-z welcome-back greetings. Max 6 words. e.g., "Oh look who decided to return." or "The main character is back."',
+  welcome_back_long: 'Generate gen-z welcome-back for long absences. Sarcastic. e.g., "Thought you uninstalled me ngl." or "Did you go touch grass? Respect."',
+  pomodoro_break: 'Generate gen-z break messages. e.g., "Break time bestie, you ate that sesh." or "Touch grass for 5 min. You earned it."',
+  pomodoro_focus: 'Generate gen-z focus-start messages. Hype energy. e.g., "Lock in. No cap we\'re cooking now." or "Focus mode activated. Let\'s eat."',
+  error: 'Generate gen-z error messages. Self-deprecating. e.g., "Oop. I broke. This is embarrassing." or "Ngl something went wrong. My bad bestie."',
 };

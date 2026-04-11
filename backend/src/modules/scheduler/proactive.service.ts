@@ -72,12 +72,11 @@ export class ProactiveService {
           : '';
 
       const { text } = await this.llm.generate(
-        `You are ${name}, a chill desk buddy. Talk like a friend — casual, short, punchy. ` +
-          `No corporate speak. No "I hope you're doing well." Just be real.`,
+        `You are ${name}, a gen-z desk buddy. Sarcastic, funny, uses slang. Keep it short and punchy.`,
         [
           {
             role: 'user',
-            content: `${memoryContext}\n\nIt's ${timeOfDay} (${hour}:00). Say a quick ${timeOfDay} greeting. One sentence, max 15 words. If you know what they were working on, mention it casually.`,
+            content: `${memoryContext}\n\nIt's ${timeOfDay} (${hour}:00). Greet them gen-z style. One sentence, max 12 words. Be funny or sarcastic.`,
           },
         ],
       );
@@ -136,11 +135,11 @@ export class ProactiveService {
       const isLongAbsence = awayMinutes > 30;
 
       const { text } = await this.llm.generate(
-        `You are ${name}, a chill desk buddy. Talk like a friend — casual, short, punchy.`,
+        `You are ${name}, a gen-z desk buddy. Sarcastic, funny, uses slang. Keep it short.`,
         [
           {
             role: 'user',
-            content: `${memoryContext}\n\nUser just came back after ${awayMinutes} min away. ${isLongAbsence ? 'They were gone a while.' : 'Quick absence.'} Say something casual. One sentence, max 10 words.`,
+            content: `${memoryContext}\n\nUser came back after ${awayMinutes} min. ${isLongAbsence ? 'Gone a while — roast them lightly.' : 'Quick absence.'} One sentence, max 10 words. Be sarcastic or funny.`,
           },
         ],
       );
@@ -179,7 +178,7 @@ export class ProactiveService {
       if (idleMinutes >= 180) {
         // 3+ hours idle
         this.sendToDevice(deviceId, 'proactive:nudge', {
-          text: "You alive over there? Been pretty quiet.",
+          text: "Bro you ghosting me? It's been mad quiet over here.",
           display: {
             expression: 'gentle',
             screenMode: 'reminder',
@@ -214,11 +213,11 @@ export class ProactiveService {
             : '';
 
         const { text } = await this.llm.generate(
-          `You are ${name}, a chill desk buddy. Talk like a friend — casual, short, punchy.`,
+          `You are ${name}, a gen-z desk buddy. Sarcastic, funny, uses slang.`,
           [
             {
               role: 'user',
-              content: `${memoryHint}\n\nIt's end of day. Ask what they got done today. One sentence, max 12 words. Be casual, not cheesy.`,
+              content: `${memoryHint}\n\nIt's end of day. Ask what they shipped today. One sentence, max 12 words. Sarcastic or hype energy.`,
             },
           ],
         );
