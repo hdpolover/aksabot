@@ -230,17 +230,27 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
     int my = MOUTH_Y + (int)bounceY;
 
     switch (expr) {
-        case face::Expression::IDLE:
-            thickBezier(s, CX - 20, my, CX, my + 8, CX + 20, my, 2, pal.mouth);
-            break;
-        case face::Expression::LISTENING: {
-            s.drawCircle(CX, my, 6, pal.mouth);
-            s.drawCircle(CX, my, 5, pal.mouth);
+        case face::Expression::IDLE: {
+            // Gentle smile with subtle breathing movement
+            float breathOff = sinf(breathPhase * 2 * 3.14159f) * 1.5f;
+            thickBezier(s, CX - 20, my, CX, my + 8 + breathOff, CX + 20, my, 2, pal.mouth);
             break;
         }
-        case face::Expression::THINKING:
-            break;  // dots drawn separately
+        case face::Expression::LISTENING: {
+            // Small "ooh" — attentive, slightly open
+            s.fillEllipse(CX, my, 7, 9, pal.mouth);
+            uint16_t inside = blendRGB565(pal.accent, pal.bg, 40);
+            s.fillEllipse(CX, my, 4, 6, inside);
+            break;
+        }
+        case face::Expression::THINKING: {
+            // Pursed/contemplative — small offset dot-mouth, shifted to one side
+            s.fillSmoothCircle(CX + 8, my, 4, pal.mouth);
+            s.fillSmoothCircle(CX + 8, my, 2, blendRGB565(pal.accent, pal.bg, 50));
+            break;
+        }
         case face::Expression::SPEAKING: {
+            // Animated open mouth synced to audio amplitude
             int ow = 16 + (int)(amp * 20);
             int oh = 6 + (int)(amp * 28);
             s.fillSmoothCircle(CX, my, oh / 2 + 2, pal.mouth);
@@ -252,6 +262,7 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             break;
         }
         case face::Expression::CONFUSED: {
+            // Wavy zigzag line + floating question mark
             for (int i = 0; i <= 36; i++) {
                 float t = (float)i / 36;
                 int wx = CX - 18 + (int)(36 * t);
@@ -264,6 +275,7 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             break;
         }
         case face::Expression::SLEEPING: {
+            // Floating Z's with breathing offset
             float bOff = sinf(breathPhase * 2 * 3.14159f) * 5;
             s.setTextSize(2);
             s.setTextColor(pal.accent);
@@ -273,25 +285,41 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             break;
         }
         case face::Expression::OFFLINE:
+            // Dead flat line — no expression
             thickBezier(s, CX - 18, my, CX, my, CX + 18, my, 2, pal.mouth);
             break;
-        case face::Expression::ENCOURAGING:
-            thickBezier(s, CX - 24, my, CX, my + 12, CX + 24, my, 3, pal.mouth);
+        case face::Expression::ENCOURAGING: {
+            // Big warm smile with teeth highlight
+            thickBezier(s, CX - 24, my, CX, my + 14, CX + 24, my, 3, pal.mouth);
+            // Teeth gleam
+            thickBezier(s, CX - 14, my + 2, CX, my + 9, CX + 14, my + 2, 2,
+                        blendRGB565(TFT_WHITE, pal.mouth, 120), 14);
             break;
-        case face::Expression::CALM:
-            thickBezier(s, CX - 16, my, CX, my + 6, CX + 16, my, 2, pal.mouth);
+        }
+        case face::Expression::CALM: {
+            // Closed-lip content smile — wider and flatter than idle
+            thickBezier(s, CX - 22, my + 2, CX, my + 5, CX + 22, my + 2, 3, pal.mouth);
             break;
-        case face::Expression::FOCUSED:
-            thickBezier(s, CX - 18, my, CX, my + 1, CX + 18, my, 2, pal.mouth);
+        }
+        case face::Expression::FOCUSED: {
+            // Tight determined line — slightly pressed, no curve
+            thickBezier(s, CX - 16, my, CX - 5, my + 1, CX + 5, my + 1, 2, pal.mouth);
+            thickBezier(s, CX + 5, my + 1, CX + 16, my, CX + 16, my, 2, pal.mouth);
             break;
-        case face::Expression::HAPPY:
+        }
+        case face::Expression::HAPPY: {
+            // Wide grin with inner highlight — widest smile
             thickBezier(s, CX - 26, my, CX, my + 16, CX + 26, my, 3, pal.mouth);
             thickBezier(s, CX - 16, my + 2, CX, my + 10, CX + 16, my + 2, 2,
                         blendRGB565(TFT_WHITE, pal.mouth, 160), 16);
             break;
-        case face::Expression::SAD:
-            thickBezier(s, CX - 18, my + 4, CX, my - 6, CX + 18, my + 4, 2, pal.mouth);
+        }
+        case face::Expression::SAD: {
+            // Frown with slight tremble
+            float trem = sinf(breathPhase * 6.28318f * 3) * 1.0f;
+            thickBezier(s, CX - 18, my + 4, CX, my - 6 + trem, CX + 18, my + 4, 2, pal.mouth);
             break;
+        }
         default: break;
     }
 }
@@ -315,40 +343,78 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     float gp = sinf(fs.glowPhase) * 0.3f + 0.7f;
     drawGlow(s, CX, CY, 60, pal.accent, pal.bg, (uint8_t)(8 * gp));
 
-    int faceOY = (int)fs.bounceY;
-    int leftEyeX  = CX - EYE_SPACE + (int)fs.fidgetX;
-    int rightEyeX = CX + EYE_SPACE + (int)fs.fidgetX;
-    int eyeY      = CY + faceOY + (int)fs.fidgetY;
+    // Apply popScale (disappear/reappear animation)
+    float ps = fs.popScale;
+    int eyeSpace = (int)(EYE_SPACE * ps);
+    int faceOY = (int)(fs.bounceY * ps);
+    int leftEyeX  = CX - eyeSpace + (int)(fs.fidgetX * ps);
+    int rightEyeX = CX + eyeSpace + (int)(fs.fidgetX * ps);
+    int eyeY      = CY + faceOY + (int)(fs.fidgetY * ps);
 
+    // Skip face rendering if fully popped away
+    if (ps < 0.01f) goto skip_face;
+
+    {
     // ── Eyes ─────────────────────────────────────────
+    // Per-eye scale: combine blink with idle micro-animation scale
+    float leftScale  = fs.blinkScale * fs.leftEyeScale * ps;
+    float rightScale = fs.blinkScale * fs.rightEyeScale * ps;
+
+    // Scaled eye shape for pop/curious effects
+    EyeShape leftEye = eye;
+    EyeShape rightEye = eye;
+    leftEye.r = (int16_t)(eye.r * fs.leftEyeScale * ps);
+    leftEye.pupilR = (int16_t)(eye.pupilR * fs.leftEyeScale * ps);
+    rightEye.r = (int16_t)(eye.r * fs.rightEyeScale * ps);
+    rightEye.pupilR = (int16_t)(eye.pupilR * fs.rightEyeScale * ps);
+
     if (fs.expression == face::Expression::SLEEPING) {
         float bOff = sinf(fs.breathPhase * 2 * 3.14159f) * 3;
         drawEyeClosed(s, leftEyeX,  eyeY + (int)bOff, 24, false);
         drawEyeClosed(s, rightEyeX, eyeY + (int)bOff, 24, false);
     } else if (fs.expression == face::Expression::OFFLINE) {
-        drawEyeOpen(s, leftEyeX, eyeY, eye, 1.0f, fs.driftX, fs.driftY);
-        drawEyeOpen(s, rightEyeX, eyeY, eye, 1.0f, fs.driftX, fs.driftY);
+        drawEyeOpen(s, leftEyeX, eyeY, leftEye, 1.0f, fs.driftX, fs.driftY);
+        drawEyeOpen(s, rightEyeX, eyeY, rightEye, 1.0f, fs.driftX, fs.driftY);
         drawEyeX(s, leftEyeX,  eyeY, 20, pal.accent);
         drawEyeX(s, rightEyeX, eyeY, 20, pal.accent);
     } else {
-        if (fs.blinkScale < 0.05f) {
+        // Left eye
+        if (leftScale < 0.05f) {
             bool curveUp = (fs.expression == face::Expression::HAPPY ||
                            fs.expression == face::Expression::ENCOURAGING);
-            drawEyeClosed(s, leftEyeX,  eyeY, eye.r, curveUp);
-            drawEyeClosed(s, rightEyeX, eyeY, eye.r, curveUp);
+            drawEyeClosed(s, leftEyeX, eyeY, leftEye.r, curveUp);
         } else {
-            drawEyeOpen(s, leftEyeX,  eyeY, eye, fs.blinkScale, fs.driftX, fs.driftY);
-            drawEyeOpen(s, rightEyeX, eyeY, eye, fs.blinkScale, fs.driftX, fs.driftY);
+            drawEyeOpen(s, leftEyeX, eyeY, leftEye, leftScale, fs.driftX, fs.driftY);
+        }
+        // Right eye
+        if (rightScale < 0.05f) {
+            bool curveUp = (fs.expression == face::Expression::HAPPY ||
+                           fs.expression == face::Expression::ENCOURAGING);
+            drawEyeClosed(s, rightEyeX, eyeY, rightEye.r, curveUp);
+        } else {
+            drawEyeOpen(s, rightEyeX, eyeY, rightEye, rightScale, fs.driftX, fs.driftY);
         }
         if (eye.hasBrows) {
             bool raised = (fs.expression == face::Expression::HAPPY);
-            drawBrow(s, leftEyeX,  eyeY, eye.r, pal.accent, raised);
-            drawBrow(s, rightEyeX, eyeY, eye.r, pal.accent, raised);
+            drawBrow(s, leftEyeX,  eyeY, leftEye.r, pal.accent, raised);
+            drawBrow(s, rightEyeX, eyeY, rightEye.r, pal.accent, raised);
         }
     }
 
     // ── Mouth ────────────────────────────────────────
-    drawMouth(s, fs.expression, pal, fs.mouthAmp, fs.bounceY, fs.breathPhase);
+    // Yawn overrides normal mouth when active
+    if (fs.yawnAmp > 0.01f) {
+        int my = MOUTH_Y + (int)(fs.bounceY * ps);
+        int ow = (int)(12 + fs.yawnAmp * 14);
+        int oh = (int)(4 + fs.yawnAmp * 20);
+        s.fillEllipse(CX, my, ow, oh, pal.mouth);
+        uint16_t inside = blendRGB565(pal.accent, pal.bg, 30);
+        if (oh > 6) s.fillEllipse(CX, my, ow - 3, oh - 3, inside);
+    } else {
+        drawMouth(s, fs.expression, pal, fs.mouthAmp, fs.bounceY * ps, fs.breathPhase);
+    }
+    }
+    skip_face:
 
     // ── Thinking dots ────────────────────────────────
     if (fs.expression == face::Expression::THINKING) {
@@ -380,32 +446,30 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
         s.fillTriangle(tx - 2, ty + 2, tx + 2, ty + 2, tx, ty - 3, tearCol);
     }
 
-    // ── Status bar (top) ─────────────────────────────
-    s.fillRect(0, 0, LCD_WIDTH, 16, blendRGB565(pal.bg, TFT_BLACK, 200));
-    s.setTextColor(status.wifiConnected ? rgb(0,200,100) : rgb(200,50,50));
-    s.setTextSize(1);
-    s.setTextDatum(lgfx::top_left);
-    s.drawString(status.wifiConnected ? "WiFi" : "NoWiFi", 4, 2);
-    s.setTextColor(status.wsConnected ? rgb(0,200,100) : rgb(100,100,100));
-    s.drawString(status.wsConnected ? "WS" : "--", 70, 2);
+    // ── Connection indicator (top-left dot) ────────────
+    // Green = online (WiFi + WS), Yellow = WiFi only, Red = offline
+    uint16_t dotCol;
+    if (status.wifiConnected && status.wsConnected)
+        dotCol = rgb(0, 200, 80);   // green — fully online
+    else if (status.wifiConnected)
+        dotCol = rgb(220, 180, 0);  // yellow — WiFi but no backend
+    else
+        dotCol = rgb(200, 50, 40);  // red — offline
+    s.fillSmoothCircle(8, 8, 4, dotCol);
 
-    // ── Label (bottom) ───────────────────────────────
-    static const char* EXPR_NAMES[] = {
-        "Ready", "Listening", "Thinking", "Speaking",
-        "Hmm?", "Sleeping", "Offline", "Hey!",
-        "Relax", "Focus", "Happy", "Sad"
-    };
-    s.setTextColor(pal.label);
-    s.setTextSize(2);
-    s.setTextDatum(lgfx::middle_center);
-    s.drawString(EXPR_NAMES[exprIdx], CX, LCD_HEIGHT - 28);
-
-    if (fs.expression == face::Expression::IDLE) {
-        s.setTextColor(blendRGB565(pal.label, pal.bg, 80));
-        s.setTextSize(1);
-        s.drawString("Hold to talk", CX, LCD_HEIGHT - 12);
+    // ── Label (bottom) — only shown for non-idle expressions ──
+    if (fs.expression != face::Expression::IDLE) {
+        static const char* EXPR_NAMES[] = {
+            "", "Listening", "Thinking", "Speaking",
+            "Hmm?", "Sleeping", "Offline", "Hey!",
+            "Relax", "Focus", "Happy", "Sad"
+        };
+        s.setTextColor(pal.label);
+        s.setTextSize(2);
+        s.setTextDatum(lgfx::middle_center);
+        s.drawString(EXPR_NAMES[exprIdx], CX, LCD_HEIGHT - 28);
+        s.setTextDatum(lgfx::top_left);
     }
-    s.setTextDatum(lgfx::top_left);
 
     if (useSprite) sprite.pushSprite(0, 0);
 }

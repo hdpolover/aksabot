@@ -88,7 +88,7 @@ When the bot is idle, the screen can show useful information instead of just a s
 
 | Mode | What's shown | When active |
 |------|-------------|-------------|
-| **Face** (default) | Animated face with blinking, status bar | Default mode |
+| **Face** (default) | Animated face with idle micro-animations, connection dot | Default mode |
 | **Clock** | Large time display, date, next upcoming reminder, mini face in corner | User switches or auto after idle timeout |
 | **Pomodoro** | Focus timer countdown, current cycle (e.g., "Focus 3/4"), progress bar | During active pomodoro session |
 | **Reminder** | Full-screen reminder text + icon + countdown (for eye break timer, etc.) | During active reminder |
@@ -532,6 +532,9 @@ New server-initiated events that the ESP32 handles:
 | proactive:nudge | Server → ESP | `{ text, audio (binary) }` | Idle nudge ("Everything okay?") |
 | proactive:dismiss | ESP → Server | `{ type }` | User dismissed a reminder (tap during reminder) |
 | proactive:snooze | ESP → Server | `{ type, snoozeMinutes: number }` | User wants to delay this reminder |
+| face:expression | Server → ESP | `{ expression: string, durationMs?: number }` | Set face expression from backend (LLM sentiment). If durationMs is set, reverts to idle after timeout. Valid expressions: idle, listening, thinking, speaking, confused, sleeping, offline, encouraging, calm, focused, happy, sad |
+| presence:arrived | ESP → Server | `{ awayDurationSeconds: number }` | User's phone detected after absence. Backend generates welcome-back greeting with TTS audio. Skipped if away < 5 min. First arrival of the day triggers morning briefing instead. |
+| presence:departed | ESP → Server | (none) | User's phone lost. Backend sends `face:expression` sad. Firmware dims and sleeps display. |
 
 ### ESP32 handling of proactive events
 
@@ -821,7 +824,7 @@ The ESP32 display system needs to support multiple modes beyond just the face.
 
 | Mode | Layout | Data source |
 |------|--------|-------------|
-| **Face** | Animated face (full screen), status bar (top) | Internal state machine |
+| **Face** | Animated face (full screen), connection dot (top-left) | Internal state machine |
 | **Clock** | Large digital time (center), date (below), next reminder preview (bottom), mini face (corner) | RTC or NTP time, reminder schedule from backend |
 | **Pomodoro** | Phase label "FOCUS" / "BREAK" (top), large countdown timer (center), cycle dots (bottom), progress bar | Pomodoro state from backend |
 | **Reminder** | Icon for reminder type (top), reminder text (center), dismiss hint (bottom) | proactive:reminder event payload |

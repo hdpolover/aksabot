@@ -72,12 +72,8 @@
 #define SD_D2     48
 #define SD_D3     47
 
-// Legacy SPI aliases for sd_storage.cpp compatibility
-// TODO: Update sd_storage to use SD_MMC (SDIO) instead of SPI SD
-#define SPI_CLK   SD_CLK
-#define SPI_MOSI  SD_CMD
-#define SPI_MISO  SD_D0
-#define SD_CS     -1    // SDIO doesn't use CS
+// NOTE: SD card uses SDIO (4-bit) via SD_MMC, not SPI.
+// No CS pin — SDIO protocol handles device addressing internally.
 
 // ── BOOT button (GPIO 0 — active LOW) ────────────────
 #define BOOT_BUTTON_PIN 0

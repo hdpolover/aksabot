@@ -25,6 +25,7 @@
 #include "boot_screen.h"
 #include "bios_menu.h"
 #include "device_server.h"
+#include "status_led.h"
 
 // Global application state
 AppState appState;
@@ -65,6 +66,9 @@ static int echoFrameCount = 0;
 static volatile bool echoRecording = false;
 static volatile bool echoPlaying = false;
 
+// ── Forward declarations ──────────────────────────────
+static void scheduleFaceRevert(uint16_t delayMs);
+
 // ── BotState → face expression mapping ─────────────────
 
 static void syncFaceToState() {
@@ -88,6 +92,7 @@ static void syncFaceToState() {
             face::setExpression(face::Expression::SLEEPING, 500);
             break;
     }
+    status_led::syncToState();
 }
 
 static void updateStatusBar() {
@@ -125,6 +130,7 @@ static void onWsJson(const char* event, const char* data) {
         display::setTranscriptText("You", data);
     }
     else if (strcmp(event, "response:start") == 0) {
+        power_manager::recordInteraction();  // Wake display for response
         appState.botState = BotState::SPEAKING;
         syncFaceToState();
         cacheAccumLen = 0;
@@ -155,8 +161,10 @@ static void onWsJson(const char* event, const char* data) {
     }
     else if (strcmp(event, "error") == 0) {
         Serial.printf("[Main] Error: %s\n", data);
+        face::setExpression(face::Expression::CONFUSED, 200);
+        scheduleFaceRevert(2500);
         appState.botState = BotState::IDLE;
-        syncFaceToState();
+        // Don't call syncFaceToState() — let CONFUSED show for 2.5s first
     }
     else if (strcmp(event, "state:update") == 0) {
         // Backend state sync (e.g., after STT error resets to idle)
@@ -170,8 +178,9 @@ static void onWsJson(const char* event, const char* data) {
             }
         }
     }
-    // ── Proactive events → display mode switching ────────
+    // ── Proactive events → wake display + show content ────
     else if (strcmp(event, "proactive:reminder") == 0) {
+        power_manager::recordInteraction();  // Wake display for reminder
         JsonDocument doc;
         if (deserializeJson(doc, data) == DeserializationError::Ok) {
             display::ReminderData rd = {};
@@ -192,6 +201,7 @@ static void onWsJson(const char* event, const char* data) {
         }
     }
     else if (strcmp(event, "proactive:pomodoro") == 0) {
+        power_manager::recordInteraction();  // Wake display for pomodoro
         JsonDocument doc;
         if (deserializeJson(doc, data) == DeserializationError::Ok) {
             const char* action = doc["action"] | "";
@@ -218,6 +228,8 @@ static void onWsJson(const char* event, const char* data) {
         }
     }
     else if (strcmp(event, "ota:start") == 0) {
+        power_manager::recordInteraction();  // Wake display for OTA
+        status_led::showOta();
         JsonDocument doc;
         if (deserializeJson(doc, data) == DeserializationError::Ok) {
             const char* url = doc["url"] | "";
@@ -225,6 +237,52 @@ static void onWsJson(const char* event, const char* data) {
             const char* version = doc["version"] | "unknown";
             if (strlen(url) > 0 && strlen(sha256) > 0) {
                 ota_update::start(url, sha256, version);
+            }
+        }
+    }
+    // ── Face expression control from backend ─────────
+    else if (strcmp(event, "face:expression") == 0) {
+        // Backend/LLM sends expression based on conversation sentiment.
+        // Payload: {"expression":"happy","durationMs":3000}
+        // If durationMs is set, reverts to IDLE after that duration.
+        // If omitted, expression persists until next state change.
+        JsonDocument doc;
+        if (deserializeJson(doc, data) == DeserializationError::Ok) {
+            const char* exprName = doc["expression"] | "";
+            uint16_t durationMs = doc["durationMs"] | 0;
+
+            // Map name to expression enum
+            struct ExprMap { const char* name; face::Expression expr; };
+            static const ExprMap map[] = {
+                {"idle",        face::Expression::IDLE},
+                {"listening",   face::Expression::LISTENING},
+                {"thinking",    face::Expression::THINKING},
+                {"speaking",    face::Expression::SPEAKING},
+                {"confused",    face::Expression::CONFUSED},
+                {"sleeping",    face::Expression::SLEEPING},
+                {"offline",     face::Expression::OFFLINE},
+                {"encouraging", face::Expression::ENCOURAGING},
+                {"calm",        face::Expression::CALM},
+                {"focused",     face::Expression::FOCUSED},
+                {"happy",       face::Expression::HAPPY},
+                {"sad",         face::Expression::SAD},
+            };
+
+            bool found = false;
+            for (const auto& m : map) {
+                if (strcmp(exprName, m.name) == 0) {
+                    power_manager::recordInteraction();
+                    face::setExpression(m.expr, 200);
+                    if (durationMs > 0) {
+                        scheduleFaceRevert(durationMs);
+                    }
+                    Serial.printf("[Main] Face expression: %s (duration=%dms)\n", exprName, durationMs);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                Serial.printf("[Main] Unknown expression: %s\n", exprName);
             }
         }
     }
@@ -597,16 +655,26 @@ void setup() {
         presence_detector::init(presCfg);
 
         presence_detector::onStateChange([](PresenceState newState, PresenceState oldState, uint32_t awaySec) {
-            if (newState == PresenceState::PRESENT && oldState == PresenceState::AWAY && appState.wsConnected) {
-                char payload[48];
-                snprintf(payload, sizeof(payload), "{\"awayDurationSeconds\":%u}", awaySec);
-                ws_client::sendEvent("presence:arrived", payload);
-                display::wake();
+            if (newState == PresenceState::PRESENT && oldState == PresenceState::AWAY) {
+                power_manager::recordInteraction();
+                // Happy greeting — user is back at desk
+                face::setExpression(face::Expression::HAPPY, 200);
+                scheduleFaceRevert(3000);
+                if (appState.wsConnected) {
+                    char payload[48];
+                    snprintf(payload, sizeof(payload), "{\"awayDurationSeconds\":%u}", awaySec);
+                    ws_client::sendEvent("presence:arrived", payload);
+                }
             }
             else if (newState == PresenceState::AWAY) {
                 if (appState.wsConnected) {
                     ws_client::sendEvent("presence:departed");
                 }
+                // Show sad face briefly, then dim and sleep
+                face::setExpression(face::Expression::SAD, 300);
+                power_manager::setState(power_manager::PowerState::DIM);
+                // Power manager will transition DIM → SLEEP after sleepTimeoutSec.
+                // Since no interaction resets the timer, it will sleep soon.
                 display::sleep();
             }
         });
@@ -629,6 +697,7 @@ void setup() {
 
     vad::init();
     ota_update::init();
+    status_led::init();
 
     // Load brightness from NVS and pass to power manager
     {
@@ -812,8 +881,9 @@ void loop() {
     presence_detector::tick(now);
     ble_manager::tickPresenceScan(now);
 
-    // Tick power management
+    // Tick power management and status LED
     power_manager::tick(now);
+    status_led::tick(now);
 
     // Sync connectivity state — check actual WiFi, not just our flag
     bool wifiNow = wifi_manager::isConnected();
@@ -842,6 +912,13 @@ void loop() {
     if (appState.botState != prevState) {
         syncFaceToState();
         updateStatusBar();
+    }
+
+    // Sync LED when WS connectivity changes (even if BotState didn't change)
+    static bool prevWsConnected = false;
+    if (appState.wsConnected != prevWsConnected) {
+        prevWsConnected = appState.wsConnected;
+        status_led::syncToState();
     }
 
     vTaskDelay(pdMS_TO_TICKS(10));

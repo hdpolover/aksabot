@@ -3,7 +3,7 @@
 
 namespace sd_storage {
 
-/// Initialize MicroSD card via SPI and mount FAT32 filesystem.
+/// Initialize MicroSD card via SDIO (4-bit) and mount FAT32 filesystem.
 /// Creates the directory structure if it doesn't exist.
 /// Returns true on success.
 bool init();

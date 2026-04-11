@@ -93,6 +93,78 @@ export class ProactiveService {
     }
   }
 
+  // ── Presence-triggered greeting ────────────────────────
+
+  /**
+   * Called when the ESP32 detects the user's phone via BLE after an absence.
+   * Generates a welcome-back greeting based on how long they were away.
+   * Returns null if the away period was too short to warrant a greeting.
+   */
+  async onPresenceArrived(
+    deviceId: string,
+    awayDurationSeconds: number,
+  ): Promise<string | null> {
+    // Skip greeting for brief absences (< 5 minutes)
+    if (awayDurationSeconds < 300) {
+      this.logger.debug(
+        `Skipping welcome-back for ${deviceId} — away only ${awayDurationSeconds}s`,
+      );
+      return null;
+    }
+
+    // Check if we already greeted today via connection greeting
+    // If this is the first return of the day, checkGreeting() handles it
+    const today = new Date().toISOString().slice(0, 10);
+    if (this.lastGreetingDate.get(deviceId) !== today) {
+      // First greeting of the day — let checkGreeting() handle it
+      // (it includes morning briefing context)
+      return this.checkGreeting(deviceId);
+    }
+
+    const awayMinutes = Math.round(awayDurationSeconds / 60);
+
+    try {
+      const device = await this.devicesRepo.findOne({
+        where: { id: deviceId },
+      });
+      const name = device?.personalityJson?.name ?? 'buddy';
+
+      const memories = await this.memoriesService.getRelevant(deviceId, 3);
+      const memoryContext =
+        memories.length > 0
+          ? `You know these things about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
+          : '';
+
+      const hour = new Date().getHours();
+      const isLongAbsence = awayMinutes > 30;
+
+      const { text } = await this.llm.generate(
+        `You are a friendly desk companion named ${name}. ` +
+          `The user just returned to their desk after being away for ${awayMinutes} minutes. ` +
+          `The current time is ${hour}:00. ` +
+          `Generate a brief, warm welcome-back message. ` +
+          (isLongAbsence
+            ? `They were gone a while — acknowledge it naturally (e.g., "Long meeting?" or "Welcome back!"). `
+            : `They were only gone briefly — keep it casual (e.g., "Hey, welcome back" or "There you are!"). `) +
+          `Keep it under 20 words. Be conversational, not robotic.`,
+        [
+          {
+            role: 'user',
+            content: `${memoryContext}\n\nGenerate a welcome-back message for someone who was away ${awayMinutes} minutes.`,
+          },
+        ],
+      );
+
+      this.logger.log(
+        `Welcome-back for ${deviceId} (away ${awayMinutes}min): ${text.slice(0, 50)}...`,
+      );
+      return text;
+    } catch (err: any) {
+      this.logger.warn(`Welcome-back failed: ${err.message}`);
+      return null;
+    }
+  }
+
   // ── Activity tracking (for idle nudge) ────────────────
 
   recordActivity(deviceId: string) {

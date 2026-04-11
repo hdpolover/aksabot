@@ -63,6 +63,12 @@ struct FaceState {
     // Glow pulse
     float glowPhase;
 
+    // Idle micro-animation
+    float leftEyeScale;         // Independent scale for left eye (1.0 = normal)
+    float rightEyeScale;        // Independent scale for right eye (1.0 = normal)
+    float yawnAmp;              // Mouth openness during yawn (0.0-1.0)
+    float popScale;             // Overall face scale for pop effects (1.0 = normal)
+
     // Transition
     bool  transitionActive;
     float transitionProgress;

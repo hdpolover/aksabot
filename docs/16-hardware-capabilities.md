@@ -33,13 +33,20 @@ overlays via 4-line SPI.
 
 **Current implementation:**
 - 6 display modes: face, clock, pomodoro, reminder, countdown, status
-- 10 face expressions with smooth transitions
-- Blink timer, breathing cycle, mouth amplitude sync, thinking dots
-- Status bar overlay (Wi-Fi, battery icon, time)
-- TFT rendering is stubbed in `display_hw` namespace — swap for real SPI driver
+- 12 face expressions with smooth transitions and per-expression mouth shapes
+- 8 idle micro-animations (look around, double blink, curious, yawn,
+  disappear/reappear, eye roll, wink, bounce) firing every 8-20s
+- Per-eye independent scaling (wink, curious peek, yawn squint)
+- Whole-face pop scale (disappear/reappear with overshoot)
+- Listening nod (gentle vertical oscillation)
+- Breathing-synced idle mouth, pursed thinking mouth, sad tremble
+- Expression triggers: backend `face:expression` WS event, presence
+  arrival (happy), presence departure (sad), errors (confused)
+- Connection dot indicator (green/yellow/red, top-left corner)
+- TFT rendering stubbed in `display_hw` namespace — swap for real SPI driver
   when hardware arrives
 
-**Relevant modules:** `face.cpp`, `display.cpp`, `boot_screen.cpp`
+**Relevant modules:** `face.cpp`, `face.h`, `display.cpp`, `boot_screen.cpp`
 
 ### 1.3 FT6336G Capacitive Touch
 
@@ -61,7 +68,7 @@ via I2C interrupt.
 **Current implementation:**
 - Auto-connect from NVS-stored credentials (fallback to compile-time constants)
 - Reconnect with exponential backoff
-- Connection status reflected on display status bar
+- Connection status reflected on display (dot indicator) and BIOS status dashboard
 
 **Relevant modules:** `wifi.cpp`, `ws_client.cpp`
 
@@ -76,20 +83,19 @@ via I2C interrupt.
 
 **Relevant modules:** `nvs_storage.cpp`
 
-### 1.6 MicroSD Card (SDIO)
+### 1.6 MicroSD Card (SDIO 4-bit)
 
 **What it does:** Bulk storage for cached audio, logs, and OTA images.
 
 **Current implementation:**
+- Uses `SD_MMC` (SDIO 4-bit) driver with pins CLK=38, CMD=40, D0-D3=39/41/48/47
+- Falls back to 1-bit SDIO mode if 4-bit fails
 - TTS cache: SHA-256 keyed Opus files, LRU eviction at 100MB cap
 - Recording buffer: captures audio during WebSocket disconnect, resends on
   reconnect
 - Resilience audio: fallback clips loaded from `/audio/resilience/` at boot
 - Debug logging: rolling 1MB log file with module tags and severity
 - OTA staging: downloaded firmware stored before flashing
-
-**Note:** Current code uses SPI-mode SD. Must migrate to `SD_MMC` (SDIO 4-bit)
-for this board. The pin mapping is already correct.
 
 **Relevant modules:** `sd_storage.cpp`, `tts_cache.cpp`, `recording_buffer.cpp`,
 `resilience_audio.cpp`, `debug_log.cpp`, `ota_update.cpp`
@@ -103,12 +109,34 @@ for this board. The pin mapping is already correct.
 - Resilience audio clips preloaded at boot
 - Audio ring buffers for capture and playback
 
-### 1.8 RGB LED (WS2812, GPIO42)
+### 1.8 RGB LED (WS2812B, GPIO42)
 
-**What it does:** Single addressable RGB LED for status indication.
+**What it does:** Single addressable RGB LED for at-a-glance status indication.
 
-**Current implementation:** Defined in config, lightly used. No rich status
-mapping yet (see Section 3.3 for expansion plan).
+**Current implementation:**
+- FastLED library with RMT peripheral on ESP32-S3
+- Non-blocking animations: SOLID, BREATHE, PULSE, BLINK, FAST_BLINK, OFF
+- Sine-based breathe curve with brightness floor (never fully dark)
+- Max brightness capped at 40/255 (status indicator, not a flashlight)
+- Auto-syncs to BotState via `syncToState()` (called from `syncFaceToState()`)
+- Override modes for low battery, OTA, and focus mode
+
+**Color/pattern mapping:**
+
+| State | Color | Pattern |
+|-------|-------|---------|
+| Idle + connected | Green | Slow breathe |
+| Idle + WiFi only (no WS) | Yellow | Slow breathe |
+| Listening | Blue | Solid |
+| Thinking | Amber | Pulse |
+| Speaking | Cyan | Solid |
+| Offline / no WiFi | Red | Slow blink |
+| Focus mode | Purple | Dim solid |
+| Low battery | Orange | Fast blink |
+| Sleeping | Off | — |
+| OTA in progress | White | Pulse |
+
+**Relevant modules:** `status_led.cpp`, `status_led.h`, `main.cpp`
 
 ### 1.9 BOOT Button (GPIO0)
 
@@ -152,30 +180,41 @@ to backend.
 **Relevant modules:** `ble_manager.cpp`, `ble_manager.h`, `main.cpp`,
 `nvs_store.cpp`
 
-### 2.2 BLE Presence Detection — DONE
+### 2.2 BLE Presence Detection — DONE (Full Stack)
 
 **What it provides:** Auto wake/sleep based on whether the user's phone is
 nearby. Flutter app advertises a BLE UUID (0xFFE4), ESP32 scans RSSI to
-determine proximity.
+determine proximity, backend generates welcome-back greetings with TTS audio.
 
-**Implementation:**
-- `PresenceScanCallbacks` in `ble_manager.cpp`: on scan result, checks for
-  0xFFE4 service UUID, feeds RSSI to `presence_detector::feedRssi()`
-- `tickPresenceScan()`: called from `loop()`, restarts scans after each cycle,
-  calls `feedMiss()` when target not found
-- `presence_detector.cpp`: full 3-state machine (PRESENT → LEAVING → AWAY) with
-  RSSI rolling average, configurable grace period, adaptive scan interval
-- `initScanOnly()`: lightweight BLE init (no GATT server) for post-WiFi presence
-  scanning — NimBLE passive scan coexists safely with WiFi on ESP32-S3
-- Boot wiring in `main.cpp`: if `nvs_store::getPresenceEnabled()` is true,
-  calls `initScanOnly()` + `startPresenceScan()` after WiFi connects
-- State change callback: sends `presence:arrived` / `presence:departed` to
-  backend via WebSocket, auto wakes/sleeps display
-- Power saving: scan interval increases to 30s when AWAY, doubles frequency
-  during LEAVING grace period
+**Flutter app (complete):**
+- `BlePresenceService`: advertises 0xFFE4 UUID in low-power background mode
+- Settings UI: enable/disable, RSSI threshold, grace period, silent wake
+- Auto-restore advertising on app launch
+- iOS/Android background BLE modes configured
 
-**Relevant modules:** `ble_manager.cpp`, `ble_manager.h`,
-`presence_detector.cpp`, `presence_detector.h`, `main.cpp`
+**ESP32 firmware (complete):**
+- `PresenceScanCallbacks`: scans for 0xFFE4, feeds RSSI to `presence_detector`
+- `initScanOnly()`: lightweight BLE init for post-WiFi scanning
+- 3-state machine (PRESENT → LEAVING → AWAY) with rolling average + grace period
+- State changes: HAPPY face on arrival, SAD face on departure
+- Sends `presence:arrived` / `presence:departed` to backend via WebSocket
+- Auto wakes display on arrival, dims+sleeps on departure
+- Adaptive scan intervals (5s present, 2.5s leaving, 30s away)
+
+**Backend (complete):**
+- `AudioGateway`: handles `presence:arrived` and `presence:departed` WS events
+- `ProactiveService.onPresenceArrived()`: generates welcome-back greeting with
+  LLM, contextual with away duration and user memories
+- Skips greeting for brief absences (< 5 minutes)
+- Long absences (> 30 min) get longer greeting; short ones get casual "hey!"
+- First return of the day delegates to `checkGreeting()` for morning briefing
+- Sends `face:expression` (happy/sad) to firmware alongside presence events
+- Welcome-back text is TTS-synthesized and sent as audio frames
+
+**Relevant modules:**
+- Firmware: `ble_manager.cpp`, `presence_detector.cpp`, `main.cpp`
+- Backend: `audio.gateway.ts`, `proactive.service.ts`, `types.ts`
+- App: `ble_presence_service.dart`, `presence_settings_page.dart`
 
 ### 2.3 Battery Level Monitoring
 
@@ -231,7 +270,7 @@ opportunities.
 
 | Feature | Description | Effort |
 |---------|-------------|--------|
-| Battery percentage on status bar | ADC read → voltage-to-% curve → display | Low |
+| Battery percentage in BIOS dashboard | ADC read → voltage-to-% curve → BIOS status | Low |
 | Push level to Flutter app | Send battery % over WebSocket → app dashboard | Low |
 | Low-battery voice alert | Bot says "I'm running low, plug me in" | Low |
 | Auto power saving | Dim display + reduce volume when below 20% | Medium |
@@ -261,31 +300,11 @@ battery-powered desk companion.
 | Breathing effect | Slow backlight pulse during "thinking" state | Low |
 | Ambient light adaptation | Pair with a light sensor on spare GPIO (see 3.7) | Medium |
 
-### 3.3 RGB LED as Status Indicator
+### 3.3 RGB LED as Status Indicator — DONE
 
-**Hardware:** WS2812-style LED on GPIO42. Full RGB, individually addressable via
-timed protocol. Supports any color and brightness.
-
-**Proposed status mapping:**
-
-| State | Color | Pattern |
-|-------|-------|---------|
-| Idle, connected | Green | Slow breathe |
-| Listening / recording | Blue | Solid |
-| Thinking / processing | Yellow | Pulse |
-| Speaking / playing audio | Cyan | Solid |
-| Focus mode active | Purple | Dim solid |
-| Error / disconnected | Red | Slow blink |
-| Low battery | Orange | Fast blink |
-| Sleeping | Off | — |
-| OTA in progress | White | Fast pulse |
-
-**Why it matters:** The LED is visible even when the display is off or dimmed.
-During focus mode (screen dimmed), the LED becomes the primary status channel.
-Users can glance at the LED color without reading the screen.
-
-**Effort:** Low — just a NeoPixel library + state-to-color mapping in the
-display/power management loop.
+Fully implemented — see Section 1.8 for details. FastLED library with
+non-blocking animations, auto-synced to BotState, with override modes for
+low battery, OTA, and focus mode.
 
 ### 3.4 UART Expansion (GPIO43/44)
 
@@ -425,9 +444,9 @@ Ranked by effort-to-impact ratio for Aksabot's desk companion use case.
 
 | # | Feature | Section | Effort | Status |
 |---|---------|---------|--------|--------|
-| 1 | Battery monitoring + status bar | 3.1 | ~2 hours | |
+| 1 | Battery monitoring + BIOS dashboard | 3.1 | ~2 hours | |
 | 2 | PWM backlight dimming + fade transitions | 3.2 | ~2 hours | DONE |
-| 3 | RGB LED status mapping | 3.3 | ~3 hours | |
+| 3 | RGB LED status mapping | 3.3 | ~3 hours | DONE |
 | 4 | Low-battery voice alert | 3.1 | ~1 hour | |
 
 ### Tier 2 — Medium effort, high impact (do next)

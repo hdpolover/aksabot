@@ -205,6 +205,70 @@ export class AudioGateway
     this.logger.log(`Sent response:end to ${deviceId} — greeting complete`);
   }
 
+  // ── Presence handlers ──────────────────────────────────────────
+
+  private async onPresenceArrived(
+    deviceId: string,
+    data?: { awayDurationSeconds?: number },
+  ) {
+    const awaySec = data?.awayDurationSeconds ?? 0;
+    this.logger.log(
+      `Device ${deviceId} presence:arrived (away ${awaySec}s)`,
+    );
+
+    // Send happy expression to firmware
+    this.sendToDevice(deviceId, 'face:expression', {
+      expression: 'happy',
+      durationMs: 3000,
+    });
+
+    // Generate welcome-back greeting with TTS
+    const greetingText = await this.proactive.onPresenceArrived(
+      deviceId,
+      awaySec,
+    );
+    if (!greetingText) return;
+
+    // Send as audio response (same flow as connection greeting)
+    const session = this.sessions.get(deviceId);
+    if (!session || session.state !== 'idle') return;
+
+    const sentences = this.splitSentences(greetingText);
+
+    this.sendToDevice(deviceId, 'response:start', {
+      type: 'welcome_back',
+    });
+
+    for (const sentence of sentences) {
+      const sock = this.deviceToSocket.get(deviceId);
+      if (!sock || sock.readyState !== 1) return;
+
+      const { opusAudio } = await this.aiService.synthesizeWithCache(
+        sentence,
+      );
+      this.sendToDevice(deviceId, 'response:text', {
+        text: sentence,
+        isFinal: false,
+      });
+      this.sendFramedOpusToDevice(deviceId, opusAudio);
+    }
+
+    this.sendToDevice(deviceId, 'response:end', {
+      fullText: greetingText,
+      cacheKeys: [],
+    });
+    this.logger.log(`Welcome-back greeting sent to ${deviceId}`);
+  }
+
+  private onPresenceDeparted(deviceId: string) {
+    this.logger.log(`Device ${deviceId} presence:departed`);
+    // Send sad expression — firmware handles display sleep
+    this.sendToDevice(deviceId, 'face:expression', {
+      expression: 'sad',
+      durationMs: 2000,
+    });
+  }
+
   /** Split text into sentences for per-sentence TTS (matches processTranscript behavior). */
   private splitSentences(text: string): string[] {
     const parts = text.split(/(?<=[.!?])\s+/);
@@ -262,6 +326,17 @@ export class AudioGateway
           break;
         case 'session:end':
           this.endConversation(deviceId);
+          break;
+        case 'presence:arrived':
+          this.onPresenceArrived(deviceId, msg.data).catch((err) =>
+            this.logger.error(`onPresenceArrived error: ${err.message}`),
+          );
+          break;
+        case 'presence:departed':
+          this.onPresenceDeparted(deviceId);
+          break;
+        case 'proactive:dismiss':
+          this.logger.debug(`Proactive dismissed by device ${deviceId}`);
           break;
         default:
           this.logger.warn(`Unknown event: ${msg.event}`);

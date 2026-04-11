@@ -4,6 +4,8 @@
 #include "touch.h"
 #include "audio_io.h"
 #include "nvs_store.h"
+#include "state.h"
+#include "sd_storage.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_system.h>
@@ -402,6 +404,51 @@ static void factoryResetScreen() {
     }
 }
 
+// ── Status dashboard (drawn at top of BIOS main menu) ────
+
+static void drawStatusDashboard() {
+    // Status area: y 30-105
+    int y = 30;
+    const int lineH = 16;
+    const int valX = LCD_WIDTH - 12;
+
+    auto statusLine = [&](const char* label, const char* value, uint16_t valColor) {
+        drawLeft(label, 12, y, DIM);
+        drawRight(value, valX, y, valColor);
+        y += lineH;
+    };
+
+    // WiFi
+    if (WiFi.isConnected()) {
+        int rssi = WiFi.RSSI();
+        char rssiStr[16];
+        snprintf(rssiStr, sizeof(rssiStr), "%d dBm", rssi);
+        uint16_t col = (rssi > -50) ? GREEN : (rssi > -70) ? YELLOW : RED;
+        statusLine("WiFi", rssiStr, col);
+
+        char ipStr[20];
+        snprintf(ipStr, sizeof(ipStr), "%s", WiFi.localIP().toString().c_str());
+        statusLine("IP", ipStr, WHITE);
+    } else {
+        statusLine("WiFi", "Disconnected", RED);
+    }
+
+    // Backend
+    statusLine("Backend", appState.wsConnected ? "Online" : "Offline",
+               appState.wsConnected ? GREEN : RED);
+
+    // Battery
+    // TODO: Read GPIO9 ADC for actual battery level
+    statusLine("Power", "USB", GREEN);
+
+    // SD card
+    statusLine("SD Card", sd_storage::isMounted() ? "Mounted" : "No card",
+               sd_storage::isMounted() ? GREEN : YELLOW);
+
+    // Separator
+    tft.drawFastHLine(10, y + 2, LCD_WIDTH - 20, DIM);
+}
+
 // ── Main BIOS menu ────────────────────────────────────────
 
 bool bios_menu::show() {
@@ -413,14 +460,37 @@ bool bios_menu::show() {
     }
 
     const char* items[] = { "Continue Boot", "Audio Test", "WiFi Scan", "System Info", "Setup WiFi", "Factory Reset" };
-    MenuDef menu = { "BIOS", items, 6, 30, 28 };
+    const int statusAreaEnd = 115;  // Status dashboard takes y 30-110
+    MenuDef menu = { "BIOS", items, 6, statusAreaEnd, 28 };
 
     for (;;) {
-        int sel = menuLoop(menu);
-        // BOOT in main menu = no-op
-        if (sel < 0) continue;
+        // Draw menu with status dashboard
+        cls();
+        drawCentered(menu.title, 4, CYAN);
+        tft.drawFastHLine(10, 26, LCD_WIDTH - 20, DIM);
+        drawStatusDashboard();
 
-        switch (sel) {
+        for (int i = 0; i < menu.count; i++) {
+            int iy = menu.top + i * menu.itemH;
+            tft.drawFastHLine(10, iy + menu.itemH - 1, LCD_WIDTH - 20, 0x2104);
+            drawLeft(menu.items[i], 16, iy + 5, WHITE);
+        }
+        drawSmall("BOOT = back", 300, DIM);
+
+        // Wait for selection
+        int tapY = waitTapY();
+        if (tapY < 0) continue;  // BOOT in main menu = no-op
+
+        int idx = (tapY - menu.top) / menu.itemH;
+        if (idx < 0 || idx >= menu.count) continue;
+
+        // Flash item
+        int fy = menu.top + idx * menu.itemH;
+        tft.fillRect(8, fy, LCD_WIDTH - 16, menu.itemH - 1, 0x0A2A);
+        drawLeft(menu.items[idx], 16, fy + 5, CYAN);
+        delay(100);
+
+        switch (idx) {
             case 0: return false;              // Continue Boot
             case 1: audioTestScreen(); break;
             case 2: wifiScanScreen(); break;

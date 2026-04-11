@@ -27,6 +27,26 @@ static uint32_t nextDriftSwitch = 0;
 // Idle fidget
 static uint32_t nextFidgetMs = 0;
 
+// ── Idle micro-animations ─────────────────────────────
+// Each "act" is a short self-contained animation that plays while idle.
+enum class IdleAct : uint8_t {
+    NONE,           // Normal idle
+    LOOK_AROUND,    // Eyes sweep left, pause, sweep right
+    DOUBLE_BLINK,   // Two quick blinks
+    CURIOUS,        // Eyes widen + drift to one side
+    YAWN,           // Mouth opens, eyes squeeze, settle
+    DISAPPEAR,      // Eyes shrink to dots, pause, pop back
+    EYE_ROLL,       // Pupils trace a circle
+    WINK,           // One eye closes briefly
+    BOUNCE,         // Quick little hop
+};
+static const uint8_t IDLE_ACT_COUNT = 8;  // Number of acts (excluding NONE)
+
+static IdleAct currentAct = IdleAct::NONE;
+static uint32_t actStartMs = 0;
+static uint32_t nextActMs = 0;
+static int8_t actParam = 0;         // e.g., which side to wink
+
 // Sad teardrop
 static uint32_t lastTearSpawnMs = 0;
 
@@ -56,11 +76,17 @@ void face::init() {
     state.blinkScale = 1.0f;
     targetExpr = Expression::IDLE;
 
+    state.leftEyeScale = 1.0f;
+    state.rightEyeScale = 1.0f;
+    state.popScale = 1.0f;
+
     uint32_t now = millis();
     nextBlinkMs = now + 2000;
     nextDriftSwitch = now + 1000;
     nextFidgetMs = now + 5000;
+    nextActMs = now + 5000 + (esp_random() % 5000);  // First act after 5-10s
     lastTearSpawnMs = now;
+    currentAct = IdleAct::NONE;
 
     Serial.println("[Face] Initialized");
 }
@@ -129,11 +155,9 @@ void face::tick(uint32_t nowMs) {
     }
     state.thinkingDotCount = state.thinkDots;  // legacy alias
 
-    // ── Breathing (sleeping) ───────────────────────
-    if (active == Expression::SLEEPING) {
-        state.breathPhase += dt / 4.0f;
-        if (state.breathPhase > 1.0f) state.breathPhase -= 1.0f;
-    }
+    // ── Breathing cycle (always runs — used by sleeping, idle mouth, sad tremble)
+    state.breathPhase += dt / 4.0f;
+    if (state.breathPhase > 1.0f) state.breathPhase -= 1.0f;
 
     // ── Mouth amplitude smoothing ──────────────────
     state.mouthAmp = flerp(state.mouthAmp, (active == Expression::SPEAKING) ? currentAmplitude : 0, 0.25f);
@@ -142,25 +166,207 @@ void face::tick(uint32_t nowMs) {
     // ── Listening pulse ────────────────────────────
     if (active == Expression::LISTENING) state.listenPhase += dt * 4.0f;
 
-    // ── Idle fidget ────────────────────────────────
+    // ── Idle micro-animations ──────────────────────
+    // Reset per-frame overrides
+    state.leftEyeScale = 1.0f;
+    state.rightEyeScale = 1.0f;
+    state.yawnAmp = 0.0f;
+    state.popScale = 1.0f;
+
     if (active == Expression::IDLE) {
+        // Base fidget (subtle position jitter)
         state.fidgetX = flerp(state.fidgetX, 0, 0.05f);
         state.fidgetY = flerp(state.fidgetY, 0, 0.05f);
-        if (nowMs >= nextFidgetMs) {
-            state.fidgetX = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 3.0f;
-            state.fidgetY = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 2.0f;
-            nextFidgetMs = nowMs + 10000 + (esp_random() % 10000);
+
+        // Schedule next micro-animation
+        if (currentAct == IdleAct::NONE && nowMs >= nextActMs) {
+            uint8_t pick = esp_random() % IDLE_ACT_COUNT;
+            currentAct = (IdleAct)(pick + 1);
+            actStartMs = nowMs;
+            actParam = (esp_random() % 2) ? -1 : 1;  // random side
+        }
+
+        // Run current act
+        if (currentAct != IdleAct::NONE) {
+            float t = (float)(nowMs - actStartMs);  // ms since act started
+
+            switch (currentAct) {
+                case IdleAct::LOOK_AROUND: {
+                    // 2.5s: look left → pause → look right → center
+                    float phase = t / 2500.0f;
+                    if (phase < 0.25f) {
+                        driftTX = -20.0f;
+                        driftTY = 0;
+                    } else if (phase < 0.5f) {
+                        driftTX = -20.0f;
+                    } else if (phase < 0.75f) {
+                        driftTX = 20.0f;
+                    } else if (phase < 1.0f) {
+                        driftTX = 0;
+                        driftTY = 0;
+                    } else {
+                        currentAct = IdleAct::NONE;
+                    }
+                    break;
+                }
+
+                case IdleAct::DOUBLE_BLINK: {
+                    // 600ms: blink, brief open, blink again
+                    if (t < 120)       state.blinkScale = 1.0f - t / 120.0f;
+                    else if (t < 200)  state.blinkScale = 0.0f;
+                    else if (t < 300)  state.blinkScale = (t - 200) / 100.0f;
+                    else if (t < 350)  state.blinkScale = 1.0f;
+                    else if (t < 470)  state.blinkScale = 1.0f - (t - 350) / 120.0f;
+                    else if (t < 550)  state.blinkScale = 0.0f;
+                    else if (t < 650)  state.blinkScale = (t - 550) / 100.0f;
+                    else { state.blinkScale = 1.0f; currentAct = IdleAct::NONE; }
+                    state.eyesOpen = (state.blinkScale > 0.05f);
+                    break;
+                }
+
+                case IdleAct::CURIOUS: {
+                    // 2s: eyes widen + drift to one side, then settle
+                    float phase = t / 2000.0f;
+                    if (phase < 0.3f) {
+                        float ease = phase / 0.3f;
+                        state.leftEyeScale = 1.0f + ease * 0.2f;
+                        state.rightEyeScale = 1.0f + ease * 0.2f;
+                        driftTX = actParam * 18.0f * ease;
+                        driftTY = -4.0f * ease;
+                    } else if (phase < 0.7f) {
+                        state.leftEyeScale = 1.2f;
+                        state.rightEyeScale = 1.2f;
+                        driftTX = actParam * 18.0f;
+                        driftTY = -4.0f;
+                    } else if (phase < 1.0f) {
+                        float ease = (phase - 0.7f) / 0.3f;
+                        state.leftEyeScale = 1.2f - ease * 0.2f;
+                        state.rightEyeScale = 1.2f - ease * 0.2f;
+                        driftTX = actParam * 18.0f * (1.0f - ease);
+                        driftTY = -4.0f * (1.0f - ease);
+                    } else {
+                        currentAct = IdleAct::NONE;
+                    }
+                    break;
+                }
+
+                case IdleAct::YAWN: {
+                    // 2.5s: eyes squeeze, mouth opens wide, then close
+                    float phase = t / 2500.0f;
+                    if (phase < 0.2f) {
+                        float ease = phase / 0.2f;
+                        state.leftEyeScale = 1.0f - ease * 0.6f;
+                        state.rightEyeScale = 1.0f - ease * 0.6f;
+                        state.yawnAmp = ease * 0.8f;
+                    } else if (phase < 0.6f) {
+                        state.leftEyeScale = 0.4f;
+                        state.rightEyeScale = 0.4f;
+                        state.yawnAmp = 0.8f;
+                    } else if (phase < 1.0f) {
+                        float ease = (phase - 0.6f) / 0.4f;
+                        state.leftEyeScale = 0.4f + ease * 0.6f;
+                        state.rightEyeScale = 0.4f + ease * 0.6f;
+                        state.yawnAmp = 0.8f * (1.0f - ease);
+                    } else {
+                        currentAct = IdleAct::NONE;
+                    }
+                    break;
+                }
+
+                case IdleAct::DISAPPEAR: {
+                    // 2s: shrink to nothing, pause, pop back with overshoot
+                    float phase = t / 2000.0f;
+                    if (phase < 0.25f) {
+                        state.popScale = 1.0f - (phase / 0.25f);
+                    } else if (phase < 0.55f) {
+                        state.popScale = 0.0f;
+                    } else if (phase < 0.75f) {
+                        float ease = (phase - 0.55f) / 0.2f;
+                        state.popScale = ease * 1.15f;  // overshoot
+                    } else if (phase < 1.0f) {
+                        float ease = (phase - 0.75f) / 0.25f;
+                        state.popScale = 1.15f - ease * 0.15f;  // settle to 1.0
+                    } else {
+                        state.popScale = 1.0f;
+                        currentAct = IdleAct::NONE;
+                    }
+                    break;
+                }
+
+                case IdleAct::EYE_ROLL: {
+                    // 1.5s: pupils trace a circle
+                    float phase = t / 1500.0f;
+                    if (phase < 1.0f) {
+                        float angle = phase * 2.0f * 3.14159f;
+                        driftTX = cosf(angle) * 14.0f;
+                        driftTY = sinf(angle) * 10.0f;
+                    } else {
+                        driftTX = 0; driftTY = 0;
+                        currentAct = IdleAct::NONE;
+                    }
+                    break;
+                }
+
+                case IdleAct::WINK: {
+                    // 800ms: one eye closes and opens
+                    float phase = t / 800.0f;
+                    float scale;
+                    if (phase < 0.25f)       scale = 1.0f - phase / 0.25f;
+                    else if (phase < 0.6f)   scale = 0.0f;
+                    else if (phase < 1.0f)   scale = (phase - 0.6f) / 0.4f;
+                    else { scale = 1.0f; currentAct = IdleAct::NONE; }
+
+                    if (actParam > 0) state.rightEyeScale = scale;
+                    else              state.leftEyeScale = scale;
+                    break;
+                }
+
+                case IdleAct::BOUNCE: {
+                    // 800ms: quick hop up and settle
+                    float phase = t / 800.0f;
+                    if (phase < 0.3f) {
+                        state.bounceY = -sinf(phase / 0.3f * 3.14159f) * 8.0f;
+                    } else if (phase < 0.6f) {
+                        state.bounceY = -sinf((phase - 0.3f) / 0.3f * 3.14159f) * 3.0f;
+                    } else if (phase < 1.0f) {
+                        state.bounceY = flerp(state.bounceY, 0, 0.15f);
+                    } else {
+                        state.bounceY = 0;
+                        currentAct = IdleAct::NONE;
+                    }
+                    break;
+                }
+
+                default:
+                    currentAct = IdleAct::NONE;
+                    break;
+            }
+
+            // When act finishes, schedule next one (8-20s from now)
+            if (currentAct == IdleAct::NONE) {
+                nextActMs = nowMs + 8000 + (esp_random() % 12000);
+            }
         }
     } else {
+        // Not idle — reset
         state.fidgetX = flerp(state.fidgetX, 0, 0.1f);
         state.fidgetY = flerp(state.fidgetY, 0, 0.1f);
+        if (currentAct != IdleAct::NONE) {
+            currentAct = IdleAct::NONE;
+            nextActMs = 0;
+        }
     }
 
-    // ── Happy bounce ───────────────────────────────
-    if (active == Expression::HAPPY)
+    // ── Bounce / nod ──────────────────────────────
+    if (active == Expression::HAPPY) {
         state.bounceY = sinf(nowMs / 300.0f) * 4.0f;
-    else
+    } else if (active == Expression::LISTENING) {
+        // Gentle nod — slower, smaller, like nodding along
+        state.bounceY = sinf(nowMs / 600.0f) * 3.0f;
+    } else if (currentAct != IdleAct::BOUNCE) {
+        // Don't zero out during idle BOUNCE act
         state.bounceY = flerp(state.bounceY, 0, 0.1f);
+    }
 
     // ── Sad teardrop ───────────────────────────────
     if (active == Expression::SAD) {

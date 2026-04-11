@@ -217,18 +217,28 @@ Rolling log file for development and troubleshooting:
 
 The bot's "face" is a set of animated expressions rendered on the TFT. Each expression is a state in a simple state machine.
 
-| Expression | When shown | Animation |
-|------------|-----------|-----------|
-| Idle/happy | Default state | Eyes open, occasional blinking (random interval 3-8s) |
-| Listening | Touch-to-talk active | Eyes wide, pulsing indicator |
-| Thinking | Waiting for backend response | Eyes looking around, loading dots |
-| Speaking | Playing audio response | Mouth animation synced to audio amplitude |
-| Confused | Error or didn't understand | Tilted eyes, question mark |
-| Sleeping | After idle timeout | Eyes closed, gentle breathing animation |
-| Offline | No backend connection | Greyed out face, Wi-Fi icon with X |
-| Encouraging | Stand up / stretch reminder | Cheerful eyes, upward expression |
-| Calm | Eye break / focus mode | Soft eyes, relaxed expression |
-| Focused | During pomodoro focus phase | Determined eyes, slight squint |
+| Expression | Trigger | Mouth | Animation |
+|------------|---------|-------|-----------|
+| Idle | Default state | Breathing-synced gentle smile | Blinks (3-8s), pupil drift, 8 idle micro-acts (look around, double blink, curious peek, yawn, disappear/reappear, eye roll, wink, bounce) every 8-20s |
+| Listening | Touch-to-talk active | Attentive "ooh" ellipse | Eyes wide, pulsing indicator, gentle nodding |
+| Thinking | Waiting for backend response | Pursed dot-mouth offset to side | Eyes looking around, loading dots |
+| Speaking | Playing audio response | Animated ellipse synced to amplitude | Mouth opens/closes with audio |
+| Confused | `error` WS event (2.5s, then reverts) | Wavy zigzag + floating "?" | Tilted eyes |
+| Sleeping | Idle timeout (5min) or presence AWAY | Floating "z Z" with breathing | Eyes closed, gentle breathing cycle |
+| Offline | No WiFi/WS connection | Flat dead line | X-eyes, greyed palette |
+| Encouraging | Reminders, wake from touch, idle tap | Big warm smile with teeth gleam | Cheerful wide eyes, brows raised |
+| Calm | Eye break, pomodoro break, session end | Wide flat closed-lip smile | Soft relaxed eyes |
+| Focused | Pomodoro focus phase | Tight pressed-lip line | Determined squint |
+| Happy | Presence arrival (3s), `face:expression` | Wide grin with highlight | Bouncing, wide eyes, brows raised |
+| Sad | Presence departure, `face:expression` | Frown with breathing tremble | Teardrops, droopy eyes |
+
+**Backend-driven expressions:** The `face:expression` WebSocket event allows the
+backend/LLM to push any expression based on conversation sentiment:
+```json
+{"event":"face:expression","data":{"expression":"happy","durationMs":3000}}
+```
+If `durationMs` is set, the expression reverts to idle after the timeout.
+If omitted, it persists until the next state change.
 
 ### Display modes
 
@@ -236,7 +246,7 @@ The screen supports multiple display modes beyond just the face. Mode switching 
 
 | Mode | Layout | Trigger |
 |------|--------|---------|
-| **Face** (default) | Full-screen animated face + status bar | Default, voice command "show face", tap during other modes |
+| **Face** (default) | Full-screen animated face + connection dot (top-left) | Default, voice command "show face", tap during other modes |
 | **Clock** | Large time (center), date (below), next reminder (bottom), mini face (corner) | Voice command "show clock", auto after configurable idle timeout |
 | **Pomodoro** | Phase label "FOCUS"/"BREAK" (top), large countdown (center), cycle dots (bottom) | `proactive:pomodoro` event from backend |
 | **Reminder** | Reminder icon (top), text (center), "tap to dismiss" (bottom) | `proactive:reminder` event, auto-returns after duration |
@@ -262,14 +272,15 @@ Toggleable overlay (works on top of any display mode) that shows:
 
 Useful for debugging and for environments where audio isn't ideal. Toggled via device settings.
 
-### Status bar
+### Connection indicator
 
-Small status indicators at top of screen (visible in face and clock modes):
-- Wi-Fi signal strength (icon)
-- Battery level (if on battery)
-- Current state text (optional)
-- Focus mode indicator (when active)
-- Pomodoro cycle indicator (when active)
+A small dot in the top-left corner of the face screen (position 8,8, radius 4px):
+- **Green** — fully online (WiFi + WebSocket connected)
+- **Yellow** — WiFi connected but no backend WebSocket
+- **Red** — offline (no WiFi)
+
+Detailed status (WiFi signal, IP, backend, battery, SD card) is shown in the
+BIOS menu status dashboard instead of cluttering the face screen.
 
 ---
 
@@ -338,8 +349,8 @@ ESP32-S3 has dual cores -- audio tasks run on core 0, everything else on core 1 
 | **TTS cache** | `tts_cache.cpp/.h` | **Complete** — SHA256 lookup, manifest, LRU eviction, 100MB cap |
 | **Recording buffer** | `recording_buffer.cpp/.h` | **Complete** — SD buffering on WS drop, frame-level resend |
 | **Resilience audio** | `resilience_audio.cpp/.h` | **Complete** — PSRAM-loaded fallback clips |
-| **Face animation** | `face.cpp/.h` | **Scaffolded** — 10 expressions, blink timer, mouth amplitude sync, transitions |
-| **Display manager** | `display.cpp/.h` | **Scaffolded** — 6 modes (face/clock/pomodoro/reminder/countdown/status), auto-return, status bar, transcript overlay. TFT rendering is stubbed in `display_hw` namespace. |
+| **Face animation** | `face.cpp/.h` | **Complete** — 12 expressions, 8 idle micro-animations, per-eye scaling, pop effects, per-expression mouth shapes, backend `face:expression` WS event, presence-driven happy/sad |
+| **Display manager** | `display.cpp/.h` | **Scaffolded** — 6 modes (face/clock/pomodoro/reminder/countdown/status), auto-return, connection dot indicator, transcript overlay, PWM backlight fade. TFT rendering is stubbed in `display_hw` namespace. |
 | **Touch driver** | `touch.cpp/.h` | **Scaffolded** — event abstraction (tap/hold/release/long_press/wake), debounce, serial simulation. Hardware touch IC reading is a TODO. |
 | State machine | `state.h` | Complete — BotState + PresenceState enums |
 | Config | `config.h` | Complete — pins, Opus, timings |
@@ -367,9 +378,9 @@ ESP32-S3 has dual cores -- audio tasks run on core 0, everything else on core 1 
 ## Phase 2 deliverables (weeks 4-5)
 
 1. TFT display driver initialized
-2. Face animation state machine (all 7 expressions)
+2. Face animation state machine (all 12 expressions)
 3. Touch-to-talk implemented
-4. Status bar with Wi-Fi indicator
+4. Connection dot indicator (green/yellow/red)
 5. Transcript display mode
 6. Sleep/wake on touch
 7. Offline face expression
