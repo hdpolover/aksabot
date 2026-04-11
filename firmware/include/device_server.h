@@ -26,4 +26,10 @@ void stop();
 /// since the last call. Call from loop() to trigger WS reconnect.
 bool consumeNewToken();
 
+/// Returns true (once) if the app requested a backend reconnect via POST /reconnect.
+bool consumeReconnect();
+
+/// Returns true (once) if the app requested a wake via POST /wake.
+bool consumeWake();
+
 }  // namespace device_server

@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -583,42 +584,39 @@ class _DeviceDashboard extends StatelessWidget {
                   const SizedBox(height: AppConstants.spacingMd),
                   Text(botName, style: theme.textTheme.headlineSmall),
                   const SizedBox(height: AppConstants.spacingXs),
-                  GestureDetector(
-                    onTap: () {
-                      context.read<DevicesBloc>().add(const LoadDevices());
-                    },
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        StatusDot(
-                          variant: online
-                              ? StatusDotVariant.online
-                              : StatusDotVariant.offline,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          online ? 'Online' : 'Offline',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: colors.onSurfaceVariant,
-                          ),
-                        ),
-                        if (!online) ...[
-                          const SizedBox(width: 4),
-                          Icon(Icons.refresh, size: 16, color: colors.onSurfaceVariant),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (!online && device.lastSeenAt != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        'Last seen ${_formatTimeAgo(device.lastSeenAt!)}',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.onSurfaceVariant.withValues(alpha: 0.7),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      StatusDot(
+                        variant: online
+                            ? StatusDotVariant.online
+                            : StatusDotVariant.offline,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        online ? 'Online' : 'Offline',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colors.onSurfaceVariant,
                         ),
                       ),
-                    ),
+                    ],
+                  ),
+                  if (!online) ...[
+                    if (device.lastSeenAt != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          'Last seen ${_formatTimeAgo(device.lastSeenAt!)}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.onSurfaceVariant.withValues(alpha: 0.7),
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: AppConstants.spacingMd),
+                    _ReconnectButton(onReconnected: () {
+                      context.read<DevicesBloc>().add(const LoadDevices());
+                    }),
+                  ],
                 ],
               ),
             ),
@@ -711,6 +709,88 @@ class _DeviceDashboard extends StatelessWidget {
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     if (diff.inDays < 7) return '${diff.inDays}d ago';
     return '${dt.month}/${dt.day}';
+  }
+}
+
+class _ReconnectButton extends StatefulWidget {
+  final VoidCallback onReconnected;
+  const _ReconnectButton({required this.onReconnected});
+
+  @override
+  State<_ReconnectButton> createState() => _ReconnectButtonState();
+}
+
+class _ReconnectButtonState extends State<_ReconnectButton> {
+  bool _loading = false;
+  String? _message;
+
+  Future<void> _reconnect() async {
+    setState(() { _loading = true; _message = null; });
+
+    try {
+      // Discover device on local network via mDNS
+      final discovery = MdnsDiscoveryService();
+      final device = await discovery.discoverFirst(
+        timeout: const Duration(seconds: 4),
+      );
+
+      if (device == null) {
+        setState(() { _loading = false; _message = 'Device not found on network'; });
+        return;
+      }
+
+      // Send reconnect command to device's local HTTP server
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 3),
+        receiveTimeout: const Duration(seconds: 5),
+      ));
+      await dio.post('http://${device.ip}:${device.port}/reconnect');
+
+      setState(() { _loading = false; _message = 'Reconnect sent!'; });
+
+      // Wait a moment for the device to connect, then refresh status
+      await Future.delayed(const Duration(seconds: 3));
+      widget.onReconnected();
+      if (mounted) setState(() => _message = null);
+    } catch (e) {
+      setState(() {
+        _loading = false;
+        _message = 'Could not reach device';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        FilledButton.tonalIcon(
+          onPressed: _loading ? null : _reconnect,
+          icon: _loading
+              ? SizedBox(
+                  width: 16, height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: colors.onSecondaryContainer),
+                )
+              : const Icon(Icons.power_settings_new, size: 18),
+          label: Text(_loading ? 'Connecting...' : 'Reconnect Device'),
+        ),
+        if (_message != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              _message!,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: _message == 'Reconnect sent!'
+                    ? colors.primary
+                    : colors.error,
+              ),
+            ),
+          ),
+      ],
+    );
   }
 }
 

@@ -891,6 +891,23 @@ void loop() {
     // Serve HTTP status requests + token delivery (used by Flutter app)
     device_server::tick();
 
+    // Handle app commands via local HTTP
+    if (device_server::consumeReconnect()) {
+        Serial.println("[Main] App requested reconnect");
+        if (wifi_manager::isConnected()) {
+            ws_client::reconnectWithToken();
+            appState.botState = BotState::IDLE;
+            syncFaceToState();
+            updateStatusBar();
+        }
+    }
+    if (device_server::consumeWake()) {
+        Serial.println("[Main] App requested wake");
+        power_manager::recordInteraction();
+        appState.botState = BotState::IDLE;
+        syncFaceToState();
+    }
+
     // Check if device token was received via HTTP → connect to backend
     if (device_server::consumeNewToken() && wifi_manager::isConnected()) {
         Serial.println("[Main] New device token received — connecting to backend WS");

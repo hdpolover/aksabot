@@ -9,6 +9,8 @@ static WebServer* server = nullptr;
 static char versionBuf[16] = {};
 static volatile bool tokenJustReceived = false;
 static volatile bool setupModeActive = false;
+static volatile bool reconnectRequested = false;
+static volatile bool wakeRequested = false;
 
 void device_server::setSetupMode(bool active) {
     setupModeActive = active;
@@ -84,6 +86,38 @@ void device_server::start(const char* version) {
         setupModeActive = false;  // close the window after one successful delivery
     });
 
+    // POST /reconnect — app tells device to reconnect to backend
+    server->on("/reconnect", HTTP_POST, []() {
+        server->sendHeader("Access-Control-Allow-Origin", "*");
+        server->send(200, "application/json", "{\"ok\":true}");
+        reconnectRequested = true;
+        Serial.println("[DeviceServer] Reconnect requested via HTTP");
+    });
+
+    // POST /wake — app wakes the device from sleep
+    server->on("/wake", HTTP_POST, []() {
+        server->sendHeader("Access-Control-Allow-Origin", "*");
+        server->send(200, "application/json", "{\"ok\":true}");
+        wakeRequested = true;
+        Serial.println("[DeviceServer] Wake requested via HTTP");
+    });
+
+    // GET /status — extended with connectivity info for the app
+    server->on("/health", HTTP_GET, []() {
+        JsonDocument doc;
+        doc["name"]    = "Aksabot";
+        doc["version"] = versionBuf;
+        doc["wifi"]    = WiFi.isConnected();
+        doc["wsConnected"] = false;  // updated by main loop via extern
+        doc["ip"]      = WiFi.localIP().toString();
+        doc["uptime"]  = millis() / 1000;
+
+        String out;
+        serializeJson(doc, out);
+        server->sendHeader("Access-Control-Allow-Origin", "*");
+        server->send(200, "application/json", out);
+    });
+
     server->onNotFound([]() {
         server->send(404, "text/plain", "not found");
     });
@@ -109,6 +143,22 @@ void device_server::stop() {
 bool device_server::consumeNewToken() {
     if (tokenJustReceived) {
         tokenJustReceived = false;
+        return true;
+    }
+    return false;
+}
+
+bool device_server::consumeReconnect() {
+    if (reconnectRequested) {
+        reconnectRequested = false;
+        return true;
+    }
+    return false;
+}
+
+bool device_server::consumeWake() {
+    if (wakeRequested) {
+        wakeRequested = false;
         return true;
     }
     return false;
