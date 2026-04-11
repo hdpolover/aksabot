@@ -583,23 +583,42 @@ class _DeviceDashboard extends StatelessWidget {
                   const SizedBox(height: AppConstants.spacingMd),
                   Text(botName, style: theme.textTheme.headlineSmall),
                   const SizedBox(height: AppConstants.spacingXs),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      StatusDot(
-                        variant: online
-                            ? StatusDotVariant.online
-                            : StatusDotVariant.offline,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        online ? 'Online' : 'Offline',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colors.onSurfaceVariant,
+                  GestureDetector(
+                    onTap: () {
+                      context.read<DevicesBloc>().add(const LoadDevices());
+                    },
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        StatusDot(
+                          variant: online
+                              ? StatusDotVariant.online
+                              : StatusDotVariant.offline,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          online ? 'Online' : 'Offline',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ),
+                        if (!online) ...[
+                          const SizedBox(width: 4),
+                          Icon(Icons.refresh, size: 16, color: colors.onSurfaceVariant),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (!online && device.lastSeenAt != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Last seen ${_formatTimeAgo(device.lastSeenAt!)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.onSurfaceVariant.withValues(alpha: 0.7),
                         ),
                       ),
-                    ],
-                  ),
+                    ),
                 ],
               ),
             ),
@@ -683,6 +702,15 @@ class _DeviceDashboard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _formatTimeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 60) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${dt.month}/${dt.day}';
   }
 }
 

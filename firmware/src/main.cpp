@@ -678,12 +678,10 @@ void setup() {
                 if (appState.wsConnected) {
                     ws_client::sendEvent("presence:departed");
                 }
-                // Show sad face briefly, then dim and sleep
+                // Show sad face briefly, then sleep via power_manager
+                // (don't call display::sleep() directly — keeps power_manager in sync)
                 face::setExpression(face::Expression::SAD, 300);
-                power_manager::setState(power_manager::PowerState::DIM);
-                // Power manager will transition DIM → SLEEP after sleepTimeoutSec.
-                // Since no interaction resets the timer, it will sleep soon.
-                display::sleep();
+                power_manager::setState(power_manager::PowerState::SLEEPING);
             }
         });
     }
@@ -898,7 +896,14 @@ void loop() {
         Serial.println("[Main] New device token received — connecting to backend WS");
         ws_client::reconnectWithToken();
         ble_manager::notifyAuthStatus(1);  // 1 = token stored
+
+        // Reset from confused/offline face to idle — setup is complete
+        appState.botState = BotState::IDLE;
+        syncFaceToState();
         updateStatusBar();
+
+        // Dismiss any lingering reminder ("Almost there...")
+        display::setMode(display::Mode::FACE);
     }
 
     // Tick presence detector + BLE scanner
@@ -938,6 +943,11 @@ void loop() {
     static bool prevWifi = false;
     static bool prevWs = false;
     if (appState.wifiConnected != prevWifi || appState.wsConnected != prevWs) {
+        // WS just connected — ensure face is IDLE (clears stuck CONFUSED from setup)
+        if (appState.wsConnected && !prevWs) {
+            appState.botState = BotState::IDLE;
+            syncFaceToState();
+        }
         prevWifi = appState.wifiConnected;
         prevWs = appState.wsConnected;
         updateStatusBar();

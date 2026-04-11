@@ -34,6 +34,9 @@ class ApiClient {
     final token = await _storage.read(key: StorageKeys.accessToken);
     if (token != null) {
       options.headers['Authorization'] = 'Bearer $token';
+      AppLogger.debug(_tag, '${options.method} ${options.baseUrl}${options.path} [token: ${token.substring(0, 20)}...]');
+    } else {
+      AppLogger.debug(_tag, '${options.method} ${options.baseUrl}${options.path} [NO TOKEN]');
     }
     handler.next(options);
   }

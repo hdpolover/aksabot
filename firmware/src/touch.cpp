@@ -3,6 +3,7 @@
 #include "config.h"
 #include "lgfx_config.h"
 #include <Arduino.h>
+#include <Wire.h>
 
 // ── Configuration ──────────────────────────────────────
 static const uint16_t DEBOUNCE_MS = 30;
@@ -12,6 +13,10 @@ static const uint16_t LONG_PRESS_MS = 5000;  // 5s — avoid conflict with hold-
 static const uint8_t  CONFIRM_COUNT = 2;
 static const uint16_t POLL_INTERVAL_MS = 15;
 static const uint16_t WAKE_COOLDOWN_MS = 500;  // Suppress touch reads after wake
+
+// FT6336G keep-alive: periodic I2C read prevents hibernate mode.
+// In hibernate the INT pin stops responding, killing tap-to-wake.
+static const uint32_t KEEPALIVE_INTERVAL_MS = 3000;  // ping every 3s while sleeping
 
 // ── LovyanGFX display instance (defined in display.cpp) ──
 extern LGFX tft;
@@ -35,7 +40,21 @@ static uint32_t wakeCooldownUntil = 0;
 // Boot stabilization — FT6336G needs ~300ms after reset to produce valid readings
 static uint32_t bootReadyMs = 0;
 
+// Keep-alive timer — prevents FT6336G from entering hibernate while display sleeps
+static uint32_t lastKeepaliveMs = 0;
+
 // ── Helpers ────────────────────────────────────────────
+
+/// Read a single FT6336G register via I2C to keep the IC in Monitor mode.
+/// The FT6336G transitions Active → Monitor → Hibernate when idle.
+/// Any I2C transaction resets the hibernate timer, keeping INT responsive.
+static void touchKeepalive() {
+    Wire.beginTransmission(TOUCH_I2C_ADDR);
+    Wire.write(0x00);  // register 0x00 = device mode
+    Wire.endTransmission(false);
+    Wire.requestFrom((uint8_t)TOUCH_I2C_ADDR, (uint8_t)1);
+    if (Wire.available()) Wire.read();  // discard — we just need the I2C traffic
+}
 
 static void fireEvent(touch::Event event) {
     const char* names[] = {"TAP", "HOLD_START", "HOLD_END", "LONG_PRESS", "WAKE"};
@@ -85,6 +104,7 @@ void touch::init() {
     lastPollMs = 0;
     lastTransitionMs = 0;
     wakeCooldownUntil = 0;
+    lastKeepaliveMs = 0;
 
     // INT pin: goes LOW when finger touches, HIGH when released
     // We read this manually to filter phantom touches from getTouch()
@@ -112,6 +132,12 @@ void touch::tick(uint32_t nowMs) {
     // Suppress reads during boot stabilization and wake cooldown
     if (nowMs < bootReadyMs) goto check_hold;
     if (nowMs < wakeCooldownUntil) goto check_hold;
+
+    // Keep FT6336G alive while sleeping — prevent hibernate (INT pin goes dead)
+    if (display::isSleeping() && (nowMs - lastKeepaliveMs) >= KEEPALIVE_INTERVAL_MS) {
+        lastKeepaliveMs = nowMs;
+        touchKeepalive();
+    }
 
     {
         // Use INT pin as primary gate: LOW = finger on screen
