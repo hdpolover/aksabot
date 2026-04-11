@@ -174,6 +174,11 @@ bool touch::isTouched() {
     return currentlyTouched;
 }
 
+void touch::clearBootDelay() {
+    bootReadyMs = 0;
+    wakeCooldownUntil = 0;
+}
+
 uint32_t touch::getHoldDurationMs() {
     if (!currentlyTouched) return 0;
     return millis() - touchStartMs;

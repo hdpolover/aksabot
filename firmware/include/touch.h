@@ -39,6 +39,9 @@ void tick(uint32_t nowMs);
 /// Check if currently being touched.
 bool isTouched();
 
+/// Clear the boot stabilization delay (for BIOS menu entry).
+void clearBootDelay();
+
 /// Get how long the current touch has been held (ms). 0 if not touching.
 uint32_t getHoldDurationMs();
 

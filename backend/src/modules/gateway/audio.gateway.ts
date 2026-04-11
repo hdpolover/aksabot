@@ -194,7 +194,7 @@ export class AudioGateway
       this.logger.debug(`Saved Opus: greeting-${ts}-s${sentenceIdx}.opus (${opusAudio.length} bytes)`);
 
       this.sendToDevice(deviceId, 'response:text', { text: sentence, isFinal: false });
-      const framesSent = this.sendFramedOpusToDevice(deviceId, opusAudio);
+      const framesSent = await this.sendFramedOpusToDevice(deviceId, opusAudio);
       this.logger.log(`Sent sentence ${sentenceIdx} to ${deviceId}: "${sentence.slice(0, 40)}..." (${framesSent} opus frames, ${opusAudio.length} bytes)`);
       sentenceIdx++;
     }
@@ -251,7 +251,7 @@ export class AudioGateway
         text: sentence,
         isFinal: false,
       });
-      this.sendFramedOpusToDevice(deviceId, opusAudio);
+      await this.sendFramedOpusToDevice(deviceId, opusAudio);
     }
 
     this.sendToDevice(deviceId, 'response:end', {
@@ -580,7 +580,7 @@ export class AudioGateway
           this.sendToDevice(deviceId, 'state:update', { state: 'speaking' });
           started = true;
         }
-        this.sendFramedOpusToDevice(deviceId, event.data);
+        await this.sendFramedOpusToDevice(deviceId, event.data);
       } else if (event.type === 'done') {
         fullResponseText = event.fullText;
         cacheKeys = event.cacheKeys;
@@ -675,8 +675,9 @@ export class AudioGateway
    * Send length-prefixed Opus frames as individual WebSocket binary messages.
    * Backend Opus codec produces: [2-byte BE length][opus frame][2-byte BE length][opus frame]...
    * ESP32 firmware expects one raw Opus frame per WS binary message.
+   * Paced at ~15ms per frame to avoid overwhelming the ESP32's WS/TLS buffer.
    */
-  private sendFramedOpusToDevice(deviceId: string, framedOpus: Buffer): number {
+  private async sendFramedOpusToDevice(deviceId: string, framedOpus: Buffer): Promise<number> {
     const socket = this.deviceToSocket.get(deviceId);
     if (!socket || socket.readyState !== 1) return 0;
 
@@ -692,10 +693,21 @@ export class AudioGateway
         break;
       }
 
+      // Re-check connection periodically (every 20 frames)
+      if (frameCount > 0 && frameCount % 20 === 0) {
+        if (!socket || socket.readyState !== 1) break;
+      }
+
       const frame = framedOpus.subarray(offset, offset + frameLen);
       socket.send(frame);
       offset += frameLen;
       frameCount++;
+
+      // Pace at ~15ms per frame (Opus frame = 20ms audio).
+      // Prevents overwhelming ESP32's TLS decrypt + WS buffer.
+      if (frameCount % 5 === 0) {
+        await new Promise((r) => setTimeout(r, 75));
+      }
     }
 
     return frameCount;

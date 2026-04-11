@@ -452,9 +452,10 @@ static void drawStatusDashboard() {
 // ── Main BIOS menu ────────────────────────────────────────
 
 bool bios_menu::show() {
-    // Warm up the touch driver — prime debounce after I2C bus init
-    for (int i = 0; i < 20; i++) {
-        touch::processSerial(millis());
+    // Let the FT6336G settle, then clear any phantom touches
+    delay(300);
+    touch::clearBootDelay();
+    for (int i = 0; i < 10; i++) {
         touch::tick(millis());
         delay(15);
     }

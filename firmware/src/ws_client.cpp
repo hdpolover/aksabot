@@ -141,6 +141,12 @@ void ws_client::init(JsonCallback onJson, BinaryCallback onBinary) {
         strncpy(tokenBuf, DEVICE_TOKEN, sizeof(tokenBuf) - 1);
     }
 
+    // Enable SSL for wss:// URLs (skip certificate validation for now)
+    if (strncmp(wsUrlBuf, "wss://", 6) == 0) {
+        client.setInsecure();
+        Serial.println("[WS] SSL enabled (insecure mode)");
+    }
+
     String authHeader = String("DeviceToken ") + tokenBuf;
     client.addHeader("Authorization", authHeader.c_str());
 }
@@ -282,6 +288,11 @@ void ws_client::reconnectWithToken() {
     if (!nvs_store::getDeviceToken(tokenBuf, sizeof(tokenBuf))) {
         strncpy(tokenBuf, DEVICE_TOKEN, sizeof(tokenBuf) - 1);
         tokenBuf[sizeof(tokenBuf) - 1] = '\0';
+    }
+
+    // Enable SSL for wss:// URLs
+    if (strncmp(wsUrlBuf, "wss://", 6) == 0) {
+        client.setInsecure();
     }
 
     // Update auth header with new token
