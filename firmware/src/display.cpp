@@ -972,6 +972,7 @@ void display::wake() {
     sleeping = false;
     face::setExpression(face::Expression::IDLE, 300);
     setMode(Mode::FACE);
-    brightness = userBrightness;
+    // Don't set brightness before fade — fadeBrightness checks target == brightness
+    // and skips if they match. We need it to fade FROM current (0) TO userBrightness.
     fadeBrightness(userBrightness, 300);
 }

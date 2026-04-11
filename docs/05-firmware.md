@@ -301,6 +301,30 @@ Primary interaction model:
 
 ---
 
+## BIOS menu
+
+Accessed by holding the BOOT button during the splash screen. Provides diagnostics and configuration outside the normal runtime.
+
+**Status dashboard** (shown at top of main menu):
+- Wi-Fi signal with human-readable label (Excellent/Good/Fair/Weak/Poor + dBm)
+- Server readiness (Ready / No token / No Wi-Fi)
+- SD card status
+- Firmware version
+
+**Menu items:**
+
+| Item | What it does |
+|------|-------------|
+| Continue Boot | Exit BIOS, proceed to normal boot |
+| Wi-Fi | Shows current connection + scan networks + change network |
+| Hardware Test | Speaker beep, mic level meter, echo test, touch test (draw dots), LED RGB cycle, automated run-all-checks |
+| System Info | Chip, CPU, flash, PSRAM, heap, MAC, firmware, display, uptime |
+| Factory Reset | Confirmation → erases NVS (WiFi, token, settings) → reboot |
+
+All screens use a tappable "< Back" bar at the bottom instead of requiring the BOOT button. Touch input uses direct `tft.getTouch()` polling (bypasses the INT-pin debounce layer for reliability during BIOS).
+
+---
+
 ## Power management
 
 | State | Display | Audio | Wi-Fi | BLE | Trigger |

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -22,11 +23,10 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
   bool _loading = true;
   bool _saving = false;
 
-  // Integration toggles — keyed by settings field name.
   bool _weatherEnabled = false;
-
-  // The settings snapshot from the server (may contain keys we don't render).
-  Map<String, dynamic> _rawSettings = {};
+  double? _latitude;
+  double? _longitude;
+  String? _locationStatus;
 
   @override
   void initState() {
@@ -47,17 +47,16 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
   void _applySettings(Device device) {
     final s = device.settingsJson;
     setState(() {
-      _rawSettings = Map<String, dynamic>.from(s);
       _weatherEnabled = s['integrations_weather'] as bool? ?? false;
+      _latitude = (s['latitude'] as num?)?.toDouble();
+      _longitude = (s['longitude'] as num?)?.toDouble();
       _loading = false;
     });
   }
 
-  Future<void> _saveSettings(String key, dynamic value) async {
+  Future<void> _saveSettings(Map<String, dynamic> patch) async {
     if (_saving) return;
     setState(() => _saving = true);
-
-    final patch = {key: value};
 
     final result = await _devicesRepo.updateSettings(widget.deviceId, patch);
     if (!mounted) return;
@@ -74,6 +73,94 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
         setState(() => _saving = false);
       },
     );
+  }
+
+  Future<void> _toggleWeather(bool enabled) async {
+    if (enabled) {
+      // Request location when enabling weather
+      final hasLocation = await _requestLocation();
+      if (!hasLocation) {
+        // Permission denied or location unavailable
+        return;
+      }
+      setState(() => _weatherEnabled = true);
+      await _saveSettings({'integrations_weather': true});
+    } else {
+      setState(() => _weatherEnabled = false);
+      await _saveSettings({'integrations_weather': false});
+    }
+  }
+
+  Future<bool> _requestLocation() async {
+    setState(() => _locationStatus = 'Checking permissions...');
+
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (!mounted) return false;
+      setState(() => _locationStatus = null);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Location services are disabled. Enable them in settings.')),
+      );
+      return false;
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        if (!mounted) return false;
+        setState(() => _locationStatus = null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location permission denied.')),
+        );
+        return false;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      if (!mounted) return false;
+      setState(() => _locationStatus = null);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Location permission permanently denied. Enable in system settings.')),
+      );
+      return false;
+    }
+
+    setState(() => _locationStatus = 'Getting location...');
+
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.low,
+          timeLimit: Duration(seconds: 10),
+        ),
+      );
+
+      if (!mounted) return false;
+
+      final tz = DateTime.now().timeZoneName;
+      // Save location + timezone to device settings
+      await _saveSettings({
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'timezone': tz,
+      });
+
+      setState(() {
+        _latitude = position.latitude;
+        _longitude = position.longitude;
+        _locationStatus = null;
+      });
+
+      return true;
+    } catch (e) {
+      if (!mounted) return false;
+      setState(() => _locationStatus = null);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to get location: $e')),
+      );
+      return false;
+    }
   }
 
   @override
@@ -106,27 +193,62 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Connected
           Text('Connected', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           Card(
             clipBehavior: Clip.antiAlias,
-            child: SwitchListTile(
-              secondary: Icon(Icons.cloud, color: colors.primary),
-              title: const Text('Weather'),
-              subtitle: const Text('OpenWeatherMap'),
-              value: _weatherEnabled,
-              onChanged: _saving
-                  ? null
-                  : (v) {
-                      setState(() => _weatherEnabled = v);
-                      _saveSettings('integrations_weather', v);
-                    },
+            child: Column(
+              children: [
+                SwitchListTile(
+                  secondary: Icon(Icons.cloud, color: colors.primary),
+                  title: const Text('Weather'),
+                  subtitle: Text(
+                    _weatherEnabled && _latitude != null
+                        ? 'Open-Meteo (${_latitude!.toStringAsFixed(1)}, ${_longitude!.toStringAsFixed(1)})'
+                        : 'Open-Meteo',
+                  ),
+                  value: _weatherEnabled,
+                  onChanged: _saving ? null : _toggleWeather,
+                ),
+                if (_locationStatus != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: Row(
+                      children: [
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          _locationStatus!,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (_weatherEnabled && _latitude != null)
+                  ListTile(
+                    dense: true,
+                    leading: Icon(Icons.my_location, size: 20, color: colors.onSurfaceVariant),
+                    title: Text(
+                      'Location: ${_latitude!.toStringAsFixed(2)}, ${_longitude!.toStringAsFixed(2)}',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    trailing: TextButton(
+                      onPressed: _saving ? null : _requestLocation,
+                      child: const Text('Update'),
+                    ),
+                  ),
+              ],
             ),
           ),
           const SizedBox(height: 24),
 
-          // Available (coming soon — no toggle, no persistence yet)
+          // Available (coming soon)
           Text('Available', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           Card(

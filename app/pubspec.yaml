@@ -50,6 +50,7 @@ dependencies:
 
   # WiFi scanning (for provisioning — list available networks)
   wifi_scan: ^0.4.1
+  geolocator: ^14.0.2
 
 dev_dependencies:
   flutter_test:

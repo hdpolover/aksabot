@@ -44,9 +44,11 @@ describe('MemoriesService', () => {
       extractFromTranscript: jest.fn().mockResolvedValue([]),
     };
 
+    const conversationsRepo = { find: jest.fn().mockResolvedValue([]) };
     service = new MemoriesService(
       memoriesRepo as any,
       messagesRepo as any,
+      conversationsRepo as any,
       extractor as any,
     );
   });

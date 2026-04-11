@@ -169,6 +169,31 @@ LLM stream → Sentence buffer → TTS queue → Opus encoder → WebSocket → 
                              [sentence 3] → waiting
 ```
 
+#### Per-sentence emotion tagging
+
+The LLM is instructed to tag each sentence with an emotion in brackets (e.g., `[happy]`, `[sarcastic]`). The backend:
+
+1. **Strips the tag** before sending text to TTS (the user never hears the tag)
+2. **Sends `face:expression`** to the ESP32 when the emotion changes between sentences
+3. **Modulates TTS voice** per emotion — excited sentences are spoken faster with more variation, sad sentences slower and subdued
+
+```
+LLM output: "That's awesome! [excited] Let me explain. [focused]"
+    ↓ extractEmotion(): text="That's awesome!", emotion="excited"
+    ↓ TTS synthesizes "That's awesome!" with speed=1.15, stability=0.7
+    ↓ Gateway sends face:expression{expression:"encouraging"} + audio frames
+    ↓ ESP32 shows ENCOURAGING eyes while mouth moves with audio amplitude
+```
+
+| Emotion | Speed multiplier | Stability multiplier | Face expression |
+|---------|-----------------|---------------------|----------------|
+| excited | 1.15x | 0.7x | ENCOURAGING |
+| happy | 1.05x | 0.8x | HAPPY |
+| calm | 0.90x | 1.0x | CALM |
+| sad | 0.85x | 0.9x | SAD |
+| sarcastic | 0.95x | 0.6x | ENCOURAGING |
+| focused | 1.00x | 1.0x | FOCUSED |
+
 ---
 
 ## Interruption handling

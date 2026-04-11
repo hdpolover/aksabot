@@ -47,6 +47,8 @@
 			</array>
 		</dict>
 	</dict>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Aksabot uses your location to provide local weather information for your AI desk companion.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Aksabot uses Bluetooth to discover, configure, and detect presence of your AI desk companion.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>

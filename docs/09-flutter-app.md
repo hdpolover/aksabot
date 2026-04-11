@@ -26,9 +26,13 @@ Auth state is managed with JWT tokens stored in flutter_secure_storage. Access t
 
 | Screen | Description |
 |--------|-------------|
-| Device list | Cards for each registered device -- name, status (online/offline), last seen |
+| Home (device grid) | 2-column grid of DeviceTile cards — always grid layout for 1+ devices, empty state for 0 |
 | Add device | BLE provisioning flow (see below) |
-| Device detail | Hub page with tabs: Settings, Conversations, Memories, Personality |
+| Device detail | Dashboard tab (hero header + quick actions), Settings tab, Personality tab |
+| Voice & Audio | Voice preset, speed/stability sliders → ElevenLabs TTS, audio toggles |
+| Presence | BLE advertising toggle, RSSI threshold, grace period — synced to backend + ESP32 |
+| Integrations | Weather toggle with geolocator location permission (lat/lon/timezone saved to device settings) |
+| Diagnostics | Real API health checks, device stats, Wi-Fi signal (human-readable), firmware version |
 
 ### Provisioning flow (Add device)
 

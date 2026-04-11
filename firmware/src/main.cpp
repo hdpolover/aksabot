@@ -503,7 +503,9 @@ static void onTouchEvent(touch::Event event) {
             break;
 
         case touch::Event::WAKE:
-            // Show a friendly wake expression
+            // recordInteraction() already called at top of onTouchEvent
+            appState.botState = BotState::IDLE;
+            syncFaceToState();
             face::setExpression(face::Expression::ENCOURAGING, 200);
             scheduleFaceRevert(1500);
             Serial.println("[Main] Woke from touch");

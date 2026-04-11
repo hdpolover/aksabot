@@ -51,8 +51,12 @@ See [04-audio-pipeline.md](04-audio-pipeline.md) for the full protocol specifica
 3. On `audio:end`: trigger the decoupled AI pipeline (STT -> LLM -> TTS)
 4. Stream Opus response chunks back to device
 5. Send `state:update` events to drive face animations
-6. Update `devices.last_seen_at` on connection
-7. Store conversation and messages in database after each exchange
+6. Send `face:expression` per sentence with LLM emotion tag (per-sentence emotion-driven expressions)
+7. Send `config:update` when device settings change via REST API (real-time settings push)
+8. Receive `device:info` on connect (firmware version, Wi-Fi SSID, RSSI → saved to device entity)
+9. Update `devices.last_seen_at` on connection
+10. Store conversation and messages in database after each exchange
+11. Inject local time + weather (Open-Meteo, 15min cache) into LLM system prompt
 
 ---
 

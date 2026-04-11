@@ -36,6 +36,18 @@ export class MemoriesController {
     return { extracted: memories.length, memories };
   }
 
+  /**
+   * Diagnostic: extract memories from the most recent conversation that has messages.
+   * Hit this to test extraction without needing to know a conversation ID.
+   */
+  @Post('devices/:deviceId/memories/extract-latest')
+  async extractFromLatest(
+    @Param('deviceId', ParseUUIDPipe) deviceId: string,
+  ) {
+    const result = await this.memoriesService.extractFromLatestConversation(deviceId);
+    return result;
+  }
+
   @Get('devices/:deviceId/memories')
   findByDevice(
     @Param('deviceId', ParseUUIDPipe) deviceId: string,

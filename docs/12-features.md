@@ -96,6 +96,61 @@ When the bot is idle, the screen can show useful information instead of just a s
 
 Display modes are managed by the ESP32 — the backend sends the data, the firmware decides how to render it.
 
+### Emotion-driven face expressions
+
+During speech, the bot's face expression changes per-sentence based on the emotional context of what it's saying. The LLM tags each sentence with an emotion, and the backend sends `face:expression` events between sentences.
+
+| LLM emotion tag | Face expression | Visual | Voice modulation |
+|-----------------|----------------|--------|-----------------|
+| `[happy]` | HAPPY | Pink eyes, smile mouth, raised brows | Slightly faster, lively |
+| `[excited]` | ENCOURAGING | Gold eyes, big grin, bounce | Faster, more expressive |
+| `[calm]` | CALM | Green eyes, gentle mouth | Slower, stable |
+| `[sad]` | SAD | Blue eyes, frown mouth | Slowest, subdued |
+| `[confused]` | CONFUSED | Orange eyes, wavy mouth, floating "?" | Slightly slower, uncertain |
+| `[focused]` | FOCUSED | Blue eyes, tight mouth | Normal, precise |
+| `[sarcastic]` | ENCOURAGING | Gold eyes, smirk | Slightly slower, very variable |
+| `[neutral]` | SPEAKING | Teal, default oval | No change |
+
+Audio-reactive micro-animations during speech:
+- Eyes widen on loud parts (1.1x scale), squint on quiet (0.92x)
+- Blink suppression during energetic speech
+- Eyebrow raise on sudden amplitude spikes (400ms)
+- Subtle head-nod synced to amplitude
+- Natural gaze drift while talking
+
+### Idle personality animations
+
+11 micro-animations fire randomly every 8-20 seconds while idle:
+
+| Animation | Duration | What it looks like |
+|-----------|----------|--------------------|
+| Look around | 2.5s | Eyes sweep left, pause, right, center |
+| Double blink | 650ms | Two rapid blinks |
+| Curious | 2s | Eyes widen + drift to one side |
+| Yawn | 3s | Eyes squeeze shut progressively, mouth opens wide, head tilts back, satisfied settle |
+| Disappear | 2s | Face shrinks away, pops back with overshoot |
+| Eye roll | 1.5s | Pupils trace a circle |
+| Wink | 800ms | One eye closes briefly |
+| Bounce | 800ms | Quick hop |
+| Doze | 3s | Eyes droop, head nods down, snaps back awake startled |
+| Munch | 2s | Squinted happy eyes + rapid chewing mouth with jaw wiggle |
+| Sigh | 2s | Half-close eyes, face deflates slightly, recovers |
+
+### Context awareness
+
+The bot knows the current time and optionally the local weather:
+
+| Context | Source | How it's used |
+|---------|--------|---------------|
+| **Local time** | Server clock + device timezone setting | "It's 3am bruh, why are you still up?" — time-aware responses |
+| **Weather** | Open-Meteo API (free, no key), 15min cache | "It's 28°C and cloudy, perfect coding weather" — opt-in via Integrations page |
+
+Weather requires location permission in the Flutter app (geolocator). Lat/lon/timezone saved to device settings and used by backend prompt service.
+
+### SHRUG expression
+
+New expression shown when errors occur or the bot has no response. Head shakes left-right with pursed lips blowing a bubble. Replaces the old CONFUSED expression on errors. Plays for 3 seconds before returning to idle.
+
 ---
 
 ## Scheduler system (backend)

@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThan, Repository } from 'typeorm';
-import { Memory, Message } from '../../core/database/entities';
+import { Conversation, Memory, Message } from '../../core/database/entities';
 import { MemoryExtractorService } from './memory-extractor.service';
 
 @Injectable()
@@ -13,6 +13,8 @@ export class MemoriesService {
     private readonly memoriesRepo: Repository<Memory>,
     @InjectRepository(Message)
     private readonly messagesRepo: Repository<Message>,
+    @InjectRepository(Conversation)
+    private readonly conversationsRepo: Repository<Conversation>,
     private readonly extractor: MemoryExtractorService,
   ) {}
 
@@ -119,6 +121,78 @@ export class MemoriesService {
       `Extracted ${saved.length} memories from conversation ${conversationId}`,
     );
     return saved;
+  }
+
+  // ── Diagnostic: extract from latest ───────────────────
+
+  async extractFromLatestConversation(deviceId: string) {
+    // Find the 5 most recent conversations for this device
+    const conversations = await this.conversationsRepo.find({
+      where: { deviceId },
+      order: { startedAt: 'DESC' },
+      take: 5,
+    });
+
+    if (conversations.length === 0) {
+      return { error: 'No conversations found for this device', conversations: [] };
+    }
+
+    // Check message counts for each
+    const diagnostics = await Promise.all(
+      conversations.map(async (c) => {
+        const messages = await this.messagesRepo.find({
+          where: { conversationId: c.id },
+          order: { createdAt: 'ASC' },
+        });
+        return {
+          conversationId: c.id,
+          startedAt: c.startedAt,
+          endedAt: c.endedAt,
+          messageCount: messages.length,
+          messages: messages.map((m) => ({
+            role: m.role,
+            content: m.content.slice(0, 100),
+          })),
+        };
+      }),
+    );
+
+    // Find the first conversation that actually has messages
+    const withMessages = diagnostics.find((d) => d.messageCount >= 2);
+
+    if (!withMessages) {
+      return {
+        error: 'No conversations with 2+ messages found',
+        conversations: diagnostics,
+      };
+    }
+
+    // Try extraction on it
+    this.logger.log(
+      `Diagnostic extraction: conversation ${withMessages.conversationId} (${withMessages.messageCount} messages)`,
+    );
+
+    try {
+      const memories = await this.extractFromConversation(
+        withMessages.conversationId,
+        deviceId,
+      );
+
+      return {
+        conversationId: withMessages.conversationId,
+        messageCount: withMessages.messageCount,
+        extracted: memories.length,
+        memories: memories.map((m) => ({ fact: m.fact, category: m.category })),
+        allConversations: diagnostics,
+      };
+    } catch (err: any) {
+      return {
+        error: `Extraction failed: ${err.message}`,
+        conversationId: withMessages.conversationId,
+        messageCount: withMessages.messageCount,
+        allConversations: diagnostics,
+      };
+    }
   }
 
   // ── Decay ─────────────────────────────────────────────
