@@ -68,15 +68,32 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
   }
 
   Future<void> _save() async {
-    if (_saving) return;
+    if (_saving || _device == null) return;
     setState(() => _saving = true);
 
-    final result = await _devicesRepo.updateSettings(widget.deviceId, {
-      'volume': _volume.round(),
-      'brightness': _brightness.round(),
-      'display_transcript': _showTranscript,
-      'idle_timeout_seconds': int.parse(_idleTimeout) * 60,
-    });
+    // Only send values that changed from what's on the server
+    final s = _device!.settingsJson;
+    final patch = <String, dynamic>{};
+
+    final serverVol = (s['volume'] as num?)?.toDouble() ?? 70;
+    if (_volume.round() != serverVol.round()) patch['volume'] = _volume.round();
+
+    final serverBr = (s['brightness'] as num?)?.toDouble() ?? 70;
+    if (_brightness.round() != serverBr.round()) patch['brightness'] = _brightness.round();
+
+    final serverTr = s['display_transcript'] as bool? ?? false;
+    if (_showTranscript != serverTr) patch['display_transcript'] = _showTranscript;
+
+    final serverTimeout = (s['idle_timeout_seconds'] as num?) ?? 1800;
+    final newTimeout = int.parse(_idleTimeout) * 60;
+    if (newTimeout != serverTimeout) patch['idle_timeout_seconds'] = newTimeout;
+
+    if (patch.isEmpty) {
+      setState(() => _saving = false);
+      return;
+    }
+
+    final result = await _devicesRepo.updateSettings(widget.deviceId, patch);
     if (!mounted) return;
 
     result.fold(

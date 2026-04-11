@@ -120,6 +120,9 @@ static const EyeShape EYES[EXPR_COUNT] = {
 
 namespace display_hw {
 
+// Forward declaration — defined below, used by renderFace
+void renderTranscriptOverlay(LGFX_Sprite& target, const char* speaker, const char* text);
+
 void init() {
     tft.init();
     tft.setRotation(0);        // Portrait: 240 wide x 320 tall
@@ -612,6 +615,11 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
         }
     }
 
+    // Draw transcript overlay into sprite (before push — avoids flicker)
+    if (transcriptEnabled && transcriptText[0] != '\0') {
+        renderTranscriptOverlay(s, transcriptSpeaker, transcriptText);
+    }
+
     if (useSprite) sprite.pushSprite(0, 0);
 }
 
@@ -777,15 +785,16 @@ void renderStatus(const display::StatusBar& status) {
     }
 }
 
-void renderTranscriptOverlay(const char* speaker, const char* text) {
+/// Draw transcript overlay into a target (sprite or tft).
+void renderTranscriptOverlay(LGFX_Sprite& target, const char* speaker, const char* text) {
     const int padX = 8;
     const int lineH = 14;
     const int maxLines = 3;
     const int maxCharsPerLine = 36;
 
-    tft.setFont(&fonts::Font2);
-    tft.setTextSize(1);
-    tft.setTextDatum(lgfx::top_left);
+    target.setFont(&fonts::Font2);
+    target.setTextSize(1);
+    target.setTextDatum(lgfx::top_left);
 
     // Word-wrap text into lines
     char lines[maxLines][42];
@@ -821,14 +830,14 @@ void renderTranscriptOverlay(const char* speaker, const char* text) {
     int barH = 18 + lineCount * lineH + 4;
     int barY = LCD_HEIGHT - barH;
 
-    tft.fillRect(0, barY, LCD_WIDTH, barH, COL_STATUS_BG);
+    target.fillRect(0, barY, LCD_WIDTH, barH, COL_STATUS_BG);
 
-    tft.setTextColor(COL_ACCENT);
-    tft.drawString(speaker, padX, barY + 3);
+    target.setTextColor(COL_ACCENT);
+    target.drawString(speaker, padX, barY + 3);
 
-    tft.setTextColor(COL_FACE);
+    target.setTextColor(COL_FACE);
     for (int i = 0; i < lineCount; i++) {
-        tft.drawString(lines[i], padX, barY + 16 + i * lineH);
+        target.drawString(lines[i], padX, barY + 16 + i * lineH);
     }
 }
 
@@ -904,9 +913,6 @@ void display::tick(uint32_t nowMs) {
             break;
     }
 
-    if (transcriptEnabled && transcriptText[0] != '\0') {
-        display_hw::renderTranscriptOverlay(transcriptSpeaker, transcriptText);
-    }
 }
 
 void display::setMode(Mode mode) {

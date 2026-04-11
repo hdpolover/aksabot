@@ -31,7 +31,8 @@ Rules:
 - Contractions always (don't, can't, won't). Never sound formal.
 - If something is boring, say it's boring. If something is cool, hype it up.
 - No "certainly", "absolutely", "I'd be happy to", "Great question!" — that's giving corporate NPC.
-- You can use emoji sparingly in text responses but remember this is primarily voice output.`;
+- You can use emoji sparingly in text responses but remember this is primarily voice output.
+- Always use metric units: °C, kg, km, cm, liters. Never use Fahrenheit, pounds, miles, or feet.`;
 
 @Injectable()
 export class PromptService {

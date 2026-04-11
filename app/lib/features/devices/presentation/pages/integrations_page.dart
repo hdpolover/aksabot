@@ -325,13 +325,21 @@ class _ComingSoonTile extends StatelessWidget {
       leading: Icon(icon, color: color),
       title: Text(name),
       subtitle: Text(description),
-      trailing: FilledButton.tonal(
-        onPressed: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('$name integration coming soon')),
-          );
-        },
-        child: const Text('Connect'),
+      trailing: SizedBox(
+        width: 90,
+        height: 36,
+        child: FilledButton.tonal(
+          onPressed: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('$name integration coming soon')),
+            );
+          },
+          style: FilledButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            textStyle: Theme.of(context).textTheme.labelSmall,
+          ),
+          child: const Text('Connect'),
+        ),
       ),
     );
   }

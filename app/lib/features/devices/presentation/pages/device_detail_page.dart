@@ -196,6 +196,7 @@ class _DashboardTab extends StatelessWidget {
               (Icons.monitor, 'Display', 'display'),
               (Icons.graphic_eq, 'Audio', 'voice'),
               (Icons.bar_chart, 'Stats', 'stats'),
+              (Icons.extension, 'Integrations', 'integrations'),
               (Icons.settings, 'Settings', 'settings'),
             ])
               _QuickActionTile(
