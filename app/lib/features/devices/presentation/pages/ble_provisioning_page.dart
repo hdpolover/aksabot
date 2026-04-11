@@ -258,9 +258,9 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
 
   Future<void> _autoSetup(String deviceName) async {
     try {
-      // Step 1: Wait for device to get its WiFi IP
+      // Step 1: Wait for device to connect to WiFi and start HTTP server
       setState(() => _setupStatus = 'Waiting for device to connect to WiFi...');
-      await Future.delayed(const Duration(seconds: 4));
+      await Future.delayed(const Duration(seconds: 6));
 
       if (!mounted) return;
 
@@ -269,16 +269,16 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
       final discovery = MdnsDiscoveryService();
       String? deviceIp;
 
-      for (int attempt = 0; attempt < 3; attempt++) {
+      for (int attempt = 0; attempt < 4; attempt++) {
         final found = await discovery.discoverFirst(
-          timeout: const Duration(seconds: 5),
+          timeout: const Duration(seconds: 6),
         );
         if (found != null) {
           deviceIp = found.ip;
           break;
         }
         if (!mounted) return;
-        if (attempt < 2) {
+        if (attempt < 3) {
           setState(() => _setupStatus = 'Searching for device... (attempt ${attempt + 2})');
         }
       }

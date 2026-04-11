@@ -812,8 +812,13 @@ void setup() {
         }
 
         if (firstBoot) {
-            device_server::setSetupMode(true);
             nvs_store::markSetupComplete();
+        }
+        // Keep setup mode open until a token is received — allows the app
+        // to deliver the token at any point (not just on first boot).
+        bool hasToken = nvs_store::hasDeviceToken() || (strlen(DEVICE_TOKEN) > 0);
+        if (!hasToken) {
+            device_server::setSetupMode(true);
         }
         device_server::start(FIRMWARE_VERSION);
     } else {
