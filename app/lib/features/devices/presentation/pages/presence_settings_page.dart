@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 
 import '../../../../core/ble/ble_presence_service.dart';
 import '../../../../core/di/injection.dart';
@@ -71,15 +72,59 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
         await _presence.saveEnabled(false);
         if (!mounted) return;
         setState(() => _enabled = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to start BLE advertising. Check Bluetooth permissions.')),
-        );
+        _showPermissionDialog();
       }
     } else {
       await _presence.stopAdvertising();
       await _presence.saveEnabled(false);
       _syncToBackend({'presence_enabled': false});
     }
+  }
+
+  void _showPermissionDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(
+          Icons.bluetooth_disabled,
+          size: 48,
+          color: Theme.of(context).colorScheme.error,
+        ),
+        title: const Text('Bluetooth Permission Required'),
+        content: const Text(
+          'Presence detection needs Bluetooth advertising permission to work. '
+          'Please enable Bluetooth and grant the required permissions in your device settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.tonal(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              // Try requesting permission via the BLE peripheral plugin
+              final result =
+                  await FlutterBlePeripheral().requestPermission();
+              if (!mounted) return;
+              if (result == BluetoothPeripheralState.granted ||
+                  result == BluetoothPeripheralState.ready) {
+                _togglePresence(true);
+              }
+            },
+            child: const Text('Grant Permission'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              // Open app settings so user can manually enable permissions
+              await FlutterBlePeripheral().openAppSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

@@ -613,17 +613,23 @@ export class AudioGateway
         );
     }
 
-    // Extract voice settings from device config
+    // Extract voice settings and context from device config
     const settings = device?.settingsJson ?? {};
     const voiceOptions = {
       voice: settings.voice_preset as string | undefined,
       speed: settings.voice_speed as number | undefined,
       stability: settings.voice_stability as number | undefined,
     };
+    const context = {
+      timezone: settings.timezone as string | undefined,
+      weatherEnabled: settings.integrations_weather as boolean | undefined,
+      latitude: settings.latitude as number | undefined,
+      longitude: settings.longitude as number | undefined,
+    };
 
     // Run streaming pipeline
     try {
-      await this.runPipeline(deviceId, result.transcript, memories, history, voiceOptions);
+      await this.runPipeline(deviceId, result.transcript, memories, history, voiceOptions, context);
     } catch (err: any) {
       this.logger.error(`Pipeline error for ${deviceId}: ${err.message}`, err.stack);
       this.sendToDevice(deviceId, 'error', {
@@ -651,15 +657,22 @@ export class AudioGateway
     memories: { fact: string; category: string }[],
     history: { role: string; content: string }[],
     voiceOptions?: { voice?: string; speed?: number; stability?: number },
+    context?: { timezone?: string; weatherEnabled?: boolean; latitude?: number; longitude?: number },
   ) {
     const session = this.sessions.get(deviceId);
     if (!session) return;
+
+    // Refresh weather if enabled (cached, 15min TTL)
+    if (context?.weatherEnabled && context.latitude && context.longitude) {
+      await this.aiService.refreshWeather(context.latitude, context.longitude);
+    }
 
     const pipeline = this.aiService.processTranscript(
       transcript,
       memories,
       history,
       voiceOptions,
+      context,
     );
 
     let started = false;

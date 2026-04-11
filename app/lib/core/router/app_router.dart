@@ -18,6 +18,7 @@ import '../../features/devices/presentation/pages/firmware_update_page.dart';
 import '../../features/devices/presentation/pages/diagnostics_page.dart';
 import '../../features/devices/presentation/pages/integrations_page.dart';
 import '../../features/devices/presentation/pages/motion_settings_page.dart';
+import '../../features/devices/presentation/pages/device_settings_page.dart';
 import '../../features/devices/presentation/pages/idle_personality_page.dart';
 import '../../features/devices/presentation/pages/mobility_settings_page.dart';
 import '../../features/conversations/presentation/pages/conversations_page.dart';
@@ -157,7 +158,7 @@ List<RouteBase> _deviceSubRoutes() {
     ),
     GoRoute(
       path: 'settings',
-      builder: (context, state) => DeviceDetailPage(
+      builder: (context, state) => DeviceSettingsPage(
         deviceId: state.pathParameters['deviceId']!,
       ),
     ),

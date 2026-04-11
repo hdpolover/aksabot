@@ -20,7 +20,6 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
   final _devicesRepo = sl<DevicesRepository>();
 
   bool _loading = true;
-  bool _saving = false;
   String? _error;
 
   bool _idleChatEnabled = true;
@@ -59,17 +58,20 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
     );
   }
 
+  int _pendingSaves = 0;
+
   Future<void> _save(String key, dynamic value) async {
-    if (_saving) return;
-    setState(() => _saving = true);
+    setState(() => _pendingSaves++);
 
     final result =
         await _devicesRepo.updateSettings(widget.deviceId, {key: value});
     if (!mounted) return;
 
+    setState(() => _pendingSaves--);
+
     result.fold(
       (failure) {
-        // Revert optimistic update by reloading from server
+        // Revert only the failed key by reloading from server
         _loadSettings();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -78,20 +80,12 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
           ),
         );
       },
-      (device) {
-        // Apply the server response to update local state
-        final s = device.settingsJson;
-        setState(() {
-          _idleChatEnabled = s['idle_chat_enabled'] as bool? ?? true;
-          _idleChatFrequency =
-              s['idle_chat_frequency'] as String? ?? 'normal';
-          _idleAnimationSpeed =
-              s['idle_animation_speed'] as String? ?? 'normal';
-        });
+      (_) {
+        // Success — local state is already correct from the optimistic
+        // setState in the onChanged callback. No need to overwrite other
+        // fields from the server response.
       },
     );
-
-    if (mounted) setState(() => _saving = false);
   }
 
   @override
@@ -141,7 +135,7 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
                               'Random fun facts, thoughts, and roasts',
                             ),
                             value: _idleChatEnabled,
-                            onChanged: _saving
+                            onChanged: _pendingSaves > 0
                                 ? null
                                 : (v) {
                                     setState(() => _idleChatEnabled = v);
@@ -180,7 +174,7 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
                                         child: Text('Often (3-8 min)'),
                                       ),
                                     ],
-                                    onChanged: _saving
+                                    onChanged: _pendingSaves > 0
                                         ? null
                                         : (v) {
                                             if (v == null) return;
@@ -240,7 +234,7 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
                                   child: Text('Fast (3-10s)'),
                                 ),
                               ],
-                              onChanged: _saving
+                              onChanged: _pendingSaves > 0
                                   ? null
                                   : (v) {
                                       if (v == null) return;
@@ -254,7 +248,7 @@ class _IdlePersonalityPageState extends State<IdlePersonalityPage> {
                       ),
                     ),
 
-                    if (_saving) ...[
+                    if (_pendingSaves > 0) ...[
                       const SizedBox(height: 16),
                       const Center(
                         child: SizedBox(

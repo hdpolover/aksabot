@@ -93,4 +93,20 @@ export class UpdateSettingsDto {
   @IsBoolean()
   @IsOptional()
   presence_enabled?: boolean;
+
+  @IsString()
+  @IsOptional()
+  timezone?: string;
+
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  @IsOptional()
+  latitude?: number;
+
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  @IsOptional()
+  longitude?: number;
 }

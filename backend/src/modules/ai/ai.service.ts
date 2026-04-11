@@ -10,6 +10,7 @@ import {
 import type { ISttProvider, SttStream, SttOptions } from './interfaces';
 import type { ILlmProvider } from './interfaces';
 import type { ITtsProvider, TtsOptions } from './interfaces';
+import type { ContextInfo } from './prompt.service';
 import type { IAudioCodec } from './interfaces';
 import type { ITtsCache } from './interfaces/tts-cache.interface';
 import { PromptService } from './prompt.service';
@@ -89,6 +90,10 @@ export class AiService {
     return this.stt.createStream(options);
   }
 
+  async refreshWeather(lat: number, lon: number): Promise<void> {
+    return this.prompt.refreshWeather(lat, lon);
+  }
+
   decodeAudio(opusChunk: Buffer): Buffer {
     return this.codec.decode(opusChunk);
   }
@@ -152,8 +157,9 @@ export class AiService {
     memories: MemoryEntry[],
     history: { role: string; content: string }[],
     voiceOptions?: TtsOptions,
+    context?: ContextInfo,
   ): AsyncGenerator<PipelineEvent> {
-    const systemPrompt = this.prompt.buildSystemPrompt(memories);
+    const systemPrompt = this.prompt.buildSystemPrompt(memories, context);
     const messages = this.prompt.buildMessages(history, transcript);
 
     const sentenceBuffer = new SentenceBuffer();

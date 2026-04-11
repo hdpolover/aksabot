@@ -74,30 +74,7 @@ class _DeviceDetailView extends StatelessWidget {
                         ],
                       ),
                     )
-                  : DefaultTabController(
-                      length: 2,
-                      child: Column(
-                        children: [
-                          TabBar(
-                            tabs: const [
-                              Tab(text: 'Dashboard'),
-                              Tab(text: 'Settings'),
-                            ],
-                            labelColor: colors.primary,
-                            unselectedLabelColor: colors.onSurfaceVariant,
-                            indicatorColor: colors.primary,
-                          ),
-                          Expanded(
-                            child: TabBarView(
-                              children: [
-                                _DashboardTab(device: device),
-                                _SettingsTab(device: device),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                  : _DashboardTab(device: device),
         );
       },
     );
@@ -149,58 +126,55 @@ class _DashboardTab extends StatelessWidget {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final online = device.isOnline;
-    const botName = 'Aksa';
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
-        // Hero header
-        Center(
-          child: Column(
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: online
-                        ? [colors.primary, colors.tertiary]
-                        : [colors.surfaceContainerHighest, colors.surfaceContainerHigh],
-                  ),
-                  borderRadius: BorderRadius.circular(AppConstants.radiusXl),
+        // Compact status bar
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 12,
+            ),
+            child: Row(
+              children: [
+                StatusDot(
+                  variant: online
+                      ? StatusDotVariant.online
+                      : StatusDotVariant.offline,
                 ),
-                child: Icon(
-                  Icons.smart_toy_rounded,
-                  size: 36,
-                  color: online ? colors.onPrimary : colors.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: AppConstants.spacingMd),
-              Text(botName, style: theme.textTheme.headlineSmall),
-              const SizedBox(height: AppConstants.spacingXs),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  StatusDot(
-                    variant: online
-                        ? StatusDotVariant.online
-                        : StatusDotVariant.offline,
+                const SizedBox(width: 8),
+                Text(
+                  online ? 'Connected' : 'Offline',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: online ? colors.primary : colors.onSurfaceVariant,
                   ),
-                  const SizedBox(width: 6),
+                ),
+                if (online && device.wifiSsid != null) ...[
+                  const SizedBox(width: 8),
                   Text(
-                    online ? 'Online' : 'Offline',
-                    style: theme.textTheme.bodyMedium?.copyWith(
+                    device.wifiSsid!,
+                    style: theme.textTheme.bodySmall?.copyWith(
                       color: colors.onSurfaceVariant,
                     ),
                   ),
                 ],
-              ),
-            ],
+                const Spacer(),
+                if (device.lastSeenAt != null)
+                  Text(
+                    online
+                        ? 'Up ${_formatUptime(DateTime.now().difference(device.lastSeenAt!))}'
+                        : 'Last seen ${_formatTimeAgo(device.lastSeenAt!)}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: colors.outline,
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
-        const SizedBox(height: AppConstants.spacingXxl),
+        const SizedBox(height: AppConstants.spacingLg),
 
         // Quick actions
         Text('Quick Actions', style: theme.textTheme.titleMedium),
@@ -234,6 +208,19 @@ class _DashboardTab extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  static String _formatUptime(Duration d) {
+    if (d.inDays > 0) return '${d.inDays}d ${d.inHours % 24}h';
+    if (d.inHours > 0) return '${d.inHours}h ${d.inMinutes % 60}m';
+    return '${d.inMinutes}m';
+  }
+
+  static String _formatTimeAgo(DateTime date) {
+    final diff = DateTime.now().difference(date);
+    if (diff.inDays > 0) return '${diff.inDays}d ago';
+    if (diff.inHours > 0) return '${diff.inHours}h ago';
+    return '${diff.inMinutes}m ago';
   }
 }
 
@@ -292,325 +279,4 @@ class _QuickActionTile extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Settings tab
-// ---------------------------------------------------------------------------
-
-class _SettingsTab extends StatefulWidget {
-  final Device device;
-  const _SettingsTab({required this.device});
-
-  @override
-  State<_SettingsTab> createState() => _SettingsTabState();
-}
-
-class _SettingsTabState extends State<_SettingsTab> {
-  bool _dirty = false;
-  double _volume = 80;
-  double _brightness = 80;
-  bool _showTranscript = true;
-  String _idleTimeout = '30';
-
-  @override
-  void initState() {
-    super.initState();
-    final s = widget.device.settingsJson;
-    _volume = (s['volume'] as num?)?.toDouble() ?? 80;
-    _brightness = (s['brightness'] as num?)?.toDouble() ?? 80;
-    _showTranscript = s['display_transcript'] as bool? ?? true;
-    final timeoutSec = (s['idle_timeout_seconds'] as num?) ?? 1800;
-    // Clamp to valid dropdown values
-    final minutes = (timeoutSec ~/ 60);
-    _idleTimeout = const ['1', '5', '10', '30'].contains(minutes.toString())
-        ? minutes.toString()
-        : '30';
-  }
-
-  @override
-  void didUpdateWidget(covariant _SettingsTab oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.device.id != widget.device.id) {
-      _dirty = false;
-    }
-  }
-
-  void _save() {
-    context.read<DevicesBloc>().add(
-          UpdateSettings(widget.device.id, {
-            'volume': _volume.round(),
-            'brightness': _brightness.round(),
-            'display_transcript': _showTranscript,
-            'idle_timeout_seconds': int.parse(_idleTimeout) * 60,
-          }),
-        );
-    setState(() => _dirty = false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    final online = widget.device.isOnline;
-
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        // General section
-        Text('General', style: theme.textTheme.titleMedium),
-        const SizedBox(height: 8),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Volume
-                Row(
-                  children: [
-                    Text('Volume', style: theme.textTheme.bodyMedium),
-                    const Spacer(),
-                    Text('${_volume.round()}%',
-                        style: theme.textTheme.bodySmall),
-                  ],
-                ),
-                Slider(
-                  value: _volume,
-                  min: 0,
-                  max: 100,
-                  divisions: 20,
-                  onChanged: (v) => setState(() {
-                    _volume = v;
-                    _dirty = true;
-                  }),
-                ),
-
-                // Brightness
-                Row(
-                  children: [
-                    Text('Brightness', style: theme.textTheme.bodyMedium),
-                    const Spacer(),
-                    Text('${_brightness.round()}%',
-                        style: theme.textTheme.bodySmall),
-                  ],
-                ),
-                Slider(
-                  value: _brightness,
-                  min: 0,
-                  max: 100,
-                  divisions: 20,
-                  onChanged: (v) => setState(() {
-                    _brightness = v;
-                    _dirty = true;
-                  }),
-                ),
-                const SizedBox(height: 8),
-
-                // Show transcript toggle
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Show transcript', style: theme.textTheme.bodyMedium),
-                    Switch(
-                      value: _showTranscript,
-                      onChanged: (v) => setState(() {
-                        _showTranscript = v;
-                        _dirty = true;
-                      }),
-                    ),
-                  ],
-                ),
-
-                // Idle timeout
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Idle timeout', style: theme.textTheme.bodyMedium),
-                    DropdownButton<String>(
-                      value: _idleTimeout,
-                      underline: const SizedBox.shrink(),
-                      items: const [
-                        DropdownMenuItem(value: '1', child: Text('1 min')),
-                        DropdownMenuItem(value: '5', child: Text('5 min')),
-                        DropdownMenuItem(value: '10', child: Text('10 min')),
-                        DropdownMenuItem(value: '30', child: Text('30 min')),
-                      ],
-                      onChanged: (v) {
-                        if (v != null) {
-                          setState(() {
-                            _idleTimeout = v;
-                            _dirty = true;
-                          });
-                        }
-                      },
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // Save button
-        FilledButton(
-          onPressed: _dirty ? _save : null,
-          child: const Text('Save Settings'),
-        ),
-        const SizedBox(height: 24),
-
-        // Device info
-        Text('Device Info', style: theme.textTheme.titleMedium),
-        const SizedBox(height: 8),
-        Card(
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            children: [
-              ListTile(
-                title: const Text('Status'),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    StatusDot(
-                      variant: online
-                          ? StatusDotVariant.online
-                          : StatusDotVariant.offline,
-                    ),
-                    const SizedBox(width: AppConstants.spacingSm),
-                    Text(
-                      online ? 'Online' : 'Offline',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colors.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                title: const Text('Wi-Fi signal'),
-                trailing: widget.device.wifiRssi != null
-                    ? Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _wifiIcon(widget.device.wifiRssi!),
-                            size: 18,
-                            color: _wifiColor(widget.device.wifiRssi!, colors),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            _wifiLabel(widget.device.wifiRssi!),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: _wifiColor(widget.device.wifiRssi!, colors),
-                            ),
-                          ),
-                        ],
-                      )
-                    : Text(
-                        widget.device.isOnline ? 'Connected' : 'N/A',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.onSurfaceVariant,
-                        ),
-                      ),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                title: const Text('Uptime'),
-                trailing: Text(
-                  online && widget.device.lastSeenAt != null
-                      ? _formatUptime(
-                          DateTime.now().difference(widget.device.lastSeenAt!))
-                      : 'Offline',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: colors.onSurfaceVariant,
-                  ),
-                ),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                title: const Text('Firmware'),
-                trailing: Text(
-                  widget.device.firmwareVersion ?? 'N/A',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colors.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-
-        // Remove device
-        OutlinedButton.icon(
-          onPressed: () => _confirmDelete(context),
-          icon: const Icon(Icons.delete_outline),
-          label: const Text('Remove Device'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: colors.error,
-            side: BorderSide(color: colors.error),
-            minimumSize: const Size(double.infinity, 48),
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _formatUptime(Duration d) {
-    if (d.inDays > 0) return '${d.inDays}d ${d.inHours % 24}h';
-    if (d.inHours > 0) return '${d.inHours}h ${d.inMinutes % 60}m';
-    return '${d.inMinutes}m';
-  }
-
-  static String _wifiLabel(int rssi) {
-    if (rssi > -50) return 'Excellent';
-    if (rssi > -60) return 'Good';
-    if (rssi > -70) return 'Fair';
-    if (rssi > -80) return 'Weak';
-    return 'Poor';
-  }
-
-  static IconData _wifiIcon(int rssi) {
-    if (rssi > -60) return Icons.wifi;
-    if (rssi > -70) return Icons.wifi_2_bar;
-    return Icons.wifi_1_bar;
-  }
-
-  static Color _wifiColor(int rssi, ColorScheme colors) {
-    if (rssi > -60) return colors.primary;
-    if (rssi > -70) return colors.tertiary;
-    return colors.error;
-  }
-
-  void _confirmDelete(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Remove Device'),
-        content: Text('Remove "${widget.device.name}" permanently?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-            ),
-            onPressed: () async {
-              Navigator.of(dialogContext).pop();
-              final bloc = context.read<DevicesBloc>();
-              bloc.add(DeleteDevice(widget.device.id));
-              await bloc.stream.firstWhere(
-                (s) => s is DevicesLoaded || s is DevicesError,
-              );
-              if (context.mounted) context.pop();
-            },
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
