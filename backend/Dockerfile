@@ -27,6 +27,7 @@ RUN addgroup -S aksabot && adduser -S aksabot -G aksabot
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
+COPY entrypoint.sh ./
 
 # Own files by app user
 RUN chown -R aksabot:aksabot /app
@@ -35,4 +36,5 @@ USER aksabot
 
 EXPOSE 4280
 
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["node", "dist/main.js"]

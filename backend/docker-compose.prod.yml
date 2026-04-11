@@ -29,8 +29,10 @@ services:
       # AI providers
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
-      # Google Cloud — mount service account JSON via volume or set inline
-      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      # Google Cloud — pass service account JSON as base64 env var.
+      # The entrypoint script decodes it to a file at startup.
+      GCLOUD_SA_BASE64: ${GCLOUD_SA_BASE64:-}
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcloud-sa.json
     depends_on:
       postgres:
         condition: service_healthy
