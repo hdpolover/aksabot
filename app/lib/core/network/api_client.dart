@@ -151,12 +151,30 @@ class ApiClient {
 
   ServerException _mapException(DioException e) {
     final data = e.response?.data;
-    final message = data is Map
-        ? (data['message'] ?? e.message ?? 'Unknown error')
-        : (e.message ?? 'Unknown error');
-    return ServerException(
-      message is List ? message.join(', ') : message.toString(),
-      statusCode: e.response?.statusCode,
-    );
+    final statusCode = e.response?.statusCode;
+
+    // Extract clean message from NestJS error response
+    String message;
+    if (data is Map) {
+      final msg = data['message'];
+      if (msg is List) {
+        message = msg.join(', ');
+      } else if (msg is String) {
+        message = msg;
+      } else {
+        message = data['error'] as String? ?? 'Request failed';
+      }
+    } else if (e.type == DioExceptionType.connectionTimeout ||
+               e.type == DioExceptionType.receiveTimeout) {
+      message = 'Connection timed out';
+    } else if (e.type == DioExceptionType.connectionError) {
+      message = 'Could not connect to server';
+    } else {
+      message = statusCode != null
+          ? 'Request failed ($statusCode)'
+          : 'Network error';
+    }
+
+    return ServerException(message, statusCode: statusCode);
   }
 }

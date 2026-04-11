@@ -80,17 +80,18 @@ All design docs are in `docs/`. This is the entry point:
 - NestJS backend with `core/` + `modules/` structure (7 modules)
 - Docker-compose (PostgreSQL 16 on port 5489, Redis 7 on port 6312, NestJS on port 4280)
 - All 6 TypeORM entities + migration applied
-- Auth (JWT + device token + forgot/reset password), Devices CRUD + personality management
+- Auth (JWT + device token + forgot/reset password), Devices CRUD + settings management
 - AI pipeline: ports & adapters (5 interfaces, 5 adapters incl. Redis TTS cache), streaming orchestrator with cache hints, per-sentence emotion tagging (LLM tags → face expression + voice modulation)
 - WebSocket gateway: full audio lifecycle, STT streaming, interruption, session management, proactive events, presence events (arrived/departed with welcome-back TTS), face:expression push, per-device rate limiting (100 chunks/sec), `config:update` push (settings sync to ESP32), `device:info` receive (firmware version, Wi-Fi RSSI)
 - Voice settings: per-device voice preset (Ziggy/Aria/Roger/Sarah), speed, stability — passed through to ElevenLabs TTS per request. Per-emotion voice modulation (excited=faster, sad=slower, calm=stable)
 - Context injection: local time (timezone-aware) + weather (Open-Meteo, 15min cache, opt-in via device settings) injected into LLM system prompt
-- Memory system: extraction via Gemini, confidence decay (daily cron), boost on access, CRUD
-- Scheduler: per-device timers, response pool (LRU + batch generation), reminders, pomodoro state machine
-- Proactive features: morning briefing, end-of-day wind-down, idle nudge, focus mode, presence-triggered welcome-back greeting (LLM + TTS, context-aware with away duration and memories)
+- Memory system: extraction via Gemini (with empty response handling, JSON array extraction from preamble text), confidence decay (daily cron), boost on access, CRUD, diagnostic extract-latest endpoint
+- Scheduler: per-device timers, response pool (LRU + batch generation), reminders (with work hours enforcement), pomodoro state machine
+- Proactive features: morning briefing, end-of-day wind-down, idle nudge, focus mode, presence-triggered welcome-back greeting (LLM + TTS, context-aware with away duration and memories), **idle personality chat** (configurable frequency: rare/normal/frequent, random Gemini quips)
+- Fixed personality: bot name "Aksa" hardcoded, gen-z personality embedded in system prompt (with identity: desk companion, built by Hendra, no camera, push-to-talk). No user-customizable personality — removed GET/PATCH personality endpoints.
 - Rate limiting: Redis-backed (auth 5/min, API 60/min, WS audio 100/sec)
 - Redis TTS cache with SHA-256 keying
-- Conversation search: `?q=` full-text search via ILIKE join on messages
+- Conversation search: `?q=` full-text search via ILIKE join on messages, conversation list includes message preview + count
 - 215 unit tests across 13 test files + 45 E2E tests (all controllers, services, gateway tested)
 - WebSocket test script (`npm run ws:sim`) to simulate ESP32
 - ESP32 simulator (`npm run esp:sim`) — creates device, connects via WebSocket, stays online
@@ -101,14 +102,14 @@ All design docs are in `docs/`. This is the entry point:
 - 24 pages, 60 BLoC tests, zero analysis issues, FVM 3.41.6
 - 3-tab bottom nav (Home, Activity, Settings) via StatefulShellRoute
 - **Home page**: device grid (DeviceTile cards) — always grid layout for 1+ devices, empty state for 0
-- **Device detail page**: Dashboard tab (hero header + quick actions grid) + Settings tab + Personality tab
+- **Device detail page**: compact status bar (online/offline, WiFi SSID, uptime) + quick actions grid (no tabs — settings is a separate page via quick action)
 - Activity tab: segmented conversations + memories with multi-device picker
 - Settings tab: account card, theme, notifications toggle, sign out
 - All core screens wired to backend: auth, devices, conversations, memories, reminders, pomodoro, focus mode, stats, response pool
 - **5 BLoCs**: AuthBloc, DevicesBloc, ConversationsBloc, MemoriesBloc, SchedulerBloc (all registered in GetIt DI, all tested)
 - **Add Device flow**: Wi-Fi (sends deviceToken to ESP32) + Bluetooth (5-step BLE provisioning with token write)
 - **BLE provisioning**: scan → connect → Wi-Fi creds → register + write token via BLE → name → done
-- **BLE presence detection**: `flutter_ble_peripheral` advertising 0xFFE4, settings UI with RSSI threshold/grace period, synced to backend via PATCH, auto-restore on app startup
+- **BLE presence detection**: `flutter_ble_peripheral` advertising 0xFFE4 (full 128-bit UUID), settings UI with RSSI threshold/grace period, synced to backend via PATCH, auto-restore on app startup, BLE state monitoring (updates UI on BT off), permission dialog with diagnostics, runtime enable/disable via `config:update` to ESP32
 - **BLE service layer**: `core/ble/` with GATT constants + provisioning service + presence service
 - **Network status banner**: `connectivity_plus` monitors connectivity, red banner slides in when offline
 - **Local notifications**: `flutter_local_notifications` with 3 channels (reminders, pomodoro, device_alerts)
@@ -116,7 +117,10 @@ All design docs are in `docs/`. This is the entry point:
 - **Diagnostics page**: real API health checks, device stats from backend
 - **Integrations page**: Weather toggle with `geolocator` location permission → saves lat/lon/timezone to device settings; Open-Meteo weather injected into LLM context
 - **Voice & Audio page**: voice preset, speed, stability sliders → synced to ElevenLabs TTS via backend PATCH
+- **Device Settings page**: standalone page (volume, brightness, transcript toggle, idle timeout) with save confirmation
+- **Idle Personality page**: idle chat toggle + frequency (rare/normal/frequent), idle animation speed (slow/normal/fast) with explicit Save button
 - **Device Info**: real Wi-Fi signal strength (human-readable label + icon), firmware version from ESP32 via `device:info` WS event
+- **Conversation cards**: preview of first user message + message count in conversation list
 - 6 planned UI screens for future features (display, OTA, motion, mobility — hardware-dependent)
 - UI/UX proposal: `docs/app-ui-ux-proposal.md`
 - Platform permissions: BLE (iOS Info.plist + Android AndroidManifest.xml + UIBackgroundModes), Location (iOS NSLocationWhenInUseUsageDescription + Android ACCESS_FINE_LOCATION)
@@ -125,7 +129,7 @@ All design docs are in `docs/`. This is the entry point:
 - **25 source modules** (25 .cpp, 30 .h, 8,954 lines): Wi-Fi, WebSocket, I2S audio, Opus codec, ES8311 codec, MicroSD (SDIO), NVS, BLE manager, presence detector, TTS cache, recording buffer, resilience audio, face animation, display manager, touch driver, VAD, OTA updates, debug logging, power management, status LED, BIOS menu, boot screen, device server, WiFi provisioning
 - **NVS wrapper**: persistent Wi-Fi creds, device token, volume/brightness/presence settings — replaces hardcoded config.h values. Wi-Fi and WebSocket fall back to compile-time constants when NVS is empty.
 - **BLE GATT provisioning server**: 4 services (WiFi 0xFFE0, Auth 0xFFE1, Control 0xFFE2, Status 0xFFE3). Flutter app writes credentials via BLE, ESP32 stores to NVS and connects.
-- **BLE presence detection**: 3-state machine (PRESENT/LEAVING/AWAY) with RSSI rolling average, configurable grace period, hysteresis. `initScanOnly()` enables passive BLE scanning alongside WiFi. Sends `presence:arrived`/`presence:departed` events to backend. Happy face on arrival, sad face on departure. Auto sleep/wake display. Enabled from NVS on boot.
+- **BLE presence detection**: 3-state machine (PRESENT/LEAVING/AWAY) with RSSI rolling average, configurable grace period, hysteresis. `initScanOnly()` enables passive BLE scanning alongside WiFi. Sends `presence:arrived`/`presence:departed` events to backend. Happy face on arrival, sad face on departure. Auto sleep/wake display. Enabled from NVS on boot + runtime via `config:update` `presence_enabled` key.
 - **TTS cache manager**: SHA256-keyed Opus audio cache on SD, manifest.json persistence, LRU eviction (100MB cap). Audio accumulation during playback, cache-on-response:end with cacheKey parsing.
 - **Recording buffer**: WebSocket disconnect resilience — audio capture loop auto-switches to SD buffering, resends on reconnect via `audio:start{buffered:true}` + binary frames.
 - **Resilience audio**: loads fallback Opus clips from `/audio/resilience/` into PSRAM on startup (offline, error, stt_fail, boot, thinking, sleep, wake).
@@ -137,7 +141,9 @@ All design docs are in `docs/`. This is the entry point:
 - **OTA updates**: HTTP download to SD, SHA-256 verification, staged flash (actual esp_ota_begin is a hardware TODO). Handles `ota:start` WebSocket event. Status LED shows OTA pulse.
 - **Debug logging**: rolling log to `/logs/debug.log`, module tags, severity levels (D/I/W/E), 1MB rotation. LOG_I/LOG_W/LOG_E macros.
 - **Status LED**: WS2812B RGB LED (GPIO42) via FastLED. Non-blocking animations (breathe, pulse, blink). Auto-syncs to BotState — green=idle, blue=listening, yellow=thinking, cyan=speaking, red=offline. Override modes for low battery, OTA, focus. Syncs on WS connectivity changes.
-- **Power management**: ACTIVE → DIM → SLEEP state machine (30s dim, 5min sleep). Records interactions, auto-dims/sleeps, wakes on touch/presence/backend events. Backend proactive events (reminders, pomodoro, response:start, OTA) call recordInteraction() to wake display.
+- **Power management**: ACTIVE → DIM → SLEEP state machine (30s dim, 5min sleep). Records interactions, auto-dims/sleeps, wakes on touch/presence/backend events. Backend proactive events (reminders, pomodoro, response:start, OTA) call recordInteraction() to wake display. Touch-to-wake fixed (display::wake() no longer skips brightness fade).
+- **Runtime config**: `config:update` WS event handles volume (audio_io::setVolume), brightness, display_transcript, idle_timeout_seconds, idle_animation_speed, audio_jitter_ms, presence_enabled, presence RSSI/grace.
+- **ArduinoWebsockets patches**: `setInsecure()` for ESP32 SSL. Patched files in `firmware/patches/`, applied via PlatformIO pre-build script (survives `pio run -t clean`).
 - FreeRTOS 3-task architecture: audio capture (Core 0), WebSocket polling (Core 1), display rendering at 30fps (Core 1)
 - BotState changes auto-sync face expression + status LED; proactive events auto-switch display modes and wake display; audio amplitude feeds mouth animation
 

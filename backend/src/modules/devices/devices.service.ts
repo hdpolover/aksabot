@@ -68,7 +68,17 @@ export class DevicesService {
     dto: UpdateSettingsDto,
   ): Promise<Device> {
     const device = await this.findById(id, userId);
-    device.settingsJson = { ...device.settingsJson, ...dto };
+
+    // Only merge keys that were actually sent (filter out undefined values
+    // from the DTO — class-transformer sets missing optional fields to undefined)
+    const patch: Record<string, any> = {};
+    for (const [key, value] of Object.entries(dto)) {
+      if (value !== undefined) {
+        patch[key] = value;
+      }
+    }
+
+    device.settingsJson = { ...device.settingsJson, ...patch };
     return this.devicesRepo.save(device);
   }
 
