@@ -68,7 +68,7 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
     if (_saving) return;
     setState(() => _saving = true);
 
-    final patch = Map<String, dynamic>.from(_rawSettings)..[key] = value;
+    final patch = {key: value};
     final result = await _devicesRepo.updateSettings(widget.deviceId, patch);
     if (!mounted) return;
 

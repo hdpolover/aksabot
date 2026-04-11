@@ -11,6 +11,8 @@ export interface ReminderConfig {
   eyeBreak: { enabled: boolean; intervalMinutes: number };
   stretch: { enabled: boolean; intervalMinutes: number };
   posture: { enabled: boolean; intervalMinutes: number };
+  workHoursStart?: number; // 0-23, default 9
+  workHoursEnd?: number;   // 0-23, default 18
 }
 
 export const DEFAULT_REMINDER_CONFIG: ReminderConfig = {

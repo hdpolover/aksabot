@@ -18,7 +18,7 @@ describe('SchedulerService', () => {
   });
 
   beforeEach(() => {
-    jest.useFakeTimers();
+    jest.useFakeTimers({ now: new Date('2026-04-12T10:00:00').getTime() });
 
     devicesRepo = {
       findOne: jest.fn().mockResolvedValue(makeDevice()),
@@ -71,8 +71,8 @@ describe('SchedulerService', () => {
     it('creates timers for all enabled reminders', async () => {
       await service.startDeviceSchedule('device-1');
 
-      // Advance 20 minutes — eye_break interval
-      jest.advanceTimersByTime(20 * 60_000);
+      // Advance 20 minutes — eye_break interval (async to flush fireReminder promises)
+      await jest.advanceTimersByTimeAsync(20 * 60_000);
 
       // Reminder should have fired for eye_break
       expect(mockReminderService.generate).toHaveBeenCalledWith('device-1', 'eye_break');
@@ -81,9 +81,8 @@ describe('SchedulerService', () => {
     it('sends reminder event to device when timer fires', async () => {
       await service.startDeviceSchedule('device-1');
 
-      jest.advanceTimersByTime(20 * 60_000); // eye_break at 20m
-
-      await Promise.resolve(); // flush microtasks
+      // Advance past the shortest interval and flush all async work
+      await jest.advanceTimersByTimeAsync(20 * 60_000);
 
       expect(sendToDevice).toHaveBeenCalledWith(
         'device-1',

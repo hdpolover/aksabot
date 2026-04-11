@@ -41,15 +41,27 @@ class BlePresenceService {
       txPowerLevel: AdvertiseTxPower.advertiseTxPowerLow,
     );
 
-    final result = await _peripheral.start(
-      advertiseData: advertiseData,
-      advertiseSettings: settings,
-    );
+    try {
+      final result = await _peripheral.start(
+        advertiseData: advertiseData,
+        advertiseSettings: settings,
+      );
 
-    _isAdvertising = result == BluetoothPeripheralState.ready ||
-        result == BluetoothPeripheralState.granted;
+      // Accept any non-error state as success
+      _isAdvertising = result == BluetoothPeripheralState.ready ||
+          result == BluetoothPeripheralState.granted ||
+          result == BluetoothPeripheralState.limited;
 
-    return _isAdvertising;
+      if (!_isAdvertising) {
+        // Check if advertising actually started despite the state code
+        _isAdvertising = await _peripheral.isAdvertising;
+      }
+
+      return _isAdvertising;
+    } catch (e) {
+      _isAdvertising = false;
+      return false;
+    }
   }
 
   /// Stops presence advertising.

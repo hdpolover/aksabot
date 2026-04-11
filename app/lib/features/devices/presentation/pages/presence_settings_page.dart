@@ -41,13 +41,12 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
     final grace = await _presence.loadGracePeriod();
     final silent = await _presence.loadSilentWakeMinutes();
 
-    // Check actual advertising state
-    await _presence.checkAdvertisingState();
-
     if (!mounted) return;
     setState(() {
       _isSupported = supported;
-      _enabled = enabled && supported;
+      // Show the user's saved preference, not the hardware state.
+      // If BLE isn't supported, force off.
+      _enabled = supported ? enabled : false;
       _rssiThreshold = rssi;
       _gracePeriod = grace.toString();
       _silentWake = silent.toString();

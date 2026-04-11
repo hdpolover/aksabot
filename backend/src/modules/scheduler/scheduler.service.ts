@@ -113,6 +113,14 @@ export class SchedulerService implements OnModuleInit {
     if (this.focusMode.has(deviceId)) return; // focus mode active
     if (this.pomodoroService.isActive(deviceId)) return; // pomodoro active
 
+    // Enforce work hours — only fire during configured work hours
+    const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+    const remConfig = device?.settingsJson?.reminders ?? {};
+    const workStart = remConfig.workHoursStart ?? 9;
+    const workEnd = remConfig.workHoursEnd ?? 18;
+    const hour = new Date().getHours();
+    if (hour < workStart || hour >= workEnd) return;
+
     try {
       const reminder = await this.reminderService.generate(deviceId, type);
 
@@ -120,7 +128,10 @@ export class SchedulerService implements OnModuleInit {
         type: reminder.type,
         text: reminder.text,
         cacheKey: reminder.cacheKey,
-        display: reminder.display,
+        durationMs: reminder.display.durationMs ?? 8000,
+        expression: reminder.display.expression,
+        screenMode: reminder.display.screenMode,
+        countdownSeconds: reminder.display.countdownSeconds,
       });
 
       this.logger.debug(`Fired ${type} reminder for device ${deviceId}`);

@@ -189,12 +189,12 @@ static void onWsJson(const char* event, const char* data) {
             display::ReminderData rd = {};
             const char* text = doc["text"] | "Reminder";
             strncpy(rd.text, text, sizeof(rd.text) - 1);
-            rd.durationMs = doc["durationMs"] | 5000;
+            rd.durationMs = doc["durationMs"] | 8000;
             const char* type = doc["type"] | "";
             strncpy(rd.icon, type, sizeof(rd.icon) - 1);
 
-            // Set face expression based on reminder type
-            if (strcmp(type, "eyeBreak") == 0) {
+            // Set face expression based on reminder type (snake_case from backend)
+            if (strcmp(type, "eye_break") == 0) {
                 face::setExpression(face::Expression::CALM, 200);
             } else {
                 face::setExpression(face::Expression::ENCOURAGING, 200);

@@ -57,8 +57,7 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
     if (_saving) return;
     setState(() => _saving = true);
 
-    // Merge into existing settings — only send the changed key.
-    final patch = Map<String, dynamic>.from(_rawSettings)..[key] = value;
+    final patch = {key: value};
 
     final result = await _devicesRepo.updateSettings(widget.deviceId, patch);
     if (!mounted) return;

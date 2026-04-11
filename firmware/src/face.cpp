@@ -39,8 +39,11 @@ enum class IdleAct : uint8_t {
     EYE_ROLL,       // Pupils trace a circle
     WINK,           // One eye closes briefly
     BOUNCE,         // Quick little hop
+    DOZE,           // Eyes droop, head nods, snaps back awake
+    MUNCH,          // Chewing motion with happy squinted eyes
+    SIGH,           // Half-close eyes, deflate, recover
 };
-static const uint8_t IDLE_ACT_COUNT = 8;  // Number of acts (excluding NONE)
+static const uint8_t IDLE_ACT_COUNT = 11;  // Number of acts (excluding NONE)
 
 static IdleAct currentAct = IdleAct::NONE;
 static uint32_t actStartMs = 0;
@@ -316,23 +319,44 @@ void face::tick(uint32_t nowMs) {
                 }
 
                 case IdleAct::YAWN: {
-                    // 2.5s: eyes squeeze, mouth opens wide, then close
-                    float phase = t / 2500.0f;
-                    if (phase < 0.2f) {
-                        float ease = phase / 0.2f;
-                        state.leftEyeScale = 1.0f - ease * 0.6f;
-                        state.rightEyeScale = 1.0f - ease * 0.6f;
-                        state.yawnAmp = ease * 0.8f;
+                    // 3s: build up → wide yawn → satisfied close
+                    float phase = t / 3000.0f;
+                    if (phase < 0.15f) {
+                        // Build-up: eyes start to droop, mouth barely opens
+                        float ease = phase / 0.15f;
+                        state.leftEyeScale = 1.0f - ease * 0.3f;
+                        state.rightEyeScale = 1.0f - ease * 0.3f;
+                        state.yawnAmp = ease * 0.2f;
+                        state.bounceY = ease * 2.0f;  // head tilts back slightly
+                    } else if (phase < 0.35f) {
+                        // Full yawn: eyes squeeze shut, mouth wide open, head back
+                        float ease = (phase - 0.15f) / 0.2f;
+                        state.leftEyeScale = 0.7f - ease * 0.6f;   // → 0.1
+                        state.rightEyeScale = 0.7f - ease * 0.6f;
+                        state.yawnAmp = 0.2f + ease * 0.7f;        // → 0.9
+                        state.bounceY = 2.0f + ease * 3.0f;        // → 5
                     } else if (phase < 0.6f) {
-                        state.leftEyeScale = 0.4f;
-                        state.rightEyeScale = 0.4f;
-                        state.yawnAmp = 0.8f;
+                        // Hold the yawn — eyes nearly closed, mouth wide
+                        state.leftEyeScale = 0.1f;
+                        state.rightEyeScale = 0.1f;
+                        state.yawnAmp = 0.9f;
+                        state.bounceY = 5.0f;
+                    } else if (phase < 0.8f) {
+                        // Close mouth, eyes start to open, head returns
+                        float ease = (phase - 0.6f) / 0.2f;
+                        state.leftEyeScale = 0.1f + ease * 0.5f;   // → 0.6
+                        state.rightEyeScale = 0.1f + ease * 0.5f;
+                        state.yawnAmp = 0.9f * (1.0f - ease);
+                        state.bounceY = 5.0f * (1.0f - ease);
                     } else if (phase < 1.0f) {
-                        float ease = (phase - 0.6f) / 0.4f;
-                        state.leftEyeScale = 0.4f + ease * 0.6f;
-                        state.rightEyeScale = 0.4f + ease * 0.6f;
-                        state.yawnAmp = 0.8f * (1.0f - ease);
+                        // Satisfied settle — content blink
+                        float ease = (phase - 0.8f) / 0.2f;
+                        state.leftEyeScale = 0.6f + ease * 0.4f;
+                        state.rightEyeScale = 0.6f + ease * 0.4f;
+                        state.yawnAmp = 0;
+                        state.bounceY = flerp(state.bounceY, 0, 0.15f);
                     } else {
+                        state.bounceY = 0;
                         currentAct = IdleAct::NONE;
                     }
                     break;
@@ -396,6 +420,90 @@ void face::tick(uint32_t nowMs) {
                     } else if (phase < 1.0f) {
                         state.bounceY = flerp(state.bounceY, 0, 0.15f);
                     } else {
+                        state.bounceY = 0;
+                        currentAct = IdleAct::NONE;
+                    }
+                    break;
+                }
+
+                case IdleAct::DOZE: {
+                    // 3s: eyes droop shut, head nods down, snaps back awake
+                    float phase = t / 3000.0f;
+                    if (phase < 0.3f) {
+                        // Eyes slowly close, head dips
+                        float ease = phase / 0.3f;
+                        state.leftEyeScale = 1.0f - ease * 0.8f;
+                        state.rightEyeScale = 1.0f - ease * 0.8f;
+                        state.bounceY = ease * 6.0f;  // nod down
+                    } else if (phase < 0.65f) {
+                        // Asleep — eyes nearly closed, head down
+                        state.leftEyeScale = 0.2f;
+                        state.rightEyeScale = 0.2f;
+                        state.bounceY = 6.0f;
+                    } else if (phase < 0.75f) {
+                        // Snap awake! Eyes pop open wide, head jerks up
+                        float ease = (phase - 0.65f) / 0.1f;
+                        state.leftEyeScale = 0.2f + ease * 1.0f;
+                        state.rightEyeScale = 0.2f + ease * 1.0f;
+                        state.bounceY = 6.0f - ease * 10.0f;  // bounce up past center
+                    } else if (phase < 1.0f) {
+                        // Settle back to normal
+                        float ease = (phase - 0.75f) / 0.25f;
+                        state.leftEyeScale = 1.2f - ease * 0.2f;
+                        state.rightEyeScale = 1.2f - ease * 0.2f;
+                        state.bounceY = flerp(state.bounceY, 0, 0.15f);
+                    } else {
+                        state.bounceY = 0;
+                        currentAct = IdleAct::NONE;
+                    }
+                    break;
+                }
+
+                case IdleAct::MUNCH: {
+                    // 2s: happy squinted eyes + rapid mouth chewing
+                    float phase = t / 2000.0f;
+                    if (phase < 1.0f) {
+                        // Squint eyes (happy eating face)
+                        float squint = (phase < 0.15f) ? (phase / 0.15f) :
+                                       (phase > 0.85f) ? (1.0f - phase) / 0.15f : 1.0f;
+                        state.leftEyeScale = 1.0f - squint * 0.4f;
+                        state.rightEyeScale = 1.0f - squint * 0.4f;
+                        // Rapid open-close chewing (~5 chews per second)
+                        float chew = sinf(t * 0.03f) * 0.5f + 0.5f;  // 0-1 oscillation
+                        state.yawnAmp = chew * 0.4f * squint;
+                        // Slight side-to-side jaw movement
+                        state.fidgetX = sinf(t * 0.015f) * 2.0f * squint;
+                    } else {
+                        currentAct = IdleAct::NONE;
+                    }
+                    break;
+                }
+
+                case IdleAct::SIGH: {
+                    // 2s: half-close eyes, deflate (shrink slightly), then recover
+                    float phase = t / 2000.0f;
+                    if (phase < 0.3f) {
+                        // Eyes droop, face deflates
+                        float ease = phase / 0.3f;
+                        state.leftEyeScale = 1.0f - ease * 0.4f;
+                        state.rightEyeScale = 1.0f - ease * 0.4f;
+                        state.popScale = 1.0f - ease * 0.06f;  // subtle shrink
+                        state.bounceY = ease * 3.0f;  // sag down
+                    } else if (phase < 0.6f) {
+                        // Hold the sigh
+                        state.leftEyeScale = 0.6f;
+                        state.rightEyeScale = 0.6f;
+                        state.popScale = 0.94f;
+                        state.bounceY = 3.0f;
+                    } else if (phase < 1.0f) {
+                        // Recover
+                        float ease = (phase - 0.6f) / 0.4f;
+                        state.leftEyeScale = 0.6f + ease * 0.4f;
+                        state.rightEyeScale = 0.6f + ease * 0.4f;
+                        state.popScale = 0.94f + ease * 0.06f;
+                        state.bounceY = flerp(state.bounceY, 0, 0.1f);
+                    } else {
+                        state.popScale = 1.0f;
                         state.bounceY = 0;
                         currentAct = IdleAct::NONE;
                     }
