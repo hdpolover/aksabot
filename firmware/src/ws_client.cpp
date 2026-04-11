@@ -202,6 +202,14 @@ void ws_client::poll() {
     // Auto-reconnect
     if (shouldReconnect && !appState.wsConnected && appState.wifiConnected && everAttempted) {
         if ((now - lastConnectAttemptMs) >= reconnectDelay) {
+            // Skip reconnect if heap is too low for SSL (~45KB needed)
+            uint32_t freeHeap = ESP.getFreeHeap();
+            if (freeHeap < 50000) {
+                Serial.printf("[WS] Skipping reconnect — low heap (%u bytes)\n", freeHeap);
+                lastConnectAttemptMs = now;  // don't spam
+                xSemaphoreGive(wsMutex);
+                return;
+            }
             Serial.printf("[WS] Reconnecting (backoff %ums)...\n", reconnectDelay);
             if (doConnect()) {
                 // success
