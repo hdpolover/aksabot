@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../domain/entities/memory_entity.dart';
 import '../bloc/memories_bloc.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
 
 /// Page displaying a device's extracted memories, grouped by category.
 ///
@@ -22,7 +23,7 @@ class MemoriesPage extends StatelessWidget {
         body: BlocBuilder<MemoriesBloc, MemoriesState>(
           builder: (context, state) {
             if (state is MemoriesLoading) {
-              return const Center(child: CircularProgressIndicator());
+              return const AppLoadingIndicator();
             }
             if (state is MemoriesError) {
               return Center(

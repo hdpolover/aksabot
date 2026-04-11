@@ -9,6 +9,7 @@ import '../../../devices/domain/repositories/devices_repository.dart';
 import '../../../memories/domain/entities/memory_entity.dart';
 import '../../../memories/presentation/bloc/memories_bloc.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
 
 /// Activity tab with segmented toggle between Conversations and Memories.
 ///
@@ -91,7 +92,7 @@ class _ActivityPageState extends State<ActivityPage> {
 
   Widget _buildBody(ThemeData theme) {
     if (_resolving) {
-      return const Center(child: CircularProgressIndicator());
+      return const AppLoadingIndicator();
     }
 
     final colors = theme.colorScheme;
@@ -180,7 +181,7 @@ class _ConversationsView extends StatelessWidget {
       child: BlocBuilder<ConversationsBloc, ConversationsState>(
         builder: (context, state) {
           if (state is ConversationsLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const AppLoadingIndicator();
           }
           if (state is ConversationsError) {
             return Center(
@@ -426,7 +427,7 @@ class _MemoriesView extends StatelessWidget {
       child: BlocBuilder<MemoriesBloc, MemoriesState>(
         builder: (context, state) {
           if (state is MemoriesLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const AppLoadingIndicator();
           }
           if (state is MemoriesError) {
             return Center(

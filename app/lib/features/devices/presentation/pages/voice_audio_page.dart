@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../domain/entities/device_entity.dart';
 import '../../domain/repositories/devices_repository.dart';
 
@@ -93,7 +94,7 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
     if (_loading) {
       return Scaffold(
         appBar: AppBar(title: const Text('Voice & Audio')),
-        body: const Center(child: CircularProgressIndicator()),
+        body: const AppLoadingIndicator(),
       );
     }
 

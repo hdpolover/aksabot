@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
-import '../../domain/entities/device_entity.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
+import '../../../../core/widgets/device_tile.dart';
+import '../../../../core/widgets/empty_state.dart';
 import '../bloc/devices_bloc.dart';
 
 class DevicesPage extends StatelessWidget {
@@ -37,7 +40,7 @@ class _DevicesView extends StatelessWidget {
       body: BlocBuilder<DevicesBloc, DevicesState>(
         builder: (context, state) {
           if (state is DevicesLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const AppLoadingIndicator();
           }
 
           if (state is DevicesError) {
@@ -61,26 +64,10 @@ class _DevicesView extends StatelessWidget {
 
           if (state is DevicesLoaded) {
             if (state.devices.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.devices_other,
-                        size: 64, color: colors.onSurfaceVariant),
-                    const SizedBox(height: 16),
-                    Text(
-                      'No devices yet',
-                      style: theme.textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Tap + to register a new device',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colors.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
+              return const EmptyState(
+                icon: Icons.devices_other,
+                title: 'No devices yet',
+                subtitle: 'Tap + to register a new device',
               );
             }
 
@@ -88,13 +75,25 @@ class _DevicesView extends StatelessWidget {
               onRefresh: () async {
                 context.read<DevicesBloc>().add(const LoadDevices());
               },
-              child: ListView.separated(
-                padding: const EdgeInsets.all(16),
+              child: GridView.builder(
+                padding: const EdgeInsets.all(AppConstants.spacingLg),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: AppConstants.spacingMd,
+                  crossAxisSpacing: AppConstants.spacingMd,
+                  childAspectRatio: 1.3,
+                ),
                 itemCount: state.devices.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 8),
                 itemBuilder: (context, index) {
                   final device = state.devices[index];
-                  return _DeviceCard(device: device);
+                  return DeviceTile(
+                    name: device.name,
+                    subtitle: device.isOnline
+                        ? 'Online'
+                        : _lastSeenLabel(device.lastSeenAt),
+                    isOnline: device.isOnline,
+                    onTap: () => context.push('/devices/${device.id}'),
+                  );
                 },
               ),
             );
@@ -108,118 +107,57 @@ class _DevicesView extends StatelessWidget {
 
   void _showCreateDialog(BuildContext context) {
     final controller = TextEditingController();
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Register Device'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            labelText: 'Device name (optional)',
-            hintText: 'e.g. Desk Buddy',
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            AppConstants.spacingXxl,
+            AppConstants.spacingSm,
+            AppConstants.spacingXxl,
+            MediaQuery.of(ctx).viewInsets.bottom + AppConstants.spacingXxl,
           ),
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Register Device',
+                  style: Theme.of(ctx).textTheme.titleLarge),
+              const SizedBox(height: AppConstants.spacingLg),
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  labelText: 'Device name (optional)',
+                  hintText: 'e.g. Desk Buddy',
+                ),
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+              ),
+              const SizedBox(height: AppConstants.spacingXxl),
+              FilledButton(
+                onPressed: () {
+                  final name = controller.text.trim().isEmpty
+                      ? null
+                      : controller.text.trim();
+                  context.read<DevicesBloc>().add(CreateDevice(name: name));
+                  Navigator.of(ctx).pop();
+                },
+                child: const Text('Create'),
+              ),
+              const SizedBox(height: AppConstants.spacingSm),
+            ],
           ),
-          FilledButton(
-            onPressed: () {
-              final name =
-                  controller.text.trim().isEmpty ? null : controller.text.trim();
-              context.read<DevicesBloc>().add(CreateDevice(name: name));
-              Navigator.of(dialogContext).pop();
-            },
-            child: const Text('Create'),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
-class _DeviceCard extends StatelessWidget {
-  final Device device;
-  const _DeviceCard({required this.device});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    final online = device.isOnline;
-
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => context.push('/devices/${device.id}'),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: online
-                      ? colors.primaryContainer
-                      : colors.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  Icons.smart_toy_outlined,
-                  color: online
-                      ? colors.onPrimaryContainer
-                      : colors.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      device.name,
-                      style: theme.textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: online ? Colors.green : colors.outline,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          online ? 'Online' : _lastSeenLabel(device.lastSeenAt),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colors.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right, color: colors.onSurfaceVariant),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _lastSeenLabel(DateTime? lastSeenAt) {
-    if (lastSeenAt == null) return 'Never connected';
-    final diff = DateTime.now().difference(lastSeenAt);
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
-  }
+String _lastSeenLabel(DateTime? lastSeenAt) {
+  if (lastSeenAt == null) return 'Never connected';
+  final diff = DateTime.now().difference(lastSeenAt);
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+  if (diff.inHours < 24) return '${diff.inHours}h ago';
+  return '${diff.inDays}d ago';
 }

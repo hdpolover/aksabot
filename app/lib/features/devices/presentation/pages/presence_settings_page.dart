@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/ble/ble_presence_service.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
 
 /// Presence detection settings — wired to BLE presence advertising service.
 class PresenceSettingsPage extends StatefulWidget {
@@ -79,7 +81,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
     if (_isLoading) {
       return Scaffold(
         appBar: AppBar(title: const Text('Presence Detection')),
-        body: const Center(child: CircularProgressIndicator()),
+        body: const AppLoadingIndicator(),
       );
     }
 
@@ -131,7 +133,9 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                         ? 'Advertising...'
                         : 'Not advertising',
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: _enabled ? Colors.green : colors.outline,
+                      color: _enabled
+                          ? Theme.of(context).extension<AppColors>()!.success
+                          : colors.outline,
                     ),
                   ),
                 ],

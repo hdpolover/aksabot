@@ -2,10 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/local/local_device.dart';
 import '../../../../core/local/local_device_store.dart';
 import '../../../../core/local/mdns_discovery_service.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
+import '../../../../core/widgets/device_tile.dart';
+import '../../../../core/widgets/empty_state.dart';
+import '../../../../core/widgets/info_row.dart';
+import '../../../../core/widgets/section_header.dart';
+import '../../../../core/widgets/status_dot.dart';
 import '../../../devices/domain/entities/device_entity.dart';
 import '../../../devices/presentation/bloc/devices_bloc.dart';
 import '../../../devices/presentation/pages/cloud_register_page.dart';
@@ -63,9 +71,7 @@ class _HomeViewState extends State<_HomeView> {
       builder: (context, state) {
         // While waiting for the bloc AND local devices, show spinner
         if (state is DevicesLoading && _localDevices == null) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+          return const Scaffold(body: AppLoadingIndicator());
         }
 
         // Backend has devices — show them normally
@@ -132,35 +138,13 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-
     return Scaffold(
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.smart_toy_rounded, size: 80, color: colors.primary),
-              const SizedBox(height: 24),
-              Text('No devices yet', style: theme.textTheme.headlineSmall),
-              const SizedBox(height: 8),
-              Text(
-                'Pair your Aksabot to get started',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 32),
-              FilledButton.icon(
-                onPressed: () => onNavigate(context, '/devices/add'),
-                icon: const Icon(Icons.add),
-                label: const Text('Add Device'),
-              ),
-            ],
-          ),
-        ),
+      body: EmptyState(
+        icon: Icons.smart_toy_rounded,
+        title: 'No devices yet',
+        subtitle: 'Pair your Aksabot to get started',
+        actionLabel: 'Add Device',
+        onAction: () => onNavigate(context, '/devices/add'),
       ),
     );
   }
@@ -255,15 +239,10 @@ class _LocalDeviceDashboardState extends State<_LocalDeviceDashboard> {
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: device.localIp != null
-                                ? Colors.green
-                                : Colors.orange,
-                          ),
+                        StatusDot(
+                          variant: device.localIp != null
+                              ? StatusDotVariant.online
+                              : StatusDotVariant.warning,
                         ),
                         const SizedBox(width: 6),
                         Text(
@@ -294,26 +273,26 @@ class _LocalDeviceDashboardState extends State<_LocalDeviceDashboard> {
                       style: theme.textTheme.titleSmall?.copyWith(
                           color: colors.onSurfaceVariant)),
                   const SizedBox(height: 12),
-                  _InfoRow(
+                  InfoRow(
                     icon: Icons.wifi,
                     label: 'Network',
                     value: device.ssid,
                   ),
-                  const SizedBox(height: 8),
-                  _InfoRow(
+                  const SizedBox(height: AppConstants.spacingSm),
+                  InfoRow(
                     icon: Icons.access_time,
                     label: 'Paired',
                     value: _formatDate(device.pairedAt),
                   ),
                   if (device.localIp != null) ...[
-                    const SizedBox(height: 8),
-                    _InfoRow(
+                    const SizedBox(height: AppConstants.spacingSm),
+                    InfoRow(
                       icon: Icons.lan,
                       label: 'Local IP',
                       value: device.localIp!,
                     ),
-                    const SizedBox(height: 8),
-                    _InfoRow(
+                    const SizedBox(height: AppConstants.spacingSm),
+                    InfoRow(
                       icon: Icons.public,
                       label: 'Address',
                       value: 'aksabot.local',
@@ -416,9 +395,10 @@ class _DiscoverButton extends StatelessWidget {
         labelColor = colors.onSurfaceVariant;
         break;
       case _DiscoverState.found:
-        icon = Icon(Icons.check_circle_outline, size: 20, color: Colors.green);
+        final appColors = Theme.of(context).extension<AppColors>()!;
+        icon = Icon(Icons.check_circle_outline, size: AppConstants.iconMd, color: appColors.success);
         label = 'Found on network!';
-        labelColor = Colors.green;
+        labelColor = appColors.success;
         break;
       case _DiscoverState.notFound:
         icon = Icon(Icons.wifi_find, size: 20, color: colors.error);
@@ -471,9 +451,6 @@ class _LocalDeviceList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-
     return Scaffold(
       appBar: AppBar(title: const Text('Devices')),
       floatingActionButton: FloatingActionButton(
@@ -481,66 +458,25 @@ class _LocalDeviceList extends StatelessWidget {
         child: const Icon(Icons.add),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppConstants.spacingLg),
         children: [
           const _CloudSyncBanner(),
-          const SizedBox(height: 12),
-          ...devices.map((device) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Card(
-                  clipBehavior: Clip.antiAlias,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: colors.primaryContainer,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(Icons.smart_toy_outlined,
-                              color: colors.onPrimaryContainer),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(device.name,
-                                  style: theme.textTheme.titleMedium),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: const BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Colors.orange,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    device.ssid,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                        color: colors.onSurfaceVariant),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          icon: Icon(Icons.delete_outline, color: colors.error),
-                          onPressed: () => onRemove(device.id),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              )),
+          const SizedBox(height: AppConstants.spacingLg),
+          GridView.count(
+            crossAxisCount: 2,
+            mainAxisSpacing: AppConstants.spacingMd,
+            crossAxisSpacing: AppConstants.spacingMd,
+            childAspectRatio: 1.3,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            children: devices
+                .map((device) => LocalDeviceTile(
+                      name: device.name,
+                      ssid: device.ssid,
+                      hasIp: device.localIp != null,
+                    ))
+                .toList(),
+          ),
         ],
       ),
     );
@@ -558,9 +494,6 @@ class _DeviceList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-
     return Scaffold(
       appBar: AppBar(title: const Text('Devices')),
       floatingActionButton: FloatingActionButton(
@@ -571,74 +504,22 @@ class _DeviceList extends StatelessWidget {
         onRefresh: () async {
           context.read<DevicesBloc>().add(const LoadDevices());
         },
-        child: ListView.separated(
-          padding: const EdgeInsets.all(16),
+        child: GridView.builder(
+          padding: const EdgeInsets.all(AppConstants.spacingLg),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: AppConstants.spacingMd,
+            crossAxisSpacing: AppConstants.spacingMd,
+            childAspectRatio: 1.3,
+          ),
           itemCount: devices.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 8),
           itemBuilder: (context, index) {
             final device = devices[index];
-            final online = device.isOnline;
-
-            return Card(
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: () => onNavigate(context, '/devices/${device.id}'),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: online
-                              ? colors.primaryContainer
-                              : colors.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.smart_toy_outlined,
-                          color: online
-                              ? colors.onPrimaryContainer
-                              : colors.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(device.name,
-                                style: theme.textTheme.titleMedium),
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: online
-                                        ? Colors.green
-                                        : colors.outline,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  online ? 'Online' : 'Offline',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                      color: colors.onSurfaceVariant),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      Icon(Icons.chevron_right, color: colors.onSurfaceVariant),
-                    ],
-                  ),
-                ),
-              ),
+            return DeviceTile(
+              name: device.name,
+              subtitle: device.isOnline ? 'Online' : 'Offline',
+              isOnline: device.isOnline,
+              onTap: () => onNavigate(context, '/devices/${device.id}'),
             );
           },
         ),
@@ -676,54 +557,55 @@ class _DeviceDashboard extends StatelessWidget {
           children: [
             SizedBox(height: MediaQuery.of(context).padding.top + 16),
 
-            // Status header
-            Row(
-              children: [
-                Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    color: colors.primaryContainer,
-                    borderRadius: BorderRadius.circular(16),
+            // Hero header — device avatar with status
+            Center(
+              child: Column(
+                children: [
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: online
+                            ? [colors.primary, colors.tertiary]
+                            : [colors.surfaceContainerHighest, colors.surfaceContainerHigh],
+                      ),
+                      borderRadius: BorderRadius.circular(AppConstants.radiusXl),
+                    ),
+                    child: Icon(
+                      Icons.smart_toy_rounded,
+                      size: 36,
+                      color: online ? colors.onPrimary : colors.onSurfaceVariant,
+                    ),
                   ),
-                  child: Icon(Icons.smart_toy_rounded,
-                      size: 32, color: colors.onPrimaryContainer),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(height: AppConstants.spacingMd),
+                  Text(botName, style: theme.textTheme.headlineSmall),
+                  const SizedBox(height: AppConstants.spacingXs),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(botName,
-                          style: theme.textTheme.headlineSmall
-                              ?.copyWith(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: online ? Colors.green : colors.outline,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            online ? 'Online' : 'Offline',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                                color: colors.onSurfaceVariant),
-                          ),
-                        ],
+                      StatusDot(
+                        variant: online
+                            ? StatusDotVariant.online
+                            : StatusDotVariant.offline,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        online ? 'Online' : 'Offline',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: AppConstants.spacingXxl),
 
-            // Status cards
+            // Status tiles — 2-column grid
             Row(
               children: [
                 Expanded(
@@ -734,7 +616,7 @@ class _DeviceDashboard extends StatelessWidget {
                     color: colors.outline,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: AppConstants.spacingMd),
                 Expanded(
                   child: _StatusCard(
                     icon: Icons.timer,
@@ -745,42 +627,41 @@ class _DeviceDashboard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: AppConstants.spacingXxl),
 
             // Quick actions
-            Text('Quick Actions', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Card(
-              clipBehavior: Clip.antiAlias,
-              child: Column(
-                children: [
-                  for (final action in [
-                    (Icons.face, 'Personality', 'personality'),
-                    (Icons.notifications_active, 'Reminders', 'reminders'),
-                    (Icons.timer, 'Pomodoro', 'pomodoro'),
-                    (Icons.center_focus_strong, 'Focus Mode', 'focus'),
-                    (Icons.bluetooth_searching, 'Presence', 'presence'),
-                    (Icons.monitor, 'Display & Face', 'display'),
-                    (Icons.graphic_eq, 'Voice & Audio', 'voice'),
-                    (Icons.bar_chart, 'Stats', 'stats'),
-                    (Icons.settings, 'Device Settings', 'settings'),
-                  ]) ...[
-                    _QuickActionTile(
-                      icon: action.$1,
-                      label: action.$2,
-                      onTap: () =>
-                          onNavigate(context, '/devices/${device.id}/${action.$3}'),
-                    ),
-                    if (action.$3 != 'settings') const Divider(height: 1),
-                  ],
-                ],
-              ),
+            const SectionHeader(title: 'Quick Actions'),
+            GridView.count(
+              crossAxisCount: 3,
+              mainAxisSpacing: AppConstants.spacingSm,
+              crossAxisSpacing: AppConstants.spacingSm,
+              childAspectRatio: 1.0,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              children: [
+                for (final action in [
+                  (Icons.face, 'Personality', 'personality'),
+                  (Icons.notifications_active, 'Reminders', 'reminders'),
+                  (Icons.timer, 'Pomodoro', 'pomodoro'),
+                  (Icons.center_focus_strong, 'Focus', 'focus'),
+                  (Icons.bluetooth_searching, 'Presence', 'presence'),
+                  (Icons.monitor, 'Display', 'display'),
+                  (Icons.graphic_eq, 'Audio', 'voice'),
+                  (Icons.bar_chart, 'Stats', 'stats'),
+                  (Icons.settings, 'Settings', 'settings'),
+                ])
+                  _QuickActionTile(
+                    icon: action.$1,
+                    label: action.$2,
+                    onTap: () =>
+                        onNavigate(context, '/devices/${device.id}/${action.$3}'),
+                  ),
+              ],
             ),
             const SizedBox(height: 20),
 
             // Recent conversations
-            Text('Recent Conversations', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
+            const SectionHeader(title: 'Recent Conversations'),
             Card(
               clipBehavior: Clip.antiAlias,
               child: ListTile(
@@ -868,35 +749,6 @@ class _CloudSyncBanner extends StatelessWidget {
   }
 }
 
-class _InfoRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-
-  const _InfoRow({required this.icon, required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final theme = Theme.of(context);
-
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: colors.onSurfaceVariant),
-        const SizedBox(width: 8),
-        Text('$label: ',
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: colors.onSurfaceVariant)),
-        Expanded(
-          child: Text(value,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(fontWeight: FontWeight.w500)),
-        ),
-      ],
-    );
-  }
-}
-
 class _StatusCard extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -946,13 +798,44 @@ class _QuickActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
-    return ListTile(
-      leading: Icon(icon, color: colors.primary),
-      title: Text(label),
-      trailing: Icon(Icons.chevron_right, color: colors.onSurfaceVariant),
-      onTap: onTap,
+    return Material(
+      color: colors.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+        child: Padding(
+          padding: const EdgeInsets.all(AppConstants.spacingMd),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: colors.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+                ),
+                child: Icon(icon, color: colors.primary, size: AppConstants.iconMd),
+              ),
+              const SizedBox(height: AppConstants.spacingSm),
+              Text(
+                label,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

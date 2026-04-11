@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/constants/app_constants.dart';
+import '../../../../core/utils/validators.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
 import '../bloc/auth_bloc.dart';
 
 class RegisterPage extends StatefulWidget {
@@ -48,7 +51,7 @@ class _RegisterPageState extends State<RegisterPage> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.symmetric(horizontal: AppConstants.spacingXxl),
             child: BlocConsumer<AuthBloc, AuthState>(
               listener: (context, state) {
                 if (state is AuthError) {
@@ -97,12 +100,7 @@ class _RegisterPageState extends State<RegisterPage> {
                           labelText: 'Name',
                           prefixIcon: Icon(Icons.person_outlined),
                         ),
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return 'Name is required';
-                          }
-                          return null;
-                        },
+                        validator: Validators.name,
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
@@ -114,15 +112,7 @@ class _RegisterPageState extends State<RegisterPage> {
                           labelText: 'Email',
                           prefixIcon: Icon(Icons.email_outlined),
                         ),
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return 'Email is required';
-                          }
-                          if (!value.contains('@')) {
-                            return 'Enter a valid email';
-                          }
-                          return null;
-                        },
+                        validator: Validators.email,
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
@@ -146,28 +136,14 @@ class _RegisterPageState extends State<RegisterPage> {
                             },
                           ),
                         ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Password is required';
-                          }
-                          if (value.length < 6) {
-                            return 'Password must be at least 6 characters';
-                          }
-                          return null;
-                        },
+                        validator: Validators.password,
                         onFieldSubmitted: (_) => _onRegister(),
                       ),
                       const SizedBox(height: 24),
                       ElevatedButton(
                         onPressed: isLoading ? null : _onRegister,
                         child: isLoading
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
+                            ? const AppButtonSpinner()
                             : const Text('Create account'),
                       ),
                       const SizedBox(height: 16),

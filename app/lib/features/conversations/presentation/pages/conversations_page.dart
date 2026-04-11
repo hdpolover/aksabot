@@ -5,6 +5,7 @@ import '../../domain/entities/conversation_entity.dart';
 import '../../domain/entities/message_entity.dart';
 import '../bloc/conversations_bloc.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
 
 /// Page displaying a device's conversation history.
 ///
@@ -23,7 +24,7 @@ class ConversationsPage extends StatelessWidget {
         body: BlocBuilder<ConversationsBloc, ConversationsState>(
           builder: (context, state) {
             if (state is ConversationsLoading) {
-              return const Center(child: CircularProgressIndicator());
+              return const AppLoadingIndicator();
             }
             if (state is ConversationsError) {
               return Center(

@@ -1,13 +1,17 @@
 import 'package:dartz/dartz.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../../../../core/constants/storage_keys.dart';
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/error/failures.dart';
+import '../../../../core/utils/logger.dart';
 import '../../domain/entities/user_entity.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../datasources/auth_remote_datasource.dart';
 
 class AuthRepositoryImpl implements AuthRepository {
+  static const _tag = 'AuthRepo';
+
   final AuthRemoteDatasource _remoteDatasource;
   final FlutterSecureStorage _storage;
 
@@ -19,17 +23,22 @@ class AuthRepositoryImpl implements AuthRepository {
     required String password,
   }) async {
     try {
+      AppLogger.debug(_tag, 'login attempt: $email');
       final response = await _remoteDatasource.login(
         email: email,
         password: password,
       );
+      AppLogger.debug(_tag, 'login success, persisting tokens');
       await _persistTokens(response.accessToken, response.refreshToken);
       return Right(response.user);
     } on AuthException catch (e) {
+      AppLogger.warning(_tag, 'AuthException: ${e.message}');
       return Left(AuthFailure(e.message));
     } on ServerException catch (e) {
+      AppLogger.error(_tag, 'ServerException: ${e.statusCode} ${e.message}');
       return Left(ServerFailure(e.message, statusCode: e.statusCode));
     } catch (e) {
+      AppLogger.error(_tag, 'Unexpected error', e);
       return Left(ServerFailure(e.toString()));
     }
   }
@@ -60,8 +69,8 @@ class AuthRepositoryImpl implements AuthRepository {
   @override
   Future<Either<Failure, void>> logout() async {
     try {
-      await _storage.delete(key: 'access_token');
-      await _storage.delete(key: 'refresh_token');
+      await _storage.delete(key: StorageKeys.accessToken);
+      await _storage.delete(key: StorageKeys.refreshToken);
       return const Right(null);
     } catch (e) {
       return Left(CacheFailure(e.toString()));
@@ -70,13 +79,13 @@ class AuthRepositoryImpl implements AuthRepository {
 
   @override
   Future<bool> isLoggedIn() async {
-    final token = await _storage.read(key: 'access_token');
+    final token = await _storage.read(key: StorageKeys.accessToken);
     return token != null;
   }
 
   @override
   Future<String?> getToken() async {
-    return _storage.read(key: 'access_token');
+    return _storage.read(key: StorageKeys.accessToken);
   }
 
   @override
@@ -88,8 +97,8 @@ class AuthRepositoryImpl implements AuthRepository {
       return Left(AuthFailure(e.message));
     } on ServerException catch (e) {
       if (e.statusCode == 401) {
-        await _storage.delete(key: 'access_token');
-        await _storage.delete(key: 'refresh_token');
+        await _storage.delete(key: StorageKeys.accessToken);
+        await _storage.delete(key: StorageKeys.refreshToken);
       }
       return Left(ServerFailure(e.message, statusCode: e.statusCode));
     } catch (e) {
@@ -130,7 +139,7 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   Future<void> _persistTokens(String accessToken, String refreshToken) async {
-    await _storage.write(key: 'access_token', value: accessToken);
-    await _storage.write(key: 'refresh_token', value: refreshToken);
+    await _storage.write(key: StorageKeys.accessToken, value: accessToken);
+    await _storage.write(key: StorageKeys.refreshToken, value: refreshToken);
   }
 }

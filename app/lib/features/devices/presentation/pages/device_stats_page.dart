@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../domain/repositories/devices_repository.dart';
 import '../../../scheduler/domain/repositories/scheduler_repository.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
 
 /// Device statistics screen — wired to GET /devices/:id/stats and pool endpoints.
 class DeviceStatsPage extends StatefulWidget {
@@ -103,7 +104,7 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Stats')),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const AppLoadingIndicator()
           : _error != null
               ? Center(
                   child: Column(

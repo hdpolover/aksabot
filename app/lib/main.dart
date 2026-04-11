@@ -8,6 +8,7 @@ import 'core/notifications/notification_service.dart';
 import 'core/observer/bloc_observer.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'core/theme/theme_controller.dart';
 import 'features/auth/presentation/bloc/auth_bloc.dart';
 
 void main() async {
@@ -37,13 +38,18 @@ class AksabotApp extends StatelessWidget {
           final authBloc = context.read<AuthBloc>();
           final router = createRouter(authBloc);
 
-          return MaterialApp.router(
-            title: 'Aksabot',
-            debugShowCheckedModeBanner: false,
-            theme: AppTheme.light,
-            darkTheme: AppTheme.dark,
-            themeMode: ThemeMode.system,
-            routerConfig: router,
+          return ValueListenableBuilder<ThemeMode>(
+            valueListenable: sl<ThemeController>(),
+            builder: (context, themeMode, _) {
+              return MaterialApp.router(
+                title: 'Aksabot',
+                debugShowCheckedModeBanner: false,
+                theme: AppTheme.light,
+                darkTheme: AppTheme.dark,
+                themeMode: themeMode,
+                routerConfig: router,
+              );
+            },
           );
         },
       ),

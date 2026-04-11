@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../domain/entities/pomodoro_entity.dart';
 import '../bloc/scheduler_bloc.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
 
 /// Page showing the current Pomodoro status with start/stop controls.
 class PomodoroPage extends StatelessWidget {
@@ -27,7 +28,7 @@ class PomodoroPage extends StatelessWidget {
           },
           builder: (context, state) {
             if (state is SchedulerLoading) {
-              return const Center(child: CircularProgressIndicator());
+              return const AppLoadingIndicator();
             }
             if (state is SchedulerError) {
               return Center(

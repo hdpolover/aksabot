@@ -1,17 +1,23 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
 import '../constants/api.dart';
+import '../constants/app_constants.dart';
+import '../constants/storage_keys.dart';
 import '../error/exceptions.dart';
+import '../utils/logger.dart';
 
 class ApiClient {
+  static const _tag = 'ApiClient';
+
   late final Dio dio;
   final FlutterSecureStorage _storage;
 
   ApiClient(this._storage) {
     dio = Dio(BaseOptions(
       baseUrl: ApiConstants.baseUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 30),
+      connectTimeout: AppConstants.connectTimeout,
+      receiveTimeout: AppConstants.receiveTimeout,
       headers: {'Content-Type': 'application/json'},
     ));
 
@@ -25,7 +31,7 @@ class ApiClient {
     RequestOptions options,
     RequestInterceptorHandler handler,
   ) async {
-    final token = await _storage.read(key: 'access_token');
+    final token = await _storage.read(key: StorageKeys.accessToken);
     if (token != null) {
       options.headers['Authorization'] = 'Bearer $token';
     }
@@ -37,12 +43,10 @@ class ApiClient {
     ErrorInterceptorHandler handler,
   ) async {
     if (error.response?.statusCode == 401) {
-      // Try refresh
       final refreshed = await _tryRefresh();
       if (refreshed) {
-        // Retry original request
         final opts = error.requestOptions;
-        final token = await _storage.read(key: 'access_token');
+        final token = await _storage.read(key: StorageKeys.accessToken);
         opts.headers['Authorization'] = 'Bearer $token';
         try {
           final response = await dio.fetch(opts);
@@ -56,7 +60,7 @@ class ApiClient {
   }
 
   Future<bool> _tryRefresh() async {
-    final refreshToken = await _storage.read(key: 'refresh_token');
+    final refreshToken = await _storage.read(key: StorageKeys.refreshToken);
     if (refreshToken == null) return false;
 
     try {
@@ -65,13 +69,12 @@ class ApiClient {
       )).post('/auth/refresh', data: {'refreshToken': refreshToken});
 
       final data = response.data['data'];
-      await _storage.write(key: 'access_token', value: data['accessToken']);
-      await _storage.write(key: 'refresh_token', value: data['refreshToken']);
+      await _storage.write(key: StorageKeys.accessToken, value: data['accessToken']);
+      await _storage.write(key: StorageKeys.refreshToken, value: data['refreshToken']);
       return true;
     } catch (_) {
-      // Refresh failed — clear tokens
-      await _storage.delete(key: 'access_token');
-      await _storage.delete(key: 'refresh_token');
+      await _storage.delete(key: StorageKeys.accessToken);
+      await _storage.delete(key: StorageKeys.refreshToken);
       return false;
     }
   }
@@ -98,9 +101,18 @@ class ApiClient {
   /// POST with unwrap
   Future<dynamic> post(String path, {dynamic data}) async {
     try {
+      AppLogger.debug(_tag, 'POST ${dio.options.baseUrl}$path');
       final response = await dio.post(path, data: data);
+      AppLogger.debug(_tag, 'POST $path → ${response.statusCode}');
       return unwrap(response);
     } on DioException catch (e) {
+      AppLogger.error(_tag, 'POST $path FAILED: ${e.type} — ${e.message}');
+      if (e.response != null) {
+        AppLogger.error(
+          _tag,
+          'Response: ${e.response?.statusCode} ${e.response?.data}',
+        );
+      }
       throw _mapException(e);
     }
   }

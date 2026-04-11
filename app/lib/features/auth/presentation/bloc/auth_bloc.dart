@@ -1,6 +1,7 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../core/utils/logger.dart';
 import '../../domain/entities/user_entity.dart';
 import '../../domain/repositories/auth_repository.dart';
 
@@ -94,6 +95,8 @@ class AuthError extends AuthState {
 // ---------------------------------------------------------------------------
 
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
+  static const _tag = 'AuthBloc';
+
   final AuthRepository _authRepository;
 
   AuthBloc(this._authRepository) : super(const AuthInitial()) {
@@ -125,13 +128,20 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     Emitter<AuthState> emit,
   ) async {
     emit(const AuthLoading());
+    AppLogger.debug(_tag, 'LoginRequested: ${event.email}');
     final result = await _authRepository.login(
       email: event.email,
       password: event.password,
     );
     result.fold(
-      (failure) => emit(AuthError(failure.message)),
-      (user) => emit(Authenticated(user)),
+      (failure) {
+        AppLogger.warning(_tag, 'Login failed: ${failure.message}');
+        emit(AuthError(failure.message));
+      },
+      (user) {
+        AppLogger.info(_tag, 'Login success: ${user.email}');
+        emit(Authenticated(user));
+      },
     );
   }
 

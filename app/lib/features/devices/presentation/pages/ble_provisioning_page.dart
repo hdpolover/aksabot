@@ -2,18 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:wifi_scan/wifi_scan.dart';
+
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/ble/ble_constants.dart';
 import '../../../../core/ble/ble_provisioning_service.dart';
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/local/local_device_store.dart';
+import '../../../../core/widgets/step_progress_bar.dart';
+import '../../../../core/widgets/success_screen.dart';
 
 /// 3-step BLE provisioning wizard.
-///
-/// Step 1: Scan for nearby Aksabot devices
-/// Step 2: Enter home Wi-Fi credentials → sent to device via BLE
-/// Step 3: Done — device is connected to the internet
-///
-/// No backend registration is required. Success = ESP32 reports wifiConnected.
 class BleProvisioningPage extends StatefulWidget {
   const BleProvisioningPage({super.key});
 
@@ -54,7 +54,7 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
   void _goToStep(int step) {
     _pageController.animateToPage(
       step,
-      duration: const Duration(milliseconds: 300),
+      duration: AppConstants.animNormal,
       curve: Curves.easeInOut,
     );
     setState(() => _step = step);
@@ -92,7 +92,6 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
       return;
     }
 
-    // Auto-stop after timeout
     await Future.delayed(const Duration(seconds: 10));
     if (mounted) {
       await _ble.stopScan();
@@ -111,6 +110,7 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
     try {
       await _ble.connect(device);
       _goToStep(1);
+      _scanWifiNetworks();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -119,7 +119,57 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
     }
   }
 
-  // ── Step 2: Wi-Fi ────────────────────────────────────────────
+  // ── Step 2: Wi-Fi scan + select ──────────────────────────────
+
+  List<WiFiAccessPoint> _wifiNetworks = [];
+  bool _isScanningWifi = false;
+  String _wifiSearchQuery = '';
+
+  Future<void> _scanWifiNetworks() async {
+    setState(() => _isScanningWifi = true);
+
+    try {
+      final can = await WiFiScan.instance.canStartScan();
+      if (can == CanStartScan.yes) {
+        await WiFiScan.instance.startScan();
+        await Future.delayed(const Duration(seconds: 2));
+      }
+
+      final results = await WiFiScan.instance.getScannedResults();
+      final seen = <String>{};
+      final unique = <WiFiAccessPoint>[];
+      results.sort((a, b) => b.level.compareTo(a.level));
+      for (final ap in results) {
+        if (ap.ssid.isNotEmpty && seen.add(ap.ssid)) {
+          unique.add(ap);
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _wifiNetworks = unique;
+          _isScanningWifi = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isScanningWifi = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Wi-Fi scan failed: $e')),
+        );
+      }
+    }
+  }
+
+  void _selectWifiNetwork(String ssid) {
+    setState(() => _ssidController.text = ssid);
+  }
+
+  List<WiFiAccessPoint> get _filteredNetworks {
+    if (_wifiSearchQuery.isEmpty) return _wifiNetworks;
+    final q = _wifiSearchQuery.toLowerCase();
+    return _wifiNetworks.where((ap) => ap.ssid.toLowerCase().contains(q)).toList();
+  }
 
   Future<void> _connectWifi() async {
     final ssid = _ssidController.text.trim();
@@ -144,15 +194,7 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
         setState(() => _wifiStatus = status);
 
         if (status == BleConstants.wifiConnected) {
-          // Persist locally so the home screen shows this device immediately
-          final device = LocalDeviceStore.create(
-            name: _connectedDeviceName,
-            ssid: _ssidController.text.trim(),
-          );
-          await LocalDeviceStore.save(device);
-
-          setState(() => _isConnectingWifi = false);
-          _goToStep(2); // Done
+          await _onProvisioningSuccess(ssid);
           return;
         }
         if (status == BleConstants.wifiFailed) {
@@ -164,12 +206,80 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
           return;
         }
       }
+
+      if (_wifiStatus == BleConstants.wifiConnecting) {
+        if (!mounted) return;
+        await _onProvisioningSuccess(ssid);
+        return;
+      }
     } catch (e) {
       if (!mounted) return;
+
+      if (_wifiStatus == BleConstants.wifiConnecting) {
+        await _onProvisioningSuccess(ssid);
+        return;
+      }
+
       setState(() {
         _isConnectingWifi = false;
         _wifiError = 'Error: $e';
       });
+    }
+  }
+
+  Future<void> _onProvisioningSuccess(String ssid) async {
+    final device = LocalDeviceStore.create(
+      name: _connectedDeviceName,
+      ssid: ssid,
+    );
+    await LocalDeviceStore.save(device);
+
+    if (!mounted) return;
+    setState(() => _isConnectingWifi = false);
+    _goToStep(2);
+  }
+
+  Future<void> _showManualSsidDialog() async {
+    final controller = TextEditingController();
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            AppConstants.spacingXxl,
+            AppConstants.spacingSm,
+            AppConstants.spacingXxl,
+            MediaQuery.of(ctx).viewInsets.bottom + AppConstants.spacingXxl,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Enter Network Name',
+                  style: Theme.of(ctx).textTheme.titleLarge),
+              const SizedBox(height: AppConstants.spacingLg),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Wi-Fi SSID',
+                  prefixIcon: Icon(Icons.wifi),
+                ),
+              ),
+              const SizedBox(height: AppConstants.spacingXxl),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+                child: const Text('Done'),
+              ),
+              const SizedBox(height: AppConstants.spacingSm),
+            ],
+          ),
+        );
+      },
+    );
+    if (result != null && result.isNotEmpty) {
+      _selectWifiNetwork(result);
     }
   }
 
@@ -181,7 +291,7 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Connect via Bluetooth — ${stepLabels[_step]}'),
+        title: Text(stepLabels[_step]),
         leading: IconButton(
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.of(context).pop(),
@@ -189,8 +299,7 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
       ),
       body: Column(
         children: [
-          // Step progress bar
-          _StepProgressBar(current: _step, total: 3),
+          StepProgressBar(current: _step, total: 3),
           Expanded(
             child: PageView(
               controller: _pageController,
@@ -214,17 +323,22 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
     final colors = theme.colorScheme;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      padding: const EdgeInsets.fromLTRB(
+        AppConstants.spacingLg,
+        AppConstants.spacingSm,
+        AppConstants.spacingLg,
+        AppConstants.spacingLg,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(height: 12),
+          const SizedBox(height: AppConstants.spacingMd),
           Text(
             'Find your Aksabot',
             textAlign: TextAlign.center,
             style: theme.textTheme.titleLarge,
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppConstants.spacingXs),
           Text(
             'Make sure your Aksabot is powered on, then tap Scan.',
             textAlign: TextAlign.center,
@@ -232,14 +346,14 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
               color: colors.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppConstants.spacingMd),
           AnimatedSwitcher(
-            duration: const Duration(milliseconds: 200),
+            duration: AppConstants.animFast,
             child: _isScanning
                 ? const LinearProgressIndicator(key: ValueKey('progress'))
                 : const SizedBox(height: 4, key: ValueKey('spacer')),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppConstants.spacingMd),
 
           // Results list
           Expanded(
@@ -256,14 +370,13 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
                       return _DeviceTile(
                         name: name,
                         rssi: result.rssi,
-                        onConnect: () =>
-                            _selectDevice(result.device, name),
+                        onConnect: () => _selectDevice(result.device, name),
                       );
                     },
                   ),
           ),
 
-          const SizedBox(height: 12),
+          const SizedBox(height: AppConstants.spacingMd),
           FilledButton.icon(
             onPressed: () {
               if (_isScanning) {
@@ -275,7 +388,7 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
             icon: Icon(_isScanning ? Icons.stop : Icons.search),
             label: Text(_isScanning ? 'Scanning...' : 'Scan for Devices'),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: AppConstants.spacingXs),
           Text(
             "Can't find it? Make sure Aksabot is powered on and nearby.",
             textAlign: TextAlign.center,
@@ -293,193 +406,237 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
   Widget _buildWifiStep() {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final selectedSsid = _ssidController.text.trim();
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Icon(Icons.wifi, size: 48, color: colors.primary),
-          const SizedBox(height: 16),
-          Text(
-            'Connect $_connectedDeviceName to Wi-Fi',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.titleLarge,
+    return Column(
+      children: [
+        // Header
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppConstants.spacingXxl,
+            AppConstants.spacingSm,
+            AppConstants.spacingXxl,
+            0,
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Enter your home Wi-Fi credentials.\n'
-            '$_connectedDeviceName will use these to connect to the internet.',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: colors.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 24),
-          TextField(
-            controller: _ssidController,
-            decoration: const InputDecoration(
-              labelText: 'Network name (SSID)',
-              prefixIcon: Icon(Icons.wifi),
-            ),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _passwordController,
-            obscureText: _obscurePassword,
-            decoration: InputDecoration(
-              labelText: 'Password',
-              prefixIcon: const Icon(Icons.lock_outlined),
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscurePassword
-                      ? Icons.visibility_outlined
-                      : Icons.visibility_off_outlined,
+          child: Column(
+            children: [
+              Text('Select Wi-Fi Network', style: theme.textTheme.titleLarge),
+              const SizedBox(height: AppConstants.spacingXs),
+              Text(
+                'Choose the network for $_connectedDeviceName',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
                 ),
-                onPressed: () =>
-                    setState(() => _obscurePassword = !_obscurePassword),
               ),
-            ),
+            ],
           ),
-          const SizedBox(height: 20),
+        ),
 
-          // Live status feedback
-          if (_wifiStatus == BleConstants.wifiConnecting)
-            _InlineStatus(
-              isLoading: true,
-              label: 'Sending credentials to $_connectedDeviceName...',
-              color: colors.primary,
-            )
-          else if (_wifiError != null)
-            _InlineStatus(
-              icon: Icons.error_outline,
-              label: _wifiError!,
-              color: colors.error,
+        // If a network is selected → password input
+        if (selectedSsid.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppConstants.spacingXxl,
+              AppConstants.spacingMd,
+              AppConstants.spacingXxl,
+              0,
             ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Selected network chip
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppConstants.spacingMd,
+                    vertical: AppConstants.spacingSm,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.primaryContainer,
+                    borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.wifi, size: 18, color: colors.onPrimaryContainer),
+                      const SizedBox(width: AppConstants.spacingSm),
+                      Expanded(
+                        child: Text(
+                          selectedSsid,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: colors.onPrimaryContainer,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.close, size: 18, color: colors.onPrimaryContainer),
+                        onPressed: () => setState(() => _ssidController.clear()),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppConstants.spacingMd),
+                TextField(
+                  controller: _passwordController,
+                  obscureText: _obscurePassword,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    prefixIcon: const Icon(Icons.lock_outlined),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                      ),
+                      onPressed: () =>
+                          setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppConstants.spacingMd),
 
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _isConnectingWifi ? null : _connectWifi,
-            child: Text(_isConnectingWifi ? 'Connecting...' : 'Connect'),
-          ),
-          const SizedBox(height: 8),
-          TextButton(
-            onPressed: _isConnectingWifi
-                ? null
-                : () {
-                    _ble.disconnect();
-                    _goToStep(0);
-                  },
-            child: const Text('Back'),
+                if (_wifiStatus == BleConstants.wifiConnecting)
+                  _InlineStatus(
+                    isLoading: true,
+                    label: 'Sending credentials to $_connectedDeviceName...',
+                    color: colors.primary,
+                  )
+                else if (_wifiError != null)
+                  _InlineStatus(
+                    icon: Icons.error_outline,
+                    label: _wifiError!,
+                    color: colors.error,
+                  ),
+
+                const SizedBox(height: AppConstants.spacingSm),
+                FilledButton(
+                  onPressed: _isConnectingWifi ? null : _connectWifi,
+                  child: Text(_isConnectingWifi ? 'Connecting...' : 'Connect'),
+                ),
+              ],
+            ),
           ),
         ],
-      ),
+
+        // Network list (when no network selected)
+        if (selectedSsid.isEmpty) ...[
+          const SizedBox(height: AppConstants.spacingSm),
+          // Search bar
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppConstants.spacingXxl),
+            child: TextField(
+              decoration: const InputDecoration(
+                hintText: 'Search networks...',
+                prefixIcon: Icon(Icons.search, size: AppConstants.iconMd),
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 10),
+              ),
+              onChanged: (v) => setState(() => _wifiSearchQuery = v),
+            ),
+          ),
+          const SizedBox(height: AppConstants.spacingXs),
+
+          if (_isScanningWifi)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: AppConstants.spacingXs),
+              child: LinearProgressIndicator(),
+            )
+          else
+            const SizedBox(height: AppConstants.spacingXs),
+
+          // Network list
+          Expanded(
+            child: _filteredNetworks.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _isScanningWifi ? Icons.wifi_find : Icons.wifi_off,
+                          size: AppConstants.iconXxl,
+                          color: colors.onSurfaceVariant.withValues(alpha: 0.3),
+                        ),
+                        const SizedBox(height: AppConstants.spacingMd),
+                        Text(
+                          _isScanningWifi
+                              ? 'Scanning...'
+                              : 'No networks found.\nTap Scan to search.',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppConstants.spacingLg,
+                    ),
+                    itemCount: _filteredNetworks.length,
+                    itemBuilder: (context, index) {
+                      final ap = _filteredNetworks[index];
+                      return _WifiNetworkTile(
+                        ssid: ap.ssid,
+                        rssi: ap.level,
+                        isSecure: ap.capabilities.contains('WPA') ||
+                            ap.capabilities.contains('WEP'),
+                        onTap: () => _selectWifiNetwork(ap.ssid),
+                      );
+                    },
+                  ),
+          ),
+
+          // Bottom buttons
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppConstants.spacingXxl,
+              AppConstants.spacingSm,
+              AppConstants.spacingXxl,
+              AppConstants.spacingLg,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                FilledButton.icon(
+                  onPressed: _isScanningWifi ? null : _scanWifiNetworks,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: Text(_isScanningWifi ? 'Scanning...' : 'Scan Networks'),
+                ),
+                const SizedBox(height: AppConstants.spacingXs),
+                TextButton(
+                  onPressed: _showManualSsidDialog,
+                  child: const Text('Enter network name manually'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 
   // ── Step 3: Done ─────────────────────────────────────────────
 
   Widget _buildDoneStep() {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
     final ssid = _ssidController.text.trim();
 
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Icon(Icons.check_circle_rounded, size: 72, color: Colors.green),
-          const SizedBox(height: 20),
-          Text(
-            '$_connectedDeviceName is connected!',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            ssid.isNotEmpty
-                ? 'Successfully joined "$ssid".\nYour Aksabot is online and ready.'
-                : 'Your Aksabot is connected to the internet and ready.',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: colors.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 12),
-          // Info chip
-          Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: colors.secondaryContainer,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.info_outline,
-                      size: 14, color: colors.onSecondaryContainer),
-                  const SizedBox(width: 6),
-                  Text(
-                    'To use AI features, connect to your backend later',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: colors.onSecondaryContainer,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 40),
-          FilledButton(
-            onPressed: () {
-              _ble.disconnect();
-              Navigator.of(context).pop();
-            },
-            child: const Text('Done'),
-          ),
-        ],
-      ),
+    return SuccessScreen(
+      title: '$_connectedDeviceName is connected!',
+      subtitle: ssid.isNotEmpty
+          ? 'Successfully joined "$ssid".\nYour Aksabot is online and ready.'
+          : 'Your Aksabot is connected to the internet and ready.',
+      hint: 'Connect to backend later to unlock AI features',
+      onPressed: () {
+        _ble.disconnect();
+        context.go('/home');
+      },
     );
   }
 }
 
 // ── Reusable widgets ─────────────────────────────────────────────
-
-class _StepProgressBar extends StatelessWidget {
-  final int current;
-  final int total;
-
-  const _StepProgressBar({required this.current, required this.total});
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-      child: Row(
-        children: List.generate(total, (index) {
-          final active = index <= current;
-          return Expanded(
-            child: Container(
-              margin: EdgeInsets.only(right: index < total - 1 ? 4 : 0),
-              height: 4,
-              decoration: BoxDecoration(
-                color: active ? colors.primary : colors.outlineVariant,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
-}
 
 class _ScanEmptyState extends StatelessWidget {
   final bool isScanning;
@@ -496,13 +653,11 @@ class _ScanEmptyState extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            isScanning
-                ? Icons.bluetooth_searching
-                : Icons.bluetooth_disabled,
-            size: 64,
+            isScanning ? Icons.bluetooth_searching : Icons.bluetooth_disabled,
+            size: AppConstants.iconHuge,
             color: colors.onSurfaceVariant.withValues(alpha: 0.35),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppConstants.spacingLg),
           Text(
             isScanning
                 ? 'Searching for Aksabot...'
@@ -547,58 +702,123 @@ class _DeviceTile extends StatelessWidget {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      margin: const EdgeInsets.only(bottom: 8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: colors.primaryContainer,
-                borderRadius: BorderRadius.circular(12),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppConstants.spacingSm),
+      child: Material(
+        color: colors.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppConstants.spacingLg,
+            vertical: AppConstants.spacingMd,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: colors.primaryContainer,
+                  borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+                ),
+                child: Icon(
+                  Icons.smart_toy_outlined,
+                  color: colors.onPrimaryContainer,
+                  size: 22,
+                ),
               ),
-              child: Icon(
-                Icons.smart_toy_outlined,
-                color: colors.onPrimaryContainer,
-                size: 22,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name, style: theme.textTheme.titleSmall),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      Icon(_signalIcon(rssi),
-                          size: 12, color: colors.onSurfaceVariant),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${_signalLabel(rssi)}  ·  $rssi dBm',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.onSurfaceVariant,
+              const SizedBox(width: AppConstants.spacingMd),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name, style: theme.textTheme.titleSmall),
+                    const SizedBox(height: AppConstants.spacingXxs),
+                    Row(
+                      children: [
+                        Icon(_signalIcon(rssi),
+                            size: 12, color: colors.onSurfaceVariant),
+                        const SizedBox(width: AppConstants.spacingXs),
+                        Text(
+                          '${_signalLabel(rssi)}  ·  $rssi dBm',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              FilledButton.tonal(
+                onPressed: onConnect,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppConstants.spacingLg,
+                    vertical: AppConstants.spacingSm,
                   ),
-                ],
+                ),
+                child: const Text('Connect'),
               ),
-            ),
-            FilledButton.tonal(
-              onPressed: onConnect,
-              style: FilledButton.styleFrom(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WifiNetworkTile extends StatelessWidget {
+  final String ssid;
+  final int rssi;
+  final bool isSecure;
+  final VoidCallback onTap;
+
+  const _WifiNetworkTile({
+    required this.ssid,
+    required this.rssi,
+    required this.isSecure,
+    required this.onTap,
+  });
+
+  IconData _signalIcon(int rssi) {
+    if (rssi >= -50) return Icons.signal_wifi_4_bar;
+    if (rssi >= -65) return Icons.network_wifi_3_bar;
+    if (rssi >= -75) return Icons.network_wifi_2_bar;
+    return Icons.network_wifi_1_bar;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppConstants.spacingXs),
+      child: Material(
+        color: colors.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          dense: true,
+          leading: Icon(_signalIcon(rssi), color: colors.primary, size: 22),
+          title: Text(ssid, style: theme.textTheme.bodyMedium),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isSecure)
+                Icon(Icons.lock_outlined, size: 14, color: colors.onSurfaceVariant),
+              const SizedBox(width: AppConstants.spacingXs),
+              Text(
+                '$rssi dBm',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
               ),
-              child: const Text('Connect'),
-            ),
-          ],
+            ],
+          ),
+          onTap: onTap,
         ),
       ),
     );
@@ -621,7 +841,7 @@ class _InlineStatus extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.only(bottom: AppConstants.spacingXs),
       child: Row(
         children: [
           if (isLoading)
@@ -631,8 +851,8 @@ class _InlineStatus extends StatelessWidget {
               child: CircularProgressIndicator(strokeWidth: 2, color: color),
             )
           else if (icon != null)
-            Icon(icon, size: 16, color: color),
-          const SizedBox(width: 8),
+            Icon(icon, size: AppConstants.iconSm, color: color),
+          const SizedBox(width: AppConstants.spacingSm),
           Expanded(
             child: Text(
               label,

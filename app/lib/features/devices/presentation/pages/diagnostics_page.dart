@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/theme/app_colors.dart';
 import '../../domain/repositories/devices_repository.dart';
 
 /// Diagnostics screen — real connectivity and device stats.
@@ -118,7 +120,7 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: _loadingStats
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const AppLoadingIndicator()
                   : _stats == null
                       ? Text(
                           'Could not load stats',
@@ -176,7 +178,7 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
                                   ? Icons.check_circle
                                   : Icons.cancel,
                               color: e.value.passed
-                                  ? Colors.green
+                                  ? Theme.of(context).extension<AppColors>()!.success
                                   : colors.error,
                               size: 20,
                             ),

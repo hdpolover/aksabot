@@ -5,6 +5,7 @@ import '../ble/ble_presence_service.dart';
 import '../network/api_client.dart';
 import '../network/connectivity_service.dart';
 import '../notifications/notification_service.dart';
+import '../theme/theme_controller.dart';
 import '../../features/auth/data/datasources/auth_remote_datasource.dart';
 import '../../features/auth/data/repositories/auth_repository_impl.dart';
 import '../../features/auth/domain/repositories/auth_repository.dart';
@@ -35,6 +36,7 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton<ApiClient>(() => ApiClient(sl()));
   sl.registerLazySingleton<BlePresenceService>(() => BlePresenceService());
   sl.registerLazySingleton<ConnectivityService>(() => ConnectivityService());
+  sl.registerLazySingleton<ThemeController>(() => ThemeController());
   sl.registerLazySingleton<NotificationService>(() => NotificationService());
 
   // Auth

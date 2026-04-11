@@ -720,6 +720,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.4"
+  multicast_dns:
+    dependency: "direct main"
+    description:
+      name: multicast_dns
+      sha256: de72ada5c3db6fdd6ad4ae99452fe05fb403c4bb37c67ceb255ddd37d2b5b1eb
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.3"
   native_toolchain_c:
     dependency: transitive
     description:
@@ -1165,6 +1173,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.2.1"
+  wifi_scan:
+    dependency: "direct main"
+    description:
+      name: wifi_scan
+      sha256: "78896ea3db8838769053accd47cab02a62ead6480557e235295320603f84c9c7"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.4.1+2"
   win32:
     dependency: transitive
     description:

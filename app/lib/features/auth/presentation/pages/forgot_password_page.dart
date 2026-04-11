@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/utils/validators.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../domain/repositories/auth_repository.dart';
 
 class ForgotPasswordPage extends StatefulWidget {
@@ -119,7 +122,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.symmetric(horizontal: AppConstants.spacingXxl),
             child: _codeSent ? _buildResetStep(theme) : _buildEmailStep(theme),
           ),
         ),
@@ -166,26 +169,14 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
               labelText: 'Email',
               prefixIcon: Icon(Icons.email_outlined),
             ),
-            validator: (value) {
-              if (value == null || value.trim().isEmpty) {
-                return 'Email is required';
-              }
-              if (!value.contains('@')) {
-                return 'Enter a valid email';
-              }
-              return null;
-            },
+            validator: Validators.email,
             onFieldSubmitted: (_) => _onSendCode(),
           ),
           const SizedBox(height: 24),
           ElevatedButton(
             onPressed: _isLoading ? null : _onSendCode,
             child: _isLoading
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                ? const AppButtonSpinner()
                 : const Text('Send reset code'),
           ),
           const SizedBox(height: 16),
@@ -268,26 +259,14 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 },
               ),
             ),
-            validator: (value) {
-              if (value == null || value.isEmpty) {
-                return 'New password is required';
-              }
-              if (value.length < 8) {
-                return 'Password must be at least 8 characters';
-              }
-              return null;
-            },
+            validator: (value) => Validators.password(value, minLength: 8),
             onFieldSubmitted: (_) => _onResetPassword(),
           ),
           const SizedBox(height: 24),
           ElevatedButton(
             onPressed: _isLoading ? null : _onResetPassword,
             child: _isLoading
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                ? const AppButtonSpinner()
                 : const Text('Reset password'),
           ),
           const SizedBox(height: 16),

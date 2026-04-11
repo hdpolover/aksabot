@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../domain/entities/device_entity.dart';
 import '../../domain/repositories/devices_repository.dart';
 
@@ -83,7 +85,7 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
     if (_loading) {
       return Scaffold(
         appBar: AppBar(title: const Text('Integrations')),
-        body: const Center(child: CircularProgressIndicator()),
+        body: const AppLoadingIndicator(),
       );
     }
 
@@ -157,14 +159,14 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
                   icon: Icons.music_note,
                   name: 'Spotify',
                   description: 'Music control via voice',
-                  color: Colors.green,
+                  color: Theme.of(context).extension<AppColors>()!.success,
                 ),
                 const Divider(height: 1),
                 _ComingSoonTile(
                   icon: Icons.checklist,
                   name: 'Todoist',
                   description: 'Task management via voice',
-                  color: Colors.red,
+                  color: Theme.of(context).colorScheme.error,
                 ),
               ],
             ),

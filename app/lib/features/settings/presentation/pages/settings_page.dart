@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/di/injection.dart';
 import '../../../../core/notifications/notification_service.dart';
+import '../../../../core/theme/theme_controller.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 
 /// App settings tab: account info, theme, about, sign out.
@@ -15,12 +16,14 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   late final NotificationService _notifications;
+  late final ThemeController _themeController;
   bool _notificationsEnabled = false;
 
   @override
   void initState() {
     super.initState();
     _notifications = sl<NotificationService>();
+    _themeController = sl<ThemeController>();
     _loadNotificationState();
   }
 
@@ -104,15 +107,29 @@ class _SettingsPageState extends State<SettingsPage> {
                 clipBehavior: Clip.antiAlias,
                 child: Column(
                   children: [
-                    ListTile(
-                      leading: const Icon(Icons.palette_outlined),
-                      title: const Text('Theme'),
-                      trailing: Text(
-                        'System',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colors.onSurfaceVariant,
-                        ),
-                      ),
+                    ValueListenableBuilder<ThemeMode>(
+                      valueListenable: _themeController,
+                      builder: (context, _, child) {
+                        return ListTile(
+                          leading: const Icon(Icons.palette_outlined),
+                          title: const Text('Theme'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _themeController.label,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: colors.onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(Icons.chevron_right,
+                                  color: colors.onSurfaceVariant),
+                            ],
+                          ),
+                          onTap: () => _showThemePicker(context),
+                        );
+                      },
                     ),
                     const Divider(height: 1),
                     SwitchListTile(
@@ -180,6 +197,69 @@ class _SettingsPageState extends State<SettingsPage> {
         },
       ),
     );
+  }
+
+  void _showThemePicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text('Theme',
+                    style: Theme.of(ctx).textTheme.titleMedium),
+              ),
+              RadioGroup<ThemeMode>(
+                groupValue: _themeController.value,
+                onChanged: (value) {
+                  if (value != null) {
+                    _themeController.setThemeMode(value);
+                    Navigator.pop(ctx);
+                  }
+                },
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final mode in ThemeMode.values)
+                      RadioListTile<ThemeMode>(
+                        title: Text(_themeModeLabel(mode)),
+                        secondary: Icon(_themeModeIcon(mode)),
+                        value: mode,
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _themeModeLabel(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.system:
+        return 'System';
+      case ThemeMode.light:
+        return 'Light';
+      case ThemeMode.dark:
+        return 'Dark';
+    }
+  }
+
+  IconData _themeModeIcon(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.system:
+        return Icons.brightness_auto;
+      case ThemeMode.light:
+        return Icons.light_mode;
+      case ThemeMode.dark:
+        return Icons.dark_mode;
+    }
   }
 
   void _confirmSignOut(BuildContext context) {

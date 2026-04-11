@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../domain/entities/reminder_config_entity.dart';
 import '../bloc/scheduler_bloc.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
 
 /// Page for toggling and configuring reminder intervals per type.
 class RemindersPage extends StatelessWidget {
@@ -20,7 +21,7 @@ class RemindersPage extends StatelessWidget {
         body: BlocBuilder<SchedulerBloc, SchedulerState>(
           builder: (context, state) {
             if (state is SchedulerLoading) {
-              return const Center(child: CircularProgressIndicator());
+              return const AppLoadingIndicator();
             }
             if (state is SchedulerError) {
               return Center(

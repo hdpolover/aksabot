@@ -48,6 +48,9 @@ dependencies:
   # Local network discovery
   multicast_dns: ^0.3.2
 
+  # WiFi scanning (for provisioning — list available networks)
+  wifi_scan: ^0.4.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

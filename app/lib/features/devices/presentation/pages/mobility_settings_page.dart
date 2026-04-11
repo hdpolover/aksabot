@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/theme/app_colors.dart';
+
 /// Desk Mobility settings — planned UI (future hardware extension).
 class MobilitySettingsPage extends StatefulWidget {
   final String deviceId;
@@ -131,7 +133,9 @@ class _MobilitySettingsPageState extends State<MobilitySettingsPage> {
                       Icon(
                         _calibrated ? Icons.check_circle : Icons.info_outline,
                         size: 16,
-                        color: _calibrated ? Colors.green : colors.outline,
+                        color: _calibrated
+                            ? Theme.of(context).extension<AppColors>()!.success
+                            : colors.outline,
                       ),
                       const SizedBox(width: 8),
                       Text(

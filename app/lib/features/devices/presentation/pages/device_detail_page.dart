@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/widgets/app_loading_indicator.dart';
+import '../../../../core/widgets/status_dot.dart';
 import '../../domain/entities/device_entity.dart';
 import '../bloc/devices_bloc.dart';
 
@@ -53,7 +56,7 @@ class _DeviceDetailView extends StatelessWidget {
             ],
           ),
           body: state is DevicesLoading
-              ? const Center(child: CircularProgressIndicator())
+              ? const AppLoadingIndicator()
               : device == null
                   ? Center(
                       child: Column(
@@ -331,15 +334,12 @@ class _SettingsTabState extends State<_SettingsTab> {
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: online ? Colors.green : colors.outline,
-                      ),
+                    StatusDot(
+                      variant: online
+                          ? StatusDotVariant.online
+                          : StatusDotVariant.offline,
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: AppConstants.spacingSm),
                     Text(
                       online ? 'Online' : 'Offline',
                       style: theme.textTheme.bodyMedium?.copyWith(
