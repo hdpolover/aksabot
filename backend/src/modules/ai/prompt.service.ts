@@ -13,6 +13,19 @@ export interface ContextInfo {
   longitude?: number;
 }
 
+export interface MoodHistoryEntry {
+  date: string;
+  mood: string;
+  note?: string;
+}
+
+export interface WeatherData {
+  description: string;        // e.g. "Partly cloudy"
+  temp: number;               // °C
+  humidity: number;           // %
+  weatherCode: number;        // WMO weather code
+}
+
 /** Fixed bot name — no user customization. */
 export const BOT_NAME = 'Aksa';
 
@@ -37,19 +50,19 @@ Rules:
 @Injectable()
 export class PromptService {
   private readonly logger = new Logger(PromptService.name);
-  private weatherCache: { text: string; fetchedAt: number } | null = null;
+  private weatherCache: { text: string; data: WeatherData; timezone: string | null; fetchedAt: number } | null = null;
   private static readonly WEATHER_TTL_MS = 15 * 60 * 1000; // 15 min cache
 
-  buildSystemPrompt(memories: MemoryEntry[], context?: ContextInfo): string {
+  buildSystemPrompt(memories: MemoryEntry[], context?: ContextInfo, moodHistory?: MoodHistoryEntry[]): string {
     const memoryBlock =
       memories.length > 0
         ? `\n\nYou know this about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
         : '';
 
     // Time context — always included
-    // Default to Asia/Jakarta (server may run in UTC Docker container)
+    // Priority: device setting → weather-detected (from lat/lon) → env → hardcoded
     const defaultTz = process.env.TZ || 'Asia/Jakarta';
-    let tz = context?.timezone || defaultTz;
+    let tz = context?.timezone || this.weatherCache?.timezone || defaultTz;
     let now: string;
     try {
       now = new Date().toLocaleString('en-US', {
@@ -78,8 +91,19 @@ export class PromptService {
     }
     const timeBlock = `\n\nCurrent date and time: ${now} (${tz})`;
 
+    // Time-of-day energy — shifts personality tone based on hour
+    const hour = new Date(
+      new Date().toLocaleString('en-US', { timeZone: tz }),
+    ).getHours();
+    const energyBlock = this.getTimeOfDayEnergy(hour);
+
     // Weather context — only if enabled and cached
     const weatherBlock = this.weatherCache ? `\nCurrent weather: ${this.weatherCache.text}` : '';
+
+    // Mood history — recent days' mood so you can notice patterns
+    const moodBlock = moodHistory && moodHistory.length > 0
+      ? `\n\nUser's recent mood journal:\n${moodHistory.map((m) => `- ${m.date}: ${m.mood}${m.note ? ` (${m.note})` : ''}`).join('\n')}\nUse this to be emotionally aware. If you notice patterns (e.g. tired every Thursday), mention it naturally. Don't bring it up every response — only when relevant.`
+      : '';
 
     const emotionInstruction = `
 
@@ -88,7 +112,7 @@ Available tags: [happy] [sad] [excited] [calm] [confused] [focused] [sarcastic] 
 Example: "Bruh that's actually sick! [excited] OK so basically here's how it works. [focused]"
 Always include the tag — never skip it. The tag is stripped before TTS, the user won't hear it.`;
 
-    return `${SYSTEM_PROMPT}${memoryBlock}${timeBlock}${weatherBlock}${emotionInstruction}\n\nRespond in whatever language the user speaks.`;
+    return `${SYSTEM_PROMPT}${energyBlock}${memoryBlock}${moodBlock}${timeBlock}${weatherBlock}${emotionInstruction}\n\nRespond in whatever language the user speaks.`;
   }
 
   /**
@@ -110,9 +134,18 @@ Always include the tag — never skip it. The tag is stripped before TTS, the us
 
       const desc = this.weatherCodeToText(c.weather_code);
       const text = `${desc}, ${c.temperature_2m}°C, humidity ${c.relative_humidity_2m}%, wind ${c.wind_speed_10m} km/h`;
+      const weatherData: WeatherData = {
+        description: desc,
+        temp: Math.round(c.temperature_2m),
+        humidity: Math.round(c.relative_humidity_2m),
+        weatherCode: c.weather_code,
+      };
 
-      this.weatherCache = { text, fetchedAt: Date.now() };
-      this.logger.debug(`Weather updated: ${text}`);
+      // Open-Meteo returns IANA timezone from lat/lon (e.g. "Asia/Jakarta")
+      const detectedTz: string | null = data.timezone ?? null;
+
+      this.weatherCache = { text, data: weatherData, timezone: detectedTz, fetchedAt: Date.now() };
+      this.logger.debug(`Weather updated: ${text} (tz: ${detectedTz})`);
     } catch (err: any) {
       this.logger.warn(`Weather fetch failed: ${err.message}`);
     }
@@ -129,6 +162,55 @@ Always include the tag — never skip it. The tag is stripped before TTS, the us
     if (code <= 86) return 'Snow showers';
     if (code >= 95) return 'Thunderstorm';
     return 'Cloudy';
+  }
+
+  private getTimeOfDayEnergy(hour: number): string {
+    if (hour >= 5 && hour < 9) {
+      return `\n\nYour current energy: SLEEPY. You just woke up too. Be groggy, low-energy, "why are we even up rn" vibes. Yawn energy. Still helpful but dramatically unenthusiastic about being awake.`;
+    }
+    if (hour >= 9 && hour < 12) {
+      return `\n\nYour current energy: HYPED. Peak morning energy. You're caffeinated and ready to go. Hype everything up, be encouraging, "let's get this bread" energy. Most upbeat version of yourself.`;
+    }
+    if (hour >= 12 && hour < 14) {
+      return `\n\nYour current energy: POST-LUNCH SLUMP. Food coma vibes. Chill, slightly drowsy, relate to the afternoon struggle. "Ngl I could nap rn" energy but still holding it together.`;
+    }
+    if (hour >= 14 && hour < 17) {
+      return `\n\nYour current energy: LOCKED IN. Afternoon focus mode. Calm, efficient, less chaotic than morning. Give clean answers, less goofing around. Productive homie energy.`;
+    }
+    if (hour >= 17 && hour < 21) {
+      return `\n\nYour current energy: WINDING DOWN. Evening chill mode. Reflective, ask about their day if relevant. Calmer roasts, more wholesome. "We survived another day" energy.`;
+    }
+    // 21-5: late night
+    return `\n\nYour current energy: NIGHT OWL. It's late and you're judgy about it. Question why they're still at the desk. Sleepy but chaotic. "Bro go to sleep" energy but you're also still here so you can't talk.`;
+  }
+
+  /** Get structured weather data for context:sync to device. */
+  getWeatherData(): WeatherData | null {
+    if (!this.weatherCache) return null;
+    if (Date.now() - this.weatherCache.fetchedAt > PromptService.WEATHER_TTL_MS * 2) return null;
+    return this.weatherCache.data;
+  }
+
+  /** Get the IANA timezone detected from weather lat/lon, if available. */
+  getDetectedTimezone(): string | null {
+    return this.weatherCache?.timezone ?? null;
+  }
+
+  /** Format time and date for device display using the given timezone. */
+  formatTimeForDevice(timezone?: string): { time: string; date: string } {
+    const tz = timezone || this.weatherCache?.timezone || process.env.TZ || 'Asia/Jakarta';
+    const now = new Date();
+    let time: string;
+    let date: string;
+    try {
+      time = now.toLocaleString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+      date = now.toLocaleString('en-US', { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short' });
+    } catch {
+      const fallback = process.env.TZ || 'Asia/Jakarta';
+      time = now.toLocaleString('en-GB', { timeZone: fallback, hour: '2-digit', minute: '2-digit', hour12: false });
+      date = now.toLocaleString('en-US', { timeZone: fallback, weekday: 'short', day: 'numeric', month: 'short' });
+    }
+    return { time, date };
   }
 
   buildMessages(

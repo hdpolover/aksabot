@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SchedulerService } from './scheduler.service';
 import { PomodoroService } from './pomodoro.service';
 import { ResponsePoolService } from './response-pool.service';
+import { MoodJournalService } from './mood-journal.service';
 import type { ReminderConfig } from './types';
 
 @Controller('devices/:deviceId')
@@ -24,6 +25,7 @@ export class SchedulerController {
     private readonly scheduler: SchedulerService,
     private readonly pomodoro: PomodoroService,
     private readonly responsePool: ResponsePoolService,
+    private readonly moodJournal: MoodJournalService,
   ) {}
 
   // ── Reminders config ──────────────────────────────────
@@ -87,5 +89,12 @@ export class SchedulerController {
   @Get('pool/stats')
   getPoolStats(@Param('deviceId', ParseUUIDPipe) deviceId: string) {
     return this.responsePool.getStats(deviceId);
+  }
+
+  // ── Mood journal ─────────────────────────────────────
+
+  @Get('moods')
+  getMoods(@Param('deviceId', ParseUUIDPipe) deviceId: string) {
+    return this.moodJournal.findByDevice(deviceId);
   }
 }

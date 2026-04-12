@@ -16,6 +16,10 @@ static display::PomodoroData pomodoroData = {};
 static display::ReminderData reminderData = {};
 static display::CountdownData countdownData = {};
 
+static display::GlanceData glanceData = {};
+static display::GlanceData latestContext = {};
+static bool contextDataAvailable = false;
+
 static bool sleeping = false;
 static uint8_t brightness = 70;       // Current/target brightness for the HW
 static uint8_t userBrightness = 70;   // User-set brightness (survives sleep)
@@ -856,6 +860,64 @@ void renderTranscriptOverlay(LGFX_Sprite& target, const char* speaker, const cha
     }
 }
 
+void renderGlance(const display::GlanceData& data) {
+    LGFX_Sprite& s = sprite.getBuffer() ? sprite : (LGFX_Sprite&)tft;
+    bool useSprite = (sprite.getBuffer() != nullptr);
+
+    if (useSprite) s.fillSprite(COL_BG);
+    else           tft.fillScreen(COL_BG);
+
+    // ── Large time ──
+    s.setTextDatum(lgfx::middle_center);
+    s.setFont(&fonts::Font0);
+    s.setTextSize(6);
+    s.setTextColor(COL_FACE);
+    s.drawString(data.time, CX, 80);
+
+    // ── Date ──
+    s.setTextSize(2);
+    s.setTextColor(COL_DIM);
+    s.drawString(data.date, CX, 120);
+
+    if (data.hasWeather) {
+        // ── Divider line ──
+        s.drawFastHLine(60, 150, 120, COL_DIM);
+
+        // ── Weather icon (text-based) ──
+        const char* icon = "?";
+        uint8_t code = data.weatherCode;
+        if (code == 0)        icon = "*";   // Clear/sun
+        else if (code <= 3)   icon = "~";   // Partly cloudy
+        else if (code <= 49)  icon = "=";   // Foggy
+        else if (code <= 69)  icon = ",";   // Rain/drizzle
+        else if (code <= 79)  icon = ".";   // Snow
+        else if (code <= 86)  icon = ",";   // Showers
+        else if (code >= 95)  icon = "!";   // Thunderstorm
+
+        // Temperature — large and prominent
+        char tempBuf[8];
+        snprintf(tempBuf, sizeof(tempBuf), "%d%cC", data.temp, 0xB0);  // degree symbol
+
+        s.setTextSize(4);
+        s.setTextColor(PAL[0].accent);  // Cyan from IDLE palette
+        s.drawString(tempBuf, CX, 190);
+
+        // Weather description
+        s.setTextSize(2);
+        s.setTextColor(COL_DIM);
+        s.drawString(data.weather, CX, 230);
+
+        // Humidity
+        char humBuf[12];
+        snprintf(humBuf, sizeof(humBuf), "%d%% humid", data.humidity);
+        s.setTextSize(1);
+        s.setTextColor(COL_DIM);
+        s.drawString(humBuf, CX, 260);
+    }
+
+    if (useSprite) s.pushSprite(0, 0);
+}
+
 }  // namespace display_hw
 
 // ── Public API ─────────────────────────────────────────
@@ -925,6 +987,9 @@ void display::tick(uint32_t nowMs) {
             break;
         case Mode::STATUS:
             display_hw::renderStatus(statusBar);
+            break;
+        case Mode::GLANCE:
+            display_hw::renderGlance(glanceData);
             break;
     }
 
@@ -1031,4 +1096,19 @@ void display::wake() {
     // Don't set brightness before fade — fadeBrightness checks target == brightness
     // and skips if they match. We need it to fade FROM current (0) TO userBrightness.
     fadeBrightness(userBrightness, 300);
+}
+
+void display::updateContextData(const GlanceData& data) {
+    latestContext = data;
+    contextDataAvailable = true;
+}
+
+void display::showGlance() {
+    if (!contextDataAvailable) return;
+    glanceData = latestContext;
+    setModeTemporary(Mode::GLANCE, 8000);
+}
+
+bool display::hasContextData() {
+    return contextDataAvailable;
 }

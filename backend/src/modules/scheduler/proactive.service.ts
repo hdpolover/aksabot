@@ -8,6 +8,7 @@ import type { ILlmProvider } from '../ai/interfaces';
 import { BOT_NAME } from '../ai/prompt.service';
 import { MemoriesService } from '../memories/memories.service';
 import { SessionManager } from '../gateway/session.manager';
+import { MoodJournalService } from './mood-journal.service';
 
 @Injectable()
 export class ProactiveService {
@@ -20,6 +21,11 @@ export class ProactiveService {
   // Work hours config (default 9-18)
   private workHoursStart = 9;
   private workHoursEnd = 18;
+
+  // ── Screen time tracking ─────────────────────────────
+  private presenceStart = new Map<string, number>();        // when user sat down
+  private lastScreenNag = new Map<string, number>();        // last nag timestamp
+  private static readonly SCREEN_NAG_INTERVAL_MS = 90 * 60_000; // 90 min between nags
 
   // ── Idle personality chat ────────────────────────────
   private idleChatTimers = new Map<string, NodeJS.Timeout>();
@@ -56,6 +62,7 @@ export class ProactiveService {
     @Inject(LLM_PROVIDER) private readonly llm: ILlmProvider,
     private readonly memoriesService: MemoriesService,
     private readonly sessions: SessionManager,
+    private readonly moodJournal: MoodJournalService,
   ) {}
 
   setSendToDevice(fn: (deviceId: string, event: string, data: any) => void) {
@@ -182,6 +189,8 @@ export class ProactiveService {
 
   recordActivity(deviceId: string) {
     this.lastActivity.set(deviceId, Date.now());
+    // Also start screen time tracking on first activity
+    this.startScreenTimeTracking(deviceId);
   }
 
   // ── Idle nudge check (every 30 minutes) ───────────────
@@ -212,6 +221,82 @@ export class ProactiveService {
         // Reset to avoid repeated nudges
         this.lastActivity.set(deviceId, now);
         this.logger.debug(`Idle nudge sent to device ${deviceId}`);
+      }
+    }
+  }
+
+  // ── Screen time nag ───────────────────────────────────
+
+  /**
+   * Call when user arrives at desk (BLE presence or first activity).
+   * Starts tracking continuous desk time.
+   */
+  startScreenTimeTracking(deviceId: string) {
+    if (!this.presenceStart.has(deviceId)) {
+      this.presenceStart.set(deviceId, Date.now());
+      this.logger.debug(`Screen time tracking started for ${deviceId}`);
+    }
+  }
+
+  /**
+   * Call when user leaves desk. Resets screen time tracking.
+   */
+  stopScreenTimeTracking(deviceId: string) {
+    this.presenceStart.delete(deviceId);
+    this.lastScreenNag.delete(deviceId);
+  }
+
+  /**
+   * Check screen time every 15 minutes. Nags after 90 min continuous,
+   * then every 90 min after that.
+   */
+  @Cron('0 */15 * * * *')
+  async checkScreenTime() {
+    const now = Date.now();
+
+    for (const [deviceId, startTime] of this.presenceStart.entries()) {
+      const session = this.sessions.get(deviceId);
+      if (!session || session.state !== 'idle') continue;
+
+      const deskMinutes = Math.round((now - startTime) / 60_000);
+      if (deskMinutes < 90) continue;
+
+      // Check if we nagged recently
+      const lastNag = this.lastScreenNag.get(deviceId) ?? 0;
+      if (now - lastNag < ProactiveService.SCREEN_NAG_INTERVAL_MS) continue;
+
+      this.lastScreenNag.set(deviceId, now);
+
+      const hours = Math.floor(deskMinutes / 60);
+      const mins = deskMinutes % 60;
+      const timeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+
+      try {
+        const { text } = await this.llm.generate(
+          `You are ${BOT_NAME}, a gen-z desk buddy. Sarcastic, funny, uses slang. Keep it short.`,
+          [
+            {
+              role: 'user',
+              content: `User has been sitting at their desk for ${timeStr} straight without a break. Tell them to take a break, stretch, drink water. One sentence, max 15 words. Be nagging but caring.`,
+            },
+          ],
+        );
+
+        this.sendToDevice(deviceId, 'proactive:screen_nag', {
+          text,
+          deskMinutes,
+          display: {
+            expression: 'encouraging',
+            screenMode: 'reminder',
+            durationMs: 10_000,
+          },
+        });
+
+        this.logger.log(
+          `Screen time nag for ${deviceId} (${timeStr}): ${text.slice(0, 50)}...`,
+        );
+      } catch (err: any) {
+        this.logger.warn(`Screen time nag failed for ${deviceId}: ${err.message}`);
       }
     }
   }
@@ -255,6 +340,13 @@ export class ProactiveService {
             durationMs: 15_000,
           },
         });
+        // Extract daily mood in background
+        const settings = device?.settingsJson ?? {};
+        this.moodJournal
+          .extractDailyMood(deviceId, settings.timezone as string)
+          .catch((err) =>
+            this.logger.warn(`Mood extraction failed for ${deviceId}: ${err.message}`),
+          );
       } catch (err: any) {
         this.logger.warn(
           `End of day failed for ${deviceId}: ${err.message}`,
@@ -369,5 +461,6 @@ export class ProactiveService {
     // Only cleared at midnight via the date check in checkGreeting().
     this.lastActivity.delete(deviceId);
     this.stopIdleChat(deviceId);
+    this.stopScreenTimeTracking(deviceId);
   }
 }

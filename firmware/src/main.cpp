@@ -254,6 +254,32 @@ static void onWsJson(const char* event, const char* data) {
             }
         }
     }
+    // ── Context sync (time + weather from backend) ────
+    else if (strcmp(event, "context:sync") == 0) {
+        JsonDocument doc;
+        if (deserializeJson(doc, data) == DeserializationError::Ok) {
+            display::GlanceData gd = {};
+            const char* t = doc["time"] | "";
+            const char* d = doc["date"] | "";
+            strncpy(gd.time, t, sizeof(gd.time) - 1);
+            strncpy(gd.date, d, sizeof(gd.date) - 1);
+
+            if (doc.containsKey("weather")) {
+                const char* w = doc["weather"] | "";
+                strncpy(gd.weather, w, sizeof(gd.weather) - 1);
+                gd.temp = doc["temp"] | 0;
+                gd.humidity = doc["humidity"] | 0;
+                gd.weatherCode = doc["weatherCode"] | 0;
+                gd.hasWeather = true;
+            }
+
+            display::updateContextData(gd);
+            Serial.printf("[Main] Context sync: %s, %s%s%d°C\n",
+                gd.time, gd.date,
+                gd.hasWeather ? ", " : "",
+                gd.hasWeather ? gd.temp : 0);
+        }
+    }
     // ── Face expression control from backend ─────────
     else if (strcmp(event, "face:expression") == 0) {
         // Backend/LLM sends expression based on conversation sentiment.
@@ -527,11 +553,21 @@ static void onTouchEvent(touch::Event event) {
             }
             break;
 
-        case touch::Event::WAKE:
+        case touch::Event::WAKE: {
             // recordInteraction() already called at top of onTouchEvent
             appState.botState = BotState::IDLE;
             syncFaceToState();
-            face::setExpression(face::Expression::HAPPY, 200);
+            // Varied wake expressions — not always happy
+            static const face::Expression wakeExprs[] = {
+                face::Expression::HAPPY,
+                face::Expression::HAPPY,
+                face::Expression::ENCOURAGING,
+                face::Expression::CONFUSED,      // startled
+                face::Expression::SHRUG,         // "what? huh?"
+                face::Expression::CALM,          // sleepy zen
+            };
+            face::Expression wakeExpr = wakeExprs[esp_random() % 6];
+            face::setExpression(wakeExpr, 200);
             scheduleFaceRevert(2000);
             // Ask backend for a wake-up greeting with TTS
             if (appState.wsConnected) {
@@ -539,6 +575,7 @@ static void onTouchEvent(touch::Event event) {
             }
             Serial.println("[Main] Woke from touch");
             break;
+        }
     }
 }
 
@@ -996,19 +1033,72 @@ void loop() {
         syncFaceToState();
     }
 
-    // Safety: auto-revert from THINKING/LISTENING if stuck for 15s
+    // Safety: auto-revert from THINKING/LISTENING/SPEAKING if stuck
+    // THINKING/LISTENING: 15s timeout (backend should respond faster)
+    // SPEAKING: 30s timeout (long responses can take a while, but not forever)
     static uint32_t stuckCheckMs = 0;
     if (appState.botState == BotState::THINKING || appState.botState == BotState::LISTENING) {
         if (stuckCheckMs == 0) {
             stuckCheckMs = now;
         } else if ((now - stuckCheckMs) > 15000) {
-            Serial.println("[Main] Stuck state timeout — reverting to IDLE");
+            Serial.println("[Main] Stuck state timeout (thinking/listening) — reverting to IDLE");
             appState.botState = BotState::IDLE;
             syncFaceToState();
+            display::setTranscriptText("", "");
+            stuckCheckMs = 0;
+        }
+    } else if (appState.botState == BotState::SPEAKING) {
+        if (stuckCheckMs == 0) {
+            stuckCheckMs = now;
+        } else if ((now - stuckCheckMs) > 30000) {
+            Serial.println("[Main] Stuck state timeout (speaking) — force idle");
+            playbackActive = false;
+            playbackDone = false;
+            playbackBuffering = true;
+            xQueueReset(playbackQueue);
+            face::feedAudioAmplitude(0);
+            appState.botState = BotState::IDLE;
+            syncFaceToState();
+            display::setTranscriptText("", "");
             stuckCheckMs = 0;
         }
     } else {
         stuckCheckMs = 0;
+    }
+
+    // Safety: if WS disconnects mid-speech, abort playback immediately
+    // (don't wait for the 30s timeout — connection is already gone)
+    static bool prevWsForPlayback = false;
+    if (prevWsForPlayback && !appState.wsConnected) {
+        if (appState.botState == BotState::SPEAKING || appState.botState == BotState::THINKING) {
+            Serial.println("[Main] WS disconnected mid-response — aborting playback");
+            playbackActive = false;
+            playbackDone = false;
+            playbackBuffering = true;
+            xQueueReset(playbackQueue);
+            face::feedAudioAmplitude(0);
+            display::setTranscriptText("", "");
+            // Don't set IDLE here — the connectivity check below will set OFFLINE
+        }
+    }
+    prevWsForPlayback = appState.wsConnected;
+
+    // ── Idle glance (show time/weather occasionally) ──
+    static uint32_t nextGlanceMs = 0;
+    if (nextGlanceMs == 0) nextGlanceMs = now + 180000 + (esp_random() % 120000);  // First: 3-5 min
+    if (appState.botState == BotState::IDLE &&
+        display::getMode() == display::Mode::FACE &&
+        (power_manager::getState() == power_manager::PowerState::ACTIVE ||
+         power_manager::getState() == power_manager::PowerState::DIM) &&
+        display::hasContextData() &&
+        now >= nextGlanceMs) {
+        power_manager::recordInteraction();  // Wake from DIM → ACTIVE
+        display::showGlance();
+        nextGlanceMs = now + 180000 + (esp_random() % 120000);  // Next: 3-5 min
+    }
+    // Reset glance timer on user interaction (avoid glance right after talking)
+    if (appState.botState != BotState::IDLE) {
+        nextGlanceMs = now + 180000 + (esp_random() % 120000);
     }
 
     // Serve HTTP status requests + token delivery (used by Flutter app)
@@ -1069,8 +1159,9 @@ void loop() {
 
     BotState prevState = appState.botState;
     if (!appState.wifiConnected && appState.botState != BotState::OFFLINE &&
-        appState.botState != BotState::LISTENING && appState.botState != BotState::SPEAKING &&
-        appState.botState != BotState::THINKING) {
+        appState.botState != BotState::LISTENING) {
+        // WiFi gone — go OFFLINE. SPEAKING/THINKING playback was already
+        // cleaned up by the WS disconnect handler above.
         appState.botState = BotState::OFFLINE;
     } else if (appState.wifiConnected && appState.botState == BotState::OFFLINE) {
         appState.botState = BotState::IDLE;

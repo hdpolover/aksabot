@@ -19,6 +19,7 @@ enum class Mode : uint8_t {
     REMINDER,       // Reminder icon, text, "tap to dismiss"
     COUNTDOWN,      // Large countdown number (eye break 20s)
     STATUS,         // Wi-Fi, battery, uptime, stats
+    GLANCE,         // Temporary idle screen — time + weather
 };
 
 /// Status bar data (visible in face and clock modes).
@@ -51,6 +52,17 @@ struct ReminderData {
 struct CountdownData {
     uint8_t remainingSeconds;
     char instruction[48];       // e.g., "Look at something 20ft away"
+};
+
+/// Glance display data (time + weather from backend context:sync).
+struct GlanceData {
+    char time[8];           // "14:35"
+    char date[16];          // "Sat, 12 Apr"
+    char weather[24];       // "Partly cloudy"
+    int8_t temp;            // °C
+    uint8_t humidity;       // %
+    uint8_t weatherCode;    // WMO code for icon selection
+    bool hasWeather;        // false = time-only glance
 };
 
 /// Initialize display hardware and start with face mode.
@@ -105,5 +117,14 @@ void sleep();
 
 /// Turn display on (wake) with fade-in.
 void wake();
+
+/// Store latest context data from backend (does not trigger display).
+void updateContextData(const GlanceData& data);
+
+/// Show glance screen (time + weather) temporarily, then auto-return.
+void showGlance();
+
+/// Check if context data is available for glance display.
+bool hasContextData();
 
 }  // namespace display

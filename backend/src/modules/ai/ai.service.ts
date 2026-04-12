@@ -10,7 +10,7 @@ import {
 import type { ISttProvider, SttStream, SttOptions } from './interfaces';
 import type { ILlmProvider } from './interfaces';
 import type { ITtsProvider, TtsOptions } from './interfaces';
-import type { ContextInfo } from './prompt.service';
+import type { ContextInfo, MoodHistoryEntry, WeatherData } from './prompt.service';
 import type { IAudioCodec } from './interfaces';
 import type { ITtsCache } from './interfaces/tts-cache.interface';
 import { PromptService } from './prompt.service';
@@ -119,6 +119,18 @@ export class AiService {
     return this.prompt.refreshWeather(lat, lon);
   }
 
+  getWeatherData(): WeatherData | null {
+    return this.prompt.getWeatherData();
+  }
+
+  getDetectedTimezone(): string | null {
+    return this.prompt.getDetectedTimezone();
+  }
+
+  formatTimeForDevice(timezone?: string): { time: string; date: string } {
+    return this.prompt.formatTimeForDevice(timezone);
+  }
+
   decodeAudio(opusChunk: Buffer): Buffer {
     return this.codec.decode(opusChunk);
   }
@@ -183,8 +195,9 @@ export class AiService {
     history: { role: string; content: string }[],
     voiceOptions?: TtsOptions,
     context?: ContextInfo,
+    moodHistory?: MoodHistoryEntry[],
   ): AsyncGenerator<PipelineEvent> {
-    const systemPrompt = this.prompt.buildSystemPrompt(memories, context);
+    const systemPrompt = this.prompt.buildSystemPrompt(memories, context, moodHistory);
     const messages = this.prompt.buildMessages(history, transcript);
 
     const sentenceBuffer = new SentenceBuffer();

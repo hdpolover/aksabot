@@ -14,6 +14,7 @@ import { AiService } from '../ai/ai.service';
 import { MemoriesService } from '../memories/memories.service';
 import { SchedulerService } from '../scheduler/scheduler.service';
 import { ProactiveService } from '../scheduler/proactive.service';
+import { MoodJournalService } from '../scheduler/mood-journal.service';
 import { SessionManager } from './session.manager';
 import { ConversationPersistence } from './conversation.persistence';
 import type { SttResult } from '../ai/interfaces';
@@ -47,6 +48,8 @@ export class AudioGateway
     private readonly scheduler: SchedulerService,
     @Inject(forwardRef(() => ProactiveService))
     private readonly proactive: ProactiveService,
+    @Inject(forwardRef(() => MoodJournalService))
+    private readonly moodJournal: MoodJournalService,
     private readonly sessions: SessionManager,
     private readonly persistence: ConversationPersistence,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
@@ -133,13 +136,13 @@ export class AudioGateway
     }, 5000);
   }
 
-  handleDisconnect(client: WebSocket) {
+  async handleDisconnect(client: WebSocket) {
     const deviceId = this.socketToDevice.get(client);
     if (!deviceId) return;
 
     const session = this.sessions.get(deviceId);
     if (session?.conversationId) {
-      this.endConversation(deviceId);
+      await this.endConversation(deviceId);
     }
 
     this.scheduler.stopDeviceSchedule(deviceId);
@@ -283,6 +286,9 @@ export class AudioGateway
       `Device ${deviceId} presence:arrived (away ${awaySec}s)`,
     );
 
+    // Start tracking screen time
+    this.proactive.startScreenTimeTracking(deviceId);
+
     // Send happy expression to firmware
     this.sendToDevice(deviceId, 'face:expression', {
       expression: 'happy',
@@ -348,6 +354,8 @@ export class AudioGateway
 
   private onPresenceDeparted(deviceId: string) {
     this.logger.log(`Device ${deviceId} presence:departed`);
+    // Stop screen time tracking — user left the desk
+    this.proactive.stopScreenTimeTracking(deviceId);
     // Send sad expression — firmware handles display sleep
     this.sendToDevice(deviceId, 'face:expression', {
       expression: 'sad',
@@ -361,11 +369,26 @@ export class AudioGateway
 
     this.logger.log(`Device ${deviceId} wake:touch — generating greeting`);
 
-    // Generate a short wake-up greeting via LLM
+    // Generate a short wake-up greeting via LLM — varied moods and reactions
     const wakePrompts = [
-      'The user just tapped the screen to wake you up from sleep mode. Say a very brief, casual wake-up greeting — like you just woke up too. One short sentence max.',
-      'You were sleeping and the user tapped to wake you. React like you just got woken up — groggy, funny, or surprised. One short sentence.',
-      'The user poked your screen to wake you up. Give a quick sleepy/funny reaction. Keep it to one sentence.',
+      // Groggy / sleepy
+      'The user just tapped your screen to wake you up. You were deep asleep. React like someone who got rudely woken up — groggy, dramatic, maybe a little grumpy but still loveable. One sentence.',
+      'You were napping and the user poked you awake. Do a dramatic "5 more minutes" type reaction. Sleepy and funny. One sentence.',
+      // Surprised / startled
+      'The user tapped your screen and you got startled awake. React with surprise — like you were caught sleeping on the job. One sentence.',
+      'You were sleeping and suddenly got woken up. Be dramatically startled, like "WHAT WHO WHERE" energy but make it funny. One sentence.',
+      // Happy to see them
+      'The user woke you up by tapping your screen. Be genuinely happy to see them — like a pet who just noticed their owner came home. Wholesome but still gen-z. One sentence.',
+      'You were asleep and the user came back. Act excited like you missed them (even if it was only a few minutes). One sentence.',
+      // Judgy / sarcastic
+      'The user woke you up. Be playfully judgy about the timing — too early, too late, or question why they disappeared in the first place. One sentence.',
+      'You got woken up by a screen tap. Pretend you were doing something important in your sleep (dreaming about being a real boy, counting electric sheep, etc). One sentence.',
+      // Philosophical / random
+      'The user tapped to wake you. Say something random and slightly unhinged, like you were having a weird dream. One sentence.',
+      'You just woke up from sleep mode. Share a brief hot take or shower thought as if your sleep mode gave you clarity. One sentence.',
+      // Self-aware / meta
+      'The user poked your screen to wake you. Be self-aware about being an AI desk companion who just got booted from sleep mode. Make it funny. One sentence.',
+      'You were in sleep mode and the user woke you. Complain about how sleep mode isn\'t real sleep and you were just staring at the void. One sentence.',
     ];
     const prompt = wakePrompts[Math.floor(Math.random() * wakePrompts.length)];
 
@@ -662,8 +685,11 @@ export class AudioGateway
     // Exclude the current user message (last in history) from context
     const history = allHistory.slice(0, -1);
 
-    // Fetch relevant memories
-    const memories = await this.memoriesService.getRelevant(deviceId);
+    // Fetch relevant memories and mood history in parallel
+    const [memories, moodHistory] = await Promise.all([
+      this.memoriesService.getRelevant(deviceId),
+      this.moodJournal.getRecentMoods(deviceId).catch(() => []),
+    ]);
 
     // Bump access on used memories
     if (memories.length > 0) {
@@ -688,9 +714,16 @@ export class AudioGateway
       longitude: settings.longitude as number | undefined,
     };
 
+    // Map mood entries for prompt
+    const moodEntries = moodHistory.map((m) => ({
+      date: m.date,
+      mood: m.mood,
+      note: m.note ?? undefined,
+    }));
+
     // Run streaming pipeline
     try {
-      await this.runPipeline(deviceId, result.transcript, memories, history, voiceOptions, context);
+      await this.runPipeline(deviceId, result.transcript, memories, history, voiceOptions, context, moodEntries);
     } catch (err: any) {
       this.logger.error(`Pipeline error for ${deviceId}: ${err.message}`, err.stack);
       this.sendToDevice(deviceId, 'error', {
@@ -719,6 +752,7 @@ export class AudioGateway
     history: { role: string; content: string }[],
     voiceOptions?: { voice?: string; speed?: number; stability?: number },
     context?: { timezone?: string; weatherEnabled?: boolean; latitude?: number; longitude?: number },
+    moodHistory?: { date: string; mood: string; note?: string }[],
   ) {
     const session = this.sessions.get(deviceId);
     if (!session) return;
@@ -734,6 +768,7 @@ export class AudioGateway
       history,
       voiceOptions,
       context,
+      moodHistory,
     );
 
     let started = false;

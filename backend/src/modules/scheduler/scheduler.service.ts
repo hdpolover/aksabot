@@ -7,6 +7,7 @@ import { ReminderService } from './reminder.service';
 import { PomodoroService } from './pomodoro.service';
 import { ResponsePoolService } from './response-pool.service';
 import { SessionManager } from '../gateway/session.manager';
+import { AiService } from '../ai/ai.service';
 import {
   DEFAULT_REMINDER_CONFIG,
   type ReminderConfig,
@@ -17,6 +18,7 @@ import {
 export class SchedulerService implements OnModuleInit {
   private readonly logger = new Logger(SchedulerService.name);
   private deviceTimers = new Map<string, NodeJS.Timeout[]>();
+  private contextSyncTimers = new Map<string, NodeJS.Timeout>();
   private focusMode = new Map<string, NodeJS.Timeout>();
 
   // Injected later to avoid circular dep with gateway
@@ -33,6 +35,7 @@ export class SchedulerService implements OnModuleInit {
     private readonly pomodoroService: PomodoroService,
     private readonly responsePool: ResponsePoolService,
     private readonly sessions: SessionManager,
+    private readonly ai: AiService,
   ) {}
 
   onModuleInit() {
@@ -89,12 +92,24 @@ export class SchedulerService implements OnModuleInit {
     // 1. Lazily when the first reminder fires (pickLru generates on empty pool)
     // 2. Every 6 hours via cron for connected devices
     // This avoids 10+ Gemini API calls on every reconnect.
+
+    // Start context sync (time + weather push to device)
+    this.startContextSync(deviceId).catch((err) =>
+      this.logger.warn(`Context sync start failed for ${deviceId}: ${err.message}`),
+    );
   }
 
   stopDeviceSchedule(deviceId: string): void {
     const timers = this.deviceTimers.get(deviceId) ?? [];
     timers.forEach(clearInterval);
     this.deviceTimers.delete(deviceId);
+
+    const ctxTimer = this.contextSyncTimers.get(deviceId);
+    if (ctxTimer) {
+      clearInterval(ctxTimer);
+      this.contextSyncTimers.delete(deviceId);
+    }
+
     this.pomodoroService.stopAllForDevice(deviceId);
     this.clearFocusMode(deviceId);
   }
@@ -140,6 +155,63 @@ export class SchedulerService implements OnModuleInit {
         `Reminder ${type} failed for ${deviceId}: ${err.message}`,
       );
     }
+  }
+
+  // ── Context sync (time + weather → device) ───────────
+
+  private static readonly CONTEXT_SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 min
+
+  private async startContextSync(deviceId: string): Promise<void> {
+    // Refresh weather first (so we have data for the initial sync)
+    const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+    const settings = device?.settingsJson ?? {};
+    if (settings.integrations_weather && settings.latitude && settings.longitude) {
+      await this.ai.refreshWeather(settings.latitude, settings.longitude);
+    }
+
+    // Send immediately on connect
+    this.sendContextSync(deviceId);
+
+    // Then every 10 minutes
+    const timer = setInterval(() => {
+      this.sendContextSync(deviceId);
+    }, SchedulerService.CONTEXT_SYNC_INTERVAL_MS);
+    this.contextSyncTimers.set(deviceId, timer);
+
+    this.logger.debug(`Context sync started for device ${deviceId}`);
+  }
+
+  private sendContextSync(deviceId: string): void {
+    const session = this.sessions.get(deviceId);
+    if (!session) return;
+
+    const device = this.devicesRepo.findOne({ where: { id: deviceId } }).then((dev) => {
+      const settings = dev?.settingsJson ?? {};
+      const tz = settings.timezone as string | undefined;
+      const { time, date } = this.ai.formatTimeForDevice(tz);
+
+      const payload: Record<string, any> = { time, date };
+
+      if (settings.integrations_weather) {
+        // Refresh weather in background (cached, won't re-fetch if fresh)
+        if (settings.latitude && settings.longitude) {
+          this.ai.refreshWeather(settings.latitude, settings.longitude).catch(() => {});
+        }
+
+        const weather = this.ai.getWeatherData();
+        if (weather) {
+          payload.weather = weather.description;
+          payload.temp = weather.temp;
+          payload.humidity = weather.humidity;
+          payload.weatherCode = weather.weatherCode;
+        }
+      }
+
+      this.sendToDevice(deviceId, 'context:sync', payload);
+      this.logger.debug(`Context sync sent to ${deviceId}: ${time}, ${payload.weather ?? 'no weather'}`);
+    }).catch((err: any) => {
+      this.logger.warn(`Context sync failed for ${deviceId}: ${err.message}`);
+    });
   }
 
   // ── Focus mode ───────────────────────────────────────
