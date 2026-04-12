@@ -488,15 +488,30 @@ static void onTouchEvent(touch::Event event) {
     power_manager::recordInteraction();
 
     switch (event) {
-        case touch::Event::HOLD_START:
-            if (appState.botState == BotState::IDLE) {
+        case touch::Event::HOLD_START: {
+            // Accept HOLD_START when IDLE, or when already LISTENING from a
+            // hands-free trigger (wake word/gesture stole the state — override to PTT)
+            bool wasHandsFree = (appState.botState == BotState::LISTENING &&
+                                 appState.listenTrigger != ListenTrigger::TOUCH);
+            if (appState.botState == BotState::IDLE || wasHandsFree) {
+
+                // If overriding a hands-free session, restore default VAD
+                if (wasHandsFree) {
+                    vad::reset();
+                    vad::init();
+                    Serial.println("[Main] Overriding hands-free → push-to-talk");
+                }
+
                 appState.listenTrigger = ListenTrigger::TOUCH;
                 appState.botState = BotState::LISTENING;
                 syncFaceToState();
-                wake_word::stopListening();  // Pause wake word during PTT
+                wake_word::stopListening();
                 if (appState.wsConnected) {
-                    ws_client::sendEvent("audio:start");
-                    Serial.println("[Main] Recording started (backend)");
+                    if (!wasHandsFree) {
+                        ws_client::sendEvent("audio:start");
+                    }
+                    // If was hands-free, audio:start was already sent
+                    Serial.println("[Main] Recording started (backend/PTT)");
                 } else {
                     // Echo mode — allocate buffer on first use, record raw stereo
                     if (!echoFrames) {
@@ -514,6 +529,7 @@ static void onTouchEvent(touch::Event event) {
                 }
             }
             break;
+        }
 
         case touch::Event::HOLD_END:
             if (appState.botState == BotState::LISTENING) {

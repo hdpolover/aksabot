@@ -22,6 +22,11 @@ Thumbs.db
 .pio/
 .pioenvs/
 
+# Clangd cache + compile database
+.cache/
+.clangd
+compile_commands.json
+
 # Build artifacts
 build/
 

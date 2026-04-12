@@ -17,14 +17,24 @@ class BleProvisioningService {
 
   // ── Scanning ─────────────────────────────────────────────────
 
-  /// Starts scanning for Aksabot devices (advertising 0xFFE0).
-  /// Returns a stream of discovered devices.
+  /// Starts scanning for Aksabot devices.
+  ///
+  /// No OS-level service UUID or name filters are used — both iOS CoreBluetooth
+  /// and Android's BLE scan API only match filters against the primary
+  /// advertisement packet, but NimBLE on ESP32 may put the UUID/name in the
+  /// scan response when the primary packet is full. Filtering is done in Dart
+  /// after receiving results to avoid silent misses on either platform.
   Future<Stream<List<ScanResult>>> startScan({Duration timeout = const Duration(seconds: 10)}) async {
-    await FlutterBluePlus.startScan(
-      withServices: [BleConstants.wifiService],
-      timeout: timeout,
+    await FlutterBluePlus.startScan(timeout: timeout);
+    return FlutterBluePlus.scanResults.map(
+      (results) => results
+          .where((r) {
+            final name = r.device.platformName.toLowerCase();
+            final advName = r.advertisementData.advName.toLowerCase();
+            return name.contains('aksabot') || advName.contains('aksabot');
+          })
+          .toList(),
     );
-    return FlutterBluePlus.scanResults;
   }
 
   Future<void> stopScan() async {

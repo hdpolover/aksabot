@@ -10,6 +10,7 @@ import '../../../memories/domain/entities/memory_entity.dart';
 import '../../../memories/presentation/bloc/memories_bloc.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
+import '../../../../core/widgets/empty_state.dart';
 
 /// Activity tab with segmented toggle between Conversations and Memories.
 ///
@@ -95,27 +96,11 @@ class _ActivityPageState extends State<ActivityPage> {
       return const AppLoadingIndicator();
     }
 
-    final colors = theme.colorScheme;
-
     if (_selectedDevice == null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.smart_toy_outlined, size: 48, color: colors.onSurfaceVariant),
-              const SizedBox(height: 16),
-              Text(
-                'Add a device to see activity',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
+      return const EmptyState(
+        icon: Icons.smart_toy_outlined,
+        title: 'No devices yet',
+        subtitle: 'Add a device from the Home tab to see conversations and memories.',
       );
     }
 
@@ -141,8 +126,8 @@ class _ActivityPageState extends State<ActivityPage> {
               setState(() => _selectedSegment = selection.first);
             },
             style: SegmentedButton.styleFrom(
-              selectedForegroundColor: colors.onPrimary,
-              selectedBackgroundColor: colors.primary,
+              selectedForegroundColor: theme.colorScheme.onPrimary,
+              selectedBackgroundColor: theme.colorScheme.primary,
             ),
           ),
         ),
@@ -200,11 +185,10 @@ class _ConversationsView extends StatelessWidget {
           }
           if (state is ConversationsLoaded) {
             if (state.conversations.isEmpty) {
-              return Center(
-                child: Text(
-                  'No conversations yet.',
-                  style: theme.textTheme.bodyMedium?.copyWith(color: colors.onSurfaceVariant),
-                ),
+              return const EmptyState(
+                icon: Icons.chat_bubble_outline,
+                title: 'No conversations',
+                subtitle: 'Start talking to Aksa and your conversations will appear here.',
               );
             }
             return _ConversationsList(
@@ -446,11 +430,10 @@ class _MemoriesView extends StatelessWidget {
           }
           if (state is MemoriesLoaded) {
             if (state.memories.isEmpty) {
-              return Center(
-                child: Text(
-                  'No memories yet.',
-                  style: theme.textTheme.bodyMedium?.copyWith(color: colors.onSurfaceVariant),
-                ),
+              return const EmptyState(
+                icon: Icons.psychology_outlined,
+                title: 'No memories',
+                subtitle: 'Aksa will remember things about you as you chat.',
               );
             }
             return _MemoriesContent(
