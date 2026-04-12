@@ -12,7 +12,7 @@ export class GeminiLlmProvider implements ILlmProvider {
     if (!apiKey) throw new Error('GEMINI_API_KEY is required');
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    this.model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    this.model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
   }
 
   async generate(
