@@ -10,6 +10,8 @@ import type {
 
 class GoogleSttStream extends EventEmitter implements SttStream {
   private recognizeStream: ReturnType<SpeechClient['streamingRecognize']>;
+  private finalEmitted = false;
+  private bytesWritten = 0;
 
   constructor(client: SpeechClient, config: Record<string, any>) {
     super();
@@ -25,6 +27,7 @@ class GoogleSttStream extends EventEmitter implements SttStream {
       const transcript = result.alternatives?.[0]?.transcript ?? '';
 
       if (result.isFinal) {
+        this.finalEmitted = true;
         this.emit('final', {
           transcript,
           confidence: result.alternatives?.[0]?.confidence ?? 0,
@@ -38,10 +41,24 @@ class GoogleSttStream extends EventEmitter implements SttStream {
     this.recognizeStream.on('error', (err: Error) => {
       this.emit('error', err);
     });
+
+    // When Google STT closes the stream without emitting a final result
+    // (e.g., all audio was silence, or audio was too short), we emit a
+    // 'final' with an empty transcript so the pipeline can send a proper
+    // error to the device instead of hanging silently.
+    this.recognizeStream.on('end', () => {
+      if (!this.finalEmitted) {
+        this.emit('final', {
+          transcript: '',
+          confidence: 0,
+        } satisfies SttResult);
+      }
+    });
   }
 
   write(pcmChunk: Buffer): void {
     if (this.recognizeStream.destroyed) return;
+    this.bytesWritten += pcmChunk.length;
     this.recognizeStream.write(pcmChunk);
   }
 

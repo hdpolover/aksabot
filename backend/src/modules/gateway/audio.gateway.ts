@@ -616,27 +616,21 @@ export class AudioGateway
     // Track activity for idle nudge
     this.proactive.recordActivity(deviceId);
 
-    // Create conversation if none active
-    if (!session.conversationId) {
-      const conversation =
-        await this.persistence.createConversation(deviceId);
-      session.conversationId = conversation.id;
-      this.sendToDevice(deviceId, 'session:start', {
-        sessionId: conversation.id,
-      });
-    }
-
-    // Pause idle chat while user is talking
-    this.proactive.stopIdleChat(deviceId);
-
+    // ── Create STT stream BEFORE any awaits ──────────────────────
+    // CRITICAL: session.sttStream must be set synchronously before we hit
+    // any async operation (createConversation). Audio chunks from the ESP32
+    // arrive within milliseconds of audio:start. If sttStream is null when
+    // they arrive, onAudioChunk silently drops them — STT receives no audio,
+    // 'final' never fires, and the entire pipeline never starts.
     session.interrupted = false;
     session.state = 'listening';
-    this.chunkCount.set(deviceId, 0);  // Reset chunk counter
+    this.chunkCount.set(deviceId, 0);
 
     const sttStream = this.aiService.createSttStream({
       languages: ['en-US', 'id-ID'],
     });
     session.sttStream = sttStream;
+    this.logger.log(`[${deviceId}] STT stream created (format=${session.audioFormat})`);
 
     sttStream.on('partial', (text: string) => {
       this.sendToDevice(deviceId, 'transcript:partial', {
@@ -646,13 +640,16 @@ export class AudioGateway
     });
 
     sttStream.on('final', (result: SttResult) => {
-      this.onSttFinal(deviceId, result);
+      this.logger.log(`[${deviceId}] STT final: "${result.transcript}" (confidence=${result.confidence?.toFixed(2)})`);
+      this.onSttFinal(deviceId, result).catch((err) =>
+        this.logger.error(`[${deviceId}] onSttFinal error: ${err.message}`, err.stack),
+      );
     });
 
     sttStream.on('error', (err: Error) => {
       // Only log first error per stream — avoid flooding from "write after destroyed"
       if (session.sttStream === sttStream) {
-        this.logger.error(`STT error for ${deviceId}: ${err.message}`);
+        this.logger.error(`[${deviceId}] STT error: ${err.message}`, err.stack);
         session.sttStream = null;  // Stop further writes
         this.sendToDevice(deviceId, 'error', {
           code: 'STT_ERROR',
@@ -664,6 +661,21 @@ export class AudioGateway
     });
 
     this.sendToDevice(deviceId, 'state:update', { state: 'listening' });
+
+    // Create conversation AFTER the STT stream is ready.
+    // Async DB call — audio chunks are already being forwarded to STT.
+    if (!session.conversationId) {
+      const conversation =
+        await this.persistence.createConversation(deviceId);
+      session.conversationId = conversation.id;
+      this.logger.log(`[${deviceId}] Conversation created: ${conversation.id}`);
+      this.sendToDevice(deviceId, 'session:start', {
+        sessionId: conversation.id,
+      });
+    }
+
+    // Pause idle chat while user is talking
+    this.proactive.stopIdleChat(deviceId);
   }
 
   private async isAudioRateLimited(deviceId: string): Promise<boolean> {
@@ -725,7 +737,12 @@ export class AudioGateway
 
   private onAudioEnd(deviceId: string) {
     const session = this.sessions.get(deviceId);
-    if (!session?.sttStream) return;
+    const chunksSent = this.chunkCount.get(deviceId) ?? 0;
+    if (!session?.sttStream) {
+      this.logger.warn(`[${deviceId}] audio:end but no active STT stream (chunks=${chunksSent}) — audio was dropped`);
+      return;
+    }
+    this.logger.log(`[${deviceId}] audio:end — finalizing STT (${chunksSent} chunks received)`);
     const stream = session.sttStream;
     session.sttStream = null;  // Prevent late chunks from writing after end
     stream.end();
@@ -755,6 +772,7 @@ export class AudioGateway
     });
 
     if (!result.transcript.trim()) {
+      this.logger.warn(`[${deviceId}] Empty STT transcript — no speech recognized`);
       this.sendToDevice(deviceId, 'error', {
         code: 'EMPTY_TRANSCRIPT',
         message: 'Could not understand speech',
@@ -763,6 +781,8 @@ export class AudioGateway
       this.sendToDevice(deviceId, 'state:update', { state: 'idle' });
       return;
     }
+
+    this.logger.log(`[${deviceId}] Transcript: "${result.transcript}"`);
 
     // Check for voice commands before hitting the LLM
     const commandMatch = this.voiceCommands.match(result.transcript);
@@ -784,6 +804,7 @@ export class AudioGateway
     this.sendToDevice(deviceId, 'state:update', { state: 'thinking' });
 
     // Get history and settings
+    this.logger.debug(`[${deviceId}] Fetching device + history + memories`);
     const device = await this.persistence.getDevice(deviceId);
 
     const allHistory = session.conversationId
@@ -797,6 +818,8 @@ export class AudioGateway
       this.memoriesService.getRelevant(deviceId),
       this.moodJournal.getRecentMoods(deviceId).catch(() => []),
     ]);
+
+    this.logger.debug(`[${deviceId}] Context ready — history=${history.length}, memories=${memories.length}`);
 
     // Bump access on used memories
     if (memories.length > 0) {
@@ -832,6 +855,7 @@ export class AudioGateway
     // pipeline finishes, bumpPipelineGen() will invalidate myGen and the
     // pipeline will abort without sending response:end to the device.
     const myGen = this.bumpPipelineGen(deviceId);
+    this.logger.log(`[${deviceId}] Starting pipeline gen=${myGen}`);
 
     // Run streaming pipeline
     try {
