@@ -229,6 +229,32 @@ void boot_screen::showProvisioningPrompt(const char* apName) {
     drawSmall("Waiting...", 225, DIM);
 }
 
+void boot_screen::showProvisioningConnected() {
+    clearScreen();
+
+    // Phone icon
+    int phoneY = 40;
+    tft.drawRoundRect(CX - 14, phoneY, 28, 48, 4, GREEN);
+    tft.drawFastHLine(CX - 8, phoneY + 4, 16, GREEN);
+    tft.drawFastHLine(CX - 8, phoneY + 40, 16, GREEN);
+    tft.fillCircle(CX, phoneY + 44, 2, GREEN);
+
+    // Checkmark next to phone
+    tft.drawLine(CX + 22, phoneY + 18, CX + 28, phoneY + 26, GREEN);
+    tft.drawLine(CX + 28, phoneY + 26, CX + 40, phoneY + 12, GREEN);
+
+    drawCentered("Phone Connected", 100, WHITE);
+    drawSmall("Setting up your Aksabot...", 128, DIM);
+
+    tft.drawFastHLine(30, 152, LCD_WIDTH - 60, DIM);
+
+    drawSmall("Select your Wi-Fi network", 164, CYAN);
+    drawSmall("in the app to continue.", 184, DIM);
+
+    // Animated dots slot
+    drawSmall("Waiting for Wi-Fi...", 225, DIM);
+}
+
 void boot_screen::showProvisioningStatus(const char* status) {
     tft.fillRect(0, 250, LCD_WIDTH, 40, BG);
     tft.fillCircle(CX, 245, 3, GREEN);

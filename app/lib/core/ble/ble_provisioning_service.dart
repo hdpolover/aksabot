@@ -17,25 +17,41 @@ class BleProvisioningService {
 
   // ── Scanning ─────────────────────────────────────────────────
 
-  /// Starts scanning for Aksabot devices.
+  /// Returns a filtered stream of Aksabot scan results.
   ///
-  /// No OS-level service UUID or name filters are used — both iOS CoreBluetooth
-  /// and Android's BLE scan API only match filters against the primary
-  /// advertisement packet, but NimBLE on ESP32 may put the UUID/name in the
-  /// scan response when the primary packet is full. Filtering is done in Dart
-  /// after receiving results to avoid silent misses on either platform.
-  Future<Stream<List<ScanResult>>> startScan({Duration timeout = const Duration(seconds: 10)}) async {
-    await FlutterBluePlus.startScan(timeout: timeout);
-    return FlutterBluePlus.scanResults.map(
-      (results) => results
-          .where((r) {
-            final name = r.device.platformName.toLowerCase();
-            final advName = r.advertisementData.advName.toLowerCase();
-            return name.contains('aksabot') || advName.contains('aksabot');
-          })
-          .toList(),
+  /// **Subscribe to this stream BEFORE calling [startScan].**
+  /// `FlutterBluePlus.scanResults` is a broadcast stream — events emitted
+  /// before a listener is attached are lost. With `allowDuplicates: false`
+  /// (the default), each device is only reported once, so a late subscription
+  /// permanently misses it.
+  Stream<List<ScanResult>> get scanResultsFiltered =>
+      FlutterBluePlus.scanResults.map(
+        (results) => results
+            .where((r) {
+              final name = r.device.platformName.toLowerCase();
+              final advName = r.advertisementData.advName.toLowerCase();
+              // Match by name OR by the Aksabot WiFi provisioning service UUID.
+              // NimBLE v2.5+ doesn't always include the device name in the
+              // advertisement/scan-response data, but the 0xFFE0 service UUID
+              // is reliably present.
+              final hasAksabotService = r.advertisementData.serviceUuids
+                  .any((uuid) => uuid == Guid('0000ffe0-0000-1000-8000-00805f9b34fb'));
+              return name.contains('aksabot') ||
+                  advName.contains('aksabot') ||
+                  hasAksabotService;
+            })
+            .toList(),
+      );
+
+  /// Starts scanning for Aksabot devices. Subscribe to [scanResultsFiltered]
+  /// first, then call this.
+  void startScan({Duration timeout = const Duration(seconds: 10)}) {
+    FlutterBluePlus.startScan(
+      timeout: timeout,
+      androidUsesFineLocation: true,
     );
   }
+
 
   Future<void> stopScan() async {
     await FlutterBluePlus.stopScan();

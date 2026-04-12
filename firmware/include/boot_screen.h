@@ -30,6 +30,10 @@ void showFirstBoot();
 /// apName may be nullptr when SoftAP is not active.
 void showProvisioningPrompt(const char* apName = nullptr);
 
+/// Show "Phone Connected" screen when BLE client connects during provisioning.
+/// Replaces the provisioning prompt with setup-in-progress UI.
+void showProvisioningConnected();
+
 /// Update provisioning status line (e.g., "Phone connected!", "Receiving WiFi...").
 void showProvisioningStatus(const char* status);
 

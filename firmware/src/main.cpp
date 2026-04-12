@@ -1055,31 +1055,97 @@ void setup() {
         boot_screen::showProvisioningPrompt(nullptr);  // BLE only, no AP name
 
         // Poll until credentials arrive via BLE
+        bool shownConnected = false;
         while (!ble_manager::isProvisioned()) {
+            // Update display when phone connects via BLE
+            if (!shownConnected && ble_manager::isClientConnected()) {
+                shownConnected = true;
+                boot_screen::showProvisioningConnected();
+                Serial.println("[Main] BLE client connected — showing setup screen");
+            }
+            // Reset if phone disconnects before finishing
+            if (shownConnected && !ble_manager::isClientConnected()) {
+                shownConnected = false;
+                boot_screen::showProvisioningPrompt(nullptr);
+                Serial.println("[Main] BLE client disconnected — back to waiting");
+            }
             boot_screen::tickProvisioningAnimation(millis());
             delay(100);
         }
 
         provisionedViaBle = true;
-        boot_screen::showProvisioningStatus("Credentials received via Bluetooth!");
+        boot_screen::showProvisioningStatus("Credentials received!");
         Serial.println("[Main] Provisioned via BLE");
-        delay(600);
+        delay(800);
 
-        // Stop BLE advertising before WiFi starts (coexistence)
+        // ── First-boot: WiFi connect on boot screen (before face UI) ──
+        // Keep BLE alive so the wifiStatusWatchTask can notify the app
+        // of WiFi connection status. The face UI hasn't started yet, so
+        // the boot screen is still visible.
+        char ssidBuf[64] = {};
+        const char* ssidDisplay = WIFI_SSID;
+        if (nvs_store::getWifiSsid(ssidBuf, sizeof(ssidBuf)) && strlen(ssidBuf) > 0) {
+            ssidDisplay = ssidBuf;
+        }
+        boot_screen::showConnecting(ssidDisplay);
+
+        wifi_manager::init();
+        Serial.println("[Main] Waiting for Wi-Fi...");
+        wifi_manager::waitForConnection(15000);
+
+        // Now stop BLE — WiFi status has been notified (or timed out)
         ble_manager::stopAdvertising();
+
+        if (wifi_manager::isConnected()) {
+            Serial.println("[Main] WiFi connected after provisioning");
+            appState.wifiConnected = true;
+            boot_screen::showConnected(WiFi.localIP().toString().c_str());
+
+            if (MDNS.begin("aksabot")) {
+                MDNS.addService("aksabot", "tcp", 80);
+            }
+            nvs_store::markSetupComplete();
+
+            // Start device server so the app can send the token via HTTP
+            device_server::setSetupMode(true);
+            device_server::start(FIRMWARE_VERSION);
+            Serial.println("[Main] Device server started — waiting for app to send token");
+
+            // Wait for the app to discover us (mDNS), register with backend,
+            // and POST the token. Poll for up to 45 seconds.
+            uint32_t tokenWaitStart = millis();
+            bool gotToken = false;
+            while ((millis() - tokenWaitStart) < 45000) {
+                if (nvs_store::hasDeviceToken()) {
+                    gotToken = true;
+                    break;
+                }
+                delay(500);
+            }
+
+            if (gotToken) {
+                Serial.println("[Main] Token received from app!");
+                boot_screen::showSetupComplete(ssidDisplay);
+            } else {
+                Serial.println("[Main] Token wait timeout — app will retry later");
+                boot_screen::showSetupComplete(ssidDisplay);
+            }
+        } else {
+            Serial.println("[Main] WiFi failed after provisioning");
+            boot_screen::showConnectionFailed("Check credentials and restart.");
+            delay(3000);
+        }
     } else if (hasNvsCreds) {
         Serial.println("[Main] Using NVS WiFi credentials");
     } else {
         Serial.println("[Main] Using compile-time WiFi credentials");
     }
 
-    // ── 10. Start face UI immediately ───────────────────────
-    // Show face immediately. If just provisioned, show THINKING (loading)
-    // instead of OFFLINE — the setup is still in progress, not broken.
-    if (isConfigured) {
+    // ── 10. Start face UI ───────────────────────────────────
+    if (provisionedViaBle && appState.wifiConnected) {
         appState.botState = BotState::IDLE;
-    } else if (provisionedViaBle) {
-        appState.botState = BotState::THINKING;  // setup in progress, not offline
+    } else if (isConfigured) {
+        appState.botState = BotState::IDLE;
     } else {
         appState.botState = BotState::OFFLINE;
     }
@@ -1094,59 +1160,48 @@ void setup() {
     xTaskCreatePinnedToCore(wsLoop, "ws_poll", 8192, nullptr, 3, &wsTask, 1);
     Serial.println("[Main] Face UI active — FreeRTOS tasks started");
 
-    // ── 11. WiFi connect ─────────────────────────────────
-    // Start WiFi if not already started in step 2b.
-    // After BLE provisioning, credentials are in NVS but WiFi was never inited.
-    if (!isConfigured || provisionedViaBle) {
-        wifi_manager::init();
-    }
-
-    if (needsProvisioning) {
-        // First boot — show connecting screen since user is watching
-        char ssidBuf[64] = {};
-        const char* ssidDisplay = WIFI_SSID;
-        if (nvs_store::getWifiSsid(ssidBuf, sizeof(ssidBuf)) && strlen(ssidBuf) > 0) {
-            ssidDisplay = ssidBuf;
-        }
-        boot_screen::showConnecting(ssidDisplay);
-    }
-
-    Serial.println("[Main] Waiting for Wi-Fi...");
-    wifi_manager::waitForConnection(15000);
-
-    if (wifi_manager::isConnected()) {
-        Serial.println("[Main] WiFi connected");
-        appState.wifiConnected = true;
-        appState.botState = BotState::IDLE;
-        syncFaceToState();
-        updateStatusBar();
-
-        if (MDNS.begin("aksabot")) {
-            MDNS.addService("aksabot", "tcp", 80);
+    // ── 11. WiFi connect (for already-configured devices) ───
+    // After BLE provisioning, WiFi is already connected above.
+    // This branch handles normal boot with existing credentials.
+    if (!provisionedViaBle) {
+        if (!isConfigured) {
+            wifi_manager::init();
         }
 
-        if (firstBoot) {
-            nvs_store::markSetupComplete();
-        }
-        // Keep setup mode open until a token is received — allows the app
-        // to deliver the token at any point (not just on first boot).
-        bool hasToken = nvs_store::hasDeviceToken() || (strlen(DEVICE_TOKEN) > 0);
-        if (!hasToken) {
-            device_server::setSetupMode(true);
-        }
-        device_server::start(FIRMWARE_VERSION);
-    } else {
-        Serial.println("[Main] WiFi failed — offline mode");
-        appState.botState = BotState::OFFLINE;
-        syncFaceToState();
-        updateStatusBar();
+        Serial.println("[Main] Waiting for Wi-Fi...");
+        wifi_manager::waitForConnection(15000);
 
-        // Show user-visible error so they know what to do
-        display::ReminderData rd = {};
-        strncpy(rd.text, "Can't connect to WiFi. Check your network and restart.", sizeof(rd.text) - 1);
-        rd.durationMs = 10000;
-        strncpy(rd.icon, "error", sizeof(rd.icon) - 1);
-        display::showReminder(rd);
+        if (wifi_manager::isConnected()) {
+            Serial.println("[Main] WiFi connected");
+            appState.wifiConnected = true;
+            appState.botState = BotState::IDLE;
+            syncFaceToState();
+            updateStatusBar();
+
+            if (MDNS.begin("aksabot")) {
+                MDNS.addService("aksabot", "tcp", 80);
+            }
+
+            if (firstBoot) {
+                nvs_store::markSetupComplete();
+            }
+            bool hasToken2 = nvs_store::hasDeviceToken() || (strlen(DEVICE_TOKEN) > 0);
+            if (!hasToken2) {
+                device_server::setSetupMode(true);
+            }
+            device_server::start(FIRMWARE_VERSION);
+        } else {
+            Serial.println("[Main] WiFi failed — offline mode");
+            appState.botState = BotState::OFFLINE;
+            syncFaceToState();
+            updateStatusBar();
+
+            display::ReminderData rd = {};
+            strncpy(rd.text, "Can't connect to WiFi. Check your network and restart.", sizeof(rd.text) - 1);
+            rd.durationMs = 10000;
+            strncpy(rd.icon, "error", sizeof(rd.icon) - 1);
+            display::showReminder(rd);
+        }
     }
 
     // ── 12. WebSocket connect ──────────────────────────────
@@ -1156,8 +1211,6 @@ void setup() {
         ws_client::connect();
     } else if (wifi_manager::isConnected() && !hasToken) {
         Serial.println("[Main] No device token — waiting for app to complete setup");
-        // Show thinking/loading face while the app automatically registers
-        // and sends the token. No user action needed.
         face::setExpression(face::Expression::THINKING, 200);
     }
 

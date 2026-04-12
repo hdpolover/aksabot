@@ -135,6 +135,32 @@ class _LocalDeviceList extends StatelessWidget {
     required this.onRemove,
   });
 
+  void _confirmRemove(BuildContext context, LocalDevice device) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove device?'),
+        content: Text(
+          'Remove "${device.name}" from this list? '
+          'You can re-add it from the Add Device screen.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              onRemove(device.id);
+            },
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -160,6 +186,7 @@ class _LocalDeviceList extends StatelessWidget {
                       name: device.name,
                       ssid: device.ssid,
                       hasIp: device.localIp != null,
+                      onLongPress: () => _confirmRemove(context, device),
                     ))
                 .toList(),
           ),

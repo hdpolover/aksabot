@@ -18,6 +18,7 @@ class DeviceTile extends StatelessWidget {
   /// true = advertising (phone visible to device), false = not advertising.
   final bool? bleAdvertising;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   const DeviceTile({
     super.key,
@@ -27,6 +28,7 @@ class DeviceTile extends StatelessWidget {
     this.isOnline = false,
     this.bleAdvertising,
     this.onTap,
+    this.onLongPress,
   });
 
   @override
@@ -50,6 +52,7 @@ class DeviceTile extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(AppConstants.radiusLg),
         child: Padding(
           padding: const EdgeInsets.all(AppConstants.spacingLg),
@@ -130,6 +133,7 @@ class LocalDeviceTile extends StatelessWidget {
   final String ssid;
   final bool hasIp;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   const LocalDeviceTile({
     super.key,
@@ -137,6 +141,7 @@ class LocalDeviceTile extends StatelessWidget {
     required this.ssid,
     this.hasIp = false,
     this.onTap,
+    this.onLongPress,
   });
 
   @override
@@ -147,6 +152,7 @@ class LocalDeviceTile extends StatelessWidget {
       icon: Icons.smart_toy_outlined,
       isOnline: hasIp,
       onTap: onTap,
+      onLongPress: onLongPress,
     );
   }
 }

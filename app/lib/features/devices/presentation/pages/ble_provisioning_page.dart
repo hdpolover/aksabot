@@ -78,6 +78,9 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
   // ── Step 1: Scan ─────────────────────────────────────────────
 
   Future<void> _startScan() async {
+    // Don't start another scan if one is already running
+    if (_isScanning) return;
+
     final btState = await FlutterBluePlus.adapterState.first;
     if (btState != BluetoothAdapterState.on) {
       if (!mounted) return;
@@ -87,25 +90,27 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
       return;
     }
 
+    // Stop any lingering scan before starting a fresh one.
+    // Android throttles at 5 starts per 30s — unnecessary restarts burn the budget.
+    _scanSub?.cancel();
+    _scanSub = null;
+    if (FlutterBluePlus.isScanningNow) {
+      await FlutterBluePlus.stopScan();
+      await Future.delayed(const Duration(milliseconds: 200));
+    }
+
     setState(() {
       _isScanning = true;
       _scanResults = [];
     });
 
-    try {
-      _scanSub?.cancel();
-      final resultsStream = await _ble.startScan();
-      _scanSub = resultsStream.listen((results) {
-        if (mounted) setState(() => _scanResults = results);
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isScanning = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Scan failed: $e')),
-      );
-      return;
-    }
+    // Subscribe to filtered results BEFORE starting the scan. scanResults is
+    // a broadcast stream — events emitted before listen() are lost forever.
+    _scanSub = _ble.scanResultsFiltered.listen((results) {
+      if (mounted) setState(() => _scanResults = results);
+    });
+
+    _ble.startScan();
 
     await Future.delayed(const Duration(seconds: 10));
     if (mounted) {

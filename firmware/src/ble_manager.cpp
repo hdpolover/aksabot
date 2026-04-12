@@ -298,13 +298,14 @@ void ble_manager::init() {
 
 
     // ── Start advertising ───────────────────────────────
-    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     // Use 16-bit short UUID form (4 bytes) instead of 128-bit (17 bytes).
     // The full 128-bit UUID overflows the 31-byte advertisement packet when
     // combined with the device name, causing NimBLE to spill it into the scan
     // response. iOS CoreBluetooth only reads the primary packet for service
     // UUID filtering, so it never finds the device. Short UUIDs always fit.
+    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(NimBLEUUID((uint16_t)0xFFE0));
+    pAdvertising->setName("Aksabot");
     pAdvertising->enableScanResponse(true);
     pAdvertising->setPreferredParams(0x06, 0x12);
     pAdvertising->start();
