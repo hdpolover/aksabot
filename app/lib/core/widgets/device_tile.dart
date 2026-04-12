@@ -14,6 +14,9 @@ class DeviceTile extends StatelessWidget {
   final String? subtitle;
   final IconData icon;
   final bool isOnline;
+  /// When non-null, shows a BLE presence badge next to the status dot.
+  /// true = advertising (phone visible to device), false = not advertising.
+  final bool? bleAdvertising;
   final VoidCallback? onTap;
 
   const DeviceTile({
@@ -22,6 +25,7 @@ class DeviceTile extends StatelessWidget {
     this.subtitle,
     this.icon = Icons.smart_toy_outlined,
     this.isOnline = false,
+    this.bleAdvertising,
     this.onTap,
   });
 
@@ -67,6 +71,19 @@ class DeviceTile extends StatelessWidget {
                     child: Icon(icon, color: iconColor, size: AppConstants.iconLg),
                   ),
                   const Spacer(),
+                  if (bleAdvertising != null) ...
+                    [
+                      Icon(
+                        bleAdvertising!
+                            ? Icons.bluetooth_connected
+                            : Icons.bluetooth_disabled,
+                        size: 13,
+                        color: bleAdvertising!
+                            ? colors.primary
+                            : colors.onSurfaceVariant.withValues(alpha: 0.45),
+                      ),
+                      const SizedBox(width: 4),
+                    ],
                   StatusDot(
                     variant: isOnline
                         ? StatusDotVariant.online

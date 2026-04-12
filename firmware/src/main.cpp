@@ -58,6 +58,7 @@ static const size_t PLAYBACK_QUEUE_SIZE = 40;  // ~800ms buffer at 20ms/frame
 static QueueHandle_t playbackQueue = nullptr;
 static volatile bool playbackActive = false;  // true while audio task should drain queue
 static volatile bool playbackDone = false;    // set by response:end to signal no more frames
+static volatile uint32_t handsFreeRecordStartMs = 0;  // when hands-free recording started (for no-speech timeout)
 static volatile bool playbackBuffering = true;  // jitter buffer: accumulate before playing
 static int JITTER_BUFFER_FRAMES = 15;           // wait for 300ms of audio before starting
 static volatile uint32_t lastFrameReceivedMs = 0;  // starvation detection
@@ -108,6 +109,8 @@ static void updateStatusBar() {
     sb.batteryPercent = 255;  // USB-powered
     sb.focusModeActive = false;
     sb.pomodoroActive = false;
+    sb.blePresent = (appState.presenceState == PresenceState::PRESENT ||
+                     appState.presenceState == PresenceState::LEAVING);
     // Stall detection: speaking/thinking but no data flowing for 3+ seconds
     sb.connectionStalled = false;
     if (appState.botState == BotState::SPEAKING && playbackActive && !playbackDone) {
@@ -148,6 +151,15 @@ static void onWsJson(const char* event, const char* data) {
     }
     else if (strcmp(event, "response:start") == 0) {
         power_manager::recordInteraction();  // Wake display for response
+
+        // If already playing, flush the old playback first
+        if (playbackActive) {
+            playbackActive = false;
+            xQueueReset(playbackQueue);
+            face::feedAudioAmplitude(0);
+            Serial.println("[Main] Flushing previous playback for new response");
+        }
+
         appState.botState = BotState::SPEAKING;
         syncFaceToState();
         cacheAccumLen = 0;
@@ -609,6 +621,8 @@ static void startHandsFreeRecording(ListenTrigger trigger) {
     // Stop wake word listening while recording (avoid echo trigger)
     wake_word::stopListening();
 
+    handsFreeRecordStartMs = millis();
+
     // Configure VAD for hands-free mode:
     // - Lower energy threshold to match this mic's signal level
     // - Shorter silence detection: 35 frames = 0.7s (push-to-talk uses HOLD_END instead)
@@ -795,14 +809,17 @@ static void audioCaptureLoop(void* param) {
         // VAD: check for end-of-speech (auto-stop recording)
         vad::Result vadResult = vad::analyze(pcmBuffer, samplesRead);
 
-        // Debug: log VAD state during hands-free recording
-        if (appState.listenTrigger != ListenTrigger::TOUCH) {
-            static int vadDebugCount = 0;
-            vadDebugCount++;
-            if (vadDebugCount % 50 == 0) {  // Every ~1s
-                Serial.printf("[VAD] energy=%.4f floor=%.4f speech=%d result=%d\n",
-                    vad::getLastEnergy(), vad::getNoiseFloor(),
-                    vad::hasSpeechStarted() ? 1 : 0, (int)vadResult);
+        // Hands-free: abort if no speech detected within 4 seconds (false trigger)
+        if (appState.listenTrigger != ListenTrigger::TOUCH && !vad::hasSpeechStarted()) {
+            if ((millis() - handsFreeRecordStartMs) > 4000) {
+                Serial.println("[Main] Hands-free abort — no speech detected (false trigger)");
+                audio_io::stopMic();
+                vad::reset();
+                vad::init();  // Restore default VAD config
+                appState.botState = BotState::IDLE;
+                syncFaceToState();
+                ws_client::sendEvent("audio:end");
+                continue;
             }
         }
 
@@ -812,6 +829,10 @@ static void audioCaptureLoop(void* param) {
             ws_client::sendEvent("audio:end");
             audio_io::stopMic();
             vad::reset();
+            // Restore default VAD config if we were in hands-free mode
+            if (appState.listenTrigger != ListenTrigger::TOUCH) {
+                vad::init();
+            }
             Serial.printf("[Main] VAD: end-of-speech, stopping (trigger=%s)\n",
                 appState.listenTrigger == ListenTrigger::TOUCH ? "touch" :
                 appState.listenTrigger == ListenTrigger::WAKE_WORD ? "wake_word" : "gesture");

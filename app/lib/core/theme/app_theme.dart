@@ -8,11 +8,11 @@ import 'app_colors.dart';
 ///
 /// Design language: bold, approachable, robot-companion-friendly.
 /// - Plus Jakarta Sans for geometric, techy-yet-warm typography
-/// - Electric violet primary for a distinctive identity
+/// - Blue primary for a clear, trustworthy AI-companion identity
 /// - Pill-shaped buttons and large radii for a friendly feel
 /// - Filled cards (no border outlines) for a modern, clean look
 class AppTheme {
-  static const _seedColor = Color(0xFF0D9488); // Teal — futuristic, robot-companion identity
+  static const _seedColor = Color(0xFF1D6EEA); // Blue — trustworthy, AI-companion identity
 
   static ThemeData get light => _buildTheme(Brightness.light);
   static ThemeData get dark => _buildTheme(Brightness.dark);

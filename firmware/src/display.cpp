@@ -621,6 +621,18 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
         s.fillSmoothCircle(8, 8, 4, dotCol);
     }
 
+    // ── BLE presence indicator (next to connection dot) ──
+    // Blue filled dot = phone present, dim hollow dot = away/unknown
+    {
+        uint16_t btCol = status.blePresent
+            ? rgb(80, 140, 255)                            // blue — present
+            : rgb(60, 60, 80);                             // dim — away
+        s.fillSmoothCircle(20, 8, 3, btCol);
+        // Small "B" diacritic: two tiny bumps on the right side
+        s.fillSmoothCircle(23, 6, 1, btCol);
+        s.fillSmoothCircle(23, 10, 1, btCol);
+    }
+
     // ── Status icon (bottom) — small icon instead of text label ──
     {
         int iconY = LCD_HEIGHT - 24;

@@ -6,6 +6,7 @@ import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../../../core/widgets/status_dot.dart';
 import '../../domain/entities/device_entity.dart';
 import '../../domain/repositories/devices_repository.dart';
+import 'ble_provisioning_page.dart';
 
 /// Device settings page — volume, brightness, transcript, idle timeout, device info.
 /// Navigated from the "Settings" quick action on the device dashboard.
@@ -245,6 +246,25 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
           FilledButton(
             onPressed: _saving ? null : _save,
             child: const Text('Save Settings'),
+          ),
+          const SizedBox(height: AppConstants.spacingXxl),
+
+          // Network
+          Text('Network', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: ListTile(
+              leading: const Icon(Icons.wifi),
+              title: const Text('Change Wi-Fi'),
+              subtitle: const Text('Connect Aksabot to a different network'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const BleProvisioningPage(changeWifiMode: true),
+                ),
+              ),
+            ),
           ),
           const SizedBox(height: AppConstants.spacingXxl),
 

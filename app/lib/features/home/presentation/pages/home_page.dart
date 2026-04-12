@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shimmer/shimmer.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/local/local_device.dart';
 import '../../../../core/local/local_device_store.dart';
-import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../../../core/widgets/device_tile.dart';
 import '../../../../core/widgets/empty_state.dart';
 import '../../../devices/domain/entities/device_entity.dart';
@@ -63,9 +63,9 @@ class _HomeViewState extends State<_HomeView> {
   Widget build(BuildContext context) {
     return BlocBuilder<DevicesBloc, DevicesState>(
       builder: (context, state) {
-        // While waiting for the bloc AND local devices, show spinner
+        // While waiting for both the bloc and local devices, show shimmer
         if (state is DevicesLoading && _localDevices == null) {
-          return const Scaffold(body: AppLoadingIndicator());
+          return const _DeviceGridShimmer();
         }
 
         // Backend has devices — always show grid
@@ -209,6 +209,98 @@ class _DeviceList extends StatelessWidget {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shimmer skeleton (loading state)
+// ---------------------------------------------------------------------------
+
+class _DeviceGridShimmer extends StatelessWidget {
+  const _DeviceGridShimmer();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final baseColor = colors.surfaceContainerHigh;
+    final highlightColor = colors.surfaceContainerHighest;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Devices')),
+      body: Shimmer.fromColors(
+        baseColor: baseColor,
+        highlightColor: highlightColor,
+        child: GridView.count(
+          padding: const EdgeInsets.all(AppConstants.spacingLg),
+          crossAxisCount: 2,
+          mainAxisSpacing: AppConstants.spacingMd,
+          crossAxisSpacing: AppConstants.spacingMd,
+          childAspectRatio: 1.3,
+          children: List.generate(4, (_) => const _DeviceTileSkeleton()),
+        ),
+      ),
+    );
+  }
+}
+
+class _DeviceTileSkeleton extends StatelessWidget {
+  const _DeviceTileSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      ),
+      padding: const EdgeInsets.all(AppConstants.spacingLg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: colors.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+                ),
+              ),
+              const Spacer(),
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: colors.surfaceContainerHighest,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppConstants.spacingMd),
+          Container(
+            height: 14,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: colors.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(AppConstants.radiusSm),
+            ),
+          ),
+          const SizedBox(height: AppConstants.spacingXs),
+          Container(
+            height: 11,
+            width: 60,
+            decoration: BoxDecoration(
+              color: colors.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(AppConstants.radiusSm),
+            ),
+          ),
+        ],
       ),
     );
   }

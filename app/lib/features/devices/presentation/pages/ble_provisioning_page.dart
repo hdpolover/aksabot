@@ -17,8 +17,13 @@ import '../../../../core/widgets/success_screen.dart';
 import '../../domain/repositories/devices_repository.dart';
 
 /// 3-step BLE provisioning wizard.
+///
+/// Set [changeWifiMode] to true when called from an already-paired device's
+/// settings page. In this mode the cloud registration step is skipped —
+/// only the Wi-Fi credentials are re-sent via BLE.
 class BleProvisioningPage extends StatefulWidget {
-  const BleProvisioningPage({super.key});
+  final bool changeWifiMode;
+  const BleProvisioningPage({super.key, this.changeWifiMode = false});
 
   @override
   State<BleProvisioningPage> createState() => _BleProvisioningPageState();
@@ -239,6 +244,21 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
   bool _setupError = false;
 
   Future<void> _onProvisioningSuccess(String ssid) async {
+    // Disconnect BLE — no longer needed
+    _ble.disconnect();
+
+    if (widget.changeWifiMode) {
+      // Already registered — just show a confirmation and pop.
+      if (!mounted) return;
+      setState(() {
+        _isConnectingWifi = false;
+        _setupDone = true;
+        _setupStatus = 'Wi-Fi updated successfully.';
+      });
+      _goToStep(2);
+      return;
+    }
+
     final device = LocalDeviceStore.create(
       name: _connectedDeviceName,
       ssid: ssid,
@@ -248,9 +268,6 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
     if (!mounted) return;
     setState(() => _isConnectingWifi = false);
     _goToStep(2);
-
-    // Disconnect BLE — no longer needed
-    _ble.disconnect();
 
     // Run the full cloud setup automatically
     _autoSetup(device.name);
@@ -389,7 +406,9 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
 
   @override
   Widget build(BuildContext context) {
-    final stepLabels = ['Find device', 'Wi-Fi setup', 'Done'];
+    final stepLabels = widget.changeWifiMode
+        ? ['Find device', 'New Wi-Fi', 'Done']
+        : ['Find device', 'Wi-Fi setup', 'Done'];
 
     return Scaffold(
       appBar: AppBar(
@@ -725,10 +744,14 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
   Widget _buildDoneStep() {
     if (_setupDone) {
       return SuccessScreen(
-        title: '$_connectedDeviceName is ready!',
-        subtitle: 'Your Aksabot is connected and online.\nSay hi — it might greet you back!',
+        title: widget.changeWifiMode
+            ? 'Wi-Fi updated!'
+            : '$_connectedDeviceName is ready!',
+        subtitle: widget.changeWifiMode
+            ? '$_connectedDeviceName will reconnect to the new network now.'
+            : 'Your Aksabot is connected and online.\nSay hi — it might greet you back!',
         onPressed: () {
-          Navigator.of(context).popUntil((route) => route.isFirst);
+          Navigator.of(context).pop();
         },
       );
     }

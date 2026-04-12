@@ -8,13 +8,13 @@ namespace wake_word {
 // ── Configuration ────────────────────────────────────────────
 
 // Minimum speech frames to consider as potential wake word (~200ms)
-static constexpr int MIN_SPEECH_FRAMES = 10;
+static constexpr int MIN_SPEECH_FRAMES = 20;
 // Maximum speech frames (wake word should be short, ~1.2s)
 static constexpr int MAX_SPEECH_FRAMES = 60;
 // Cooldown after detection to prevent rapid re-triggers
 static constexpr uint32_t COOLDOWN_MS = 3000;
 // Energy threshold for speech detection in wake word mode
-static constexpr float WAKE_ENERGY_THRESHOLD = 0.0004f;
+static constexpr float WAKE_ENERGY_THRESHOLD = 0.002f;
 
 // ── State ────────────────────────────────────────────────────
 
