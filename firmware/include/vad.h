@@ -63,4 +63,8 @@ float getLastEnergy();
 /// Check if speech has been detected at all in the current session.
 bool hasSpeechStarted();
 
+/// Set silence frames needed for end-of-speech detection at runtime.
+/// Use shorter values for hands-free mode (~0.7s), longer for push-to-talk (~1.5s).
+void setSilenceFrames(uint16_t frames);
+
 }  // namespace vad

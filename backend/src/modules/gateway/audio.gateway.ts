@@ -39,8 +39,8 @@ export class AudioGateway
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   private static readonly AUDIO_RATE_LIMIT = 100; // chunks per second per device
-  private static readonly HEARTBEAT_INTERVAL_MS = 10_000; // ping every 10s
-  private static readonly HEARTBEAT_TIMEOUT_MS = 20_000;  // dead if no pong in 20s
+  private static readonly HEARTBEAT_INTERVAL_MS = 15_000; // ping every 15s
+  private static readonly HEARTBEAT_TIMEOUT_MS = 45_000;  // dead if no pong in 45s
 
   constructor(
     private readonly authService: AuthService,
@@ -439,6 +439,72 @@ export class AudioGateway
     this.logger.log(`Wake greeting sent to ${deviceId}: "${wakeText.slice(0, 60)}..."`);
   }
 
+  private async onReconnectBack(deviceId: string) {
+    const session = this.sessions.get(deviceId);
+    if (!session || session.state !== 'idle') return;
+
+    // Skip if a connection greeting is already queued (from handleConnection)
+    // Give 3s buffer for the greeting to fire first
+    await new Promise((r) => setTimeout(r, 3000));
+
+    // Re-check state — greeting may have started
+    const s2 = this.sessions.get(deviceId);
+    if (!s2 || s2.state !== 'idle') return;
+
+    this.logger.log(`Device ${deviceId} reconnect:back — generating snarky reconnect audio`);
+
+    const reconnectPrompts = [
+      'Your internet just dropped and came back. Roast the WiFi or ISP. Be dramatic about almost dying (going offline). One sentence.',
+      'You just got disconnected and reconnected. Act like you survived a near-death experience. Dramatic, sarcastic. One sentence.',
+      'The connection dropped and you\'re back online. Comment on the bad internet like it personally offended you. One sentence.',
+      'You were offline for a bit and just came back. Act relieved in a dramatic way, or blame the router. One sentence.',
+      'Connection restored. React like you just respawned in a video game or came back from the void. Be funny. One sentence.',
+      'The WiFi dropped you. Make a sarcastic comment about the internet quality, like "really?" or "we doing this again?" vibes. One sentence.',
+      'You just reconnected after a dropout. Be the dramatic friend who acts like they were gone for years even though it was seconds. One sentence.',
+      'Internet hiccup — you\'re back. Reference the connection being unstable in a funny way. Maybe threaten the router. One sentence.',
+    ];
+    const prompt = reconnectPrompts[Math.floor(Math.random() * reconnectPrompts.length)];
+
+    const memories = await this.memoriesService.getRelevant(deviceId);
+    const systemPrompt = this.aiService['prompt'].buildSystemPrompt(memories);
+
+    let text = '';
+    const stream = this.aiService['llm'].generateStream(systemPrompt, [
+      { role: 'user', content: prompt },
+    ]);
+    for await (const token of stream) {
+      text += token;
+    }
+
+    text = text.replace(/\[\s*\w+\s*\]/g, '').trim();
+    if (!text) return;
+
+    const device = await this.persistence.getDevice(deviceId);
+    const settings = device?.settingsJson ?? {};
+    const voiceOpts = { voice: settings.voice_preset, speed: settings.voice_speed, stability: settings.voice_stability };
+
+    const sentences = this.splitSentences(text);
+
+    this.sendToDevice(deviceId, 'response:start', { type: 'reconnect' });
+
+    for (const sentence of sentences) {
+      const sock = this.deviceToSocket.get(deviceId);
+      if (!sock || sock.readyState !== 1) return;
+
+      const { opusAudio } = await this.aiService.synthesizeWithCache(
+        sentence, undefined, voiceOpts,
+      );
+      this.sendToDevice(deviceId, 'response:text', { text: sentence, isFinal: false });
+      await this.sendFramedOpusToDevice(deviceId, opusAudio);
+    }
+
+    this.sendToDevice(deviceId, 'response:end', {
+      fullText: text,
+      cacheKeys: [],
+    });
+    this.logger.log(`Reconnect quip sent to ${deviceId}: "${text.slice(0, 60)}..."`);
+  }
+
   /** Split text into sentences for per-sentence TTS (matches processTranscript behavior). */
   private splitSentences(text: string): string[] {
     const parts = text.split(/(?<=[.!?])\s+/);
@@ -514,6 +580,11 @@ export class AudioGateway
         case 'wake:touch':
           this.onWakeTouch(deviceId).catch((err) =>
             this.logger.error(`onWakeTouch error: ${err.message}`),
+          );
+          break;
+        case 'reconnect:back':
+          this.onReconnectBack(deviceId).catch((err) =>
+            this.logger.error(`onReconnectBack error: ${err.message}`),
           );
           break;
         default:

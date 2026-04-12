@@ -148,3 +148,7 @@ float vad::getLastEnergy() {
 bool vad::hasSpeechStarted() {
     return speechDetected;
 }
+
+void vad::setSilenceFrames(uint16_t frames) {
+    cfg.silenceFramesForEnd = frames;
+}

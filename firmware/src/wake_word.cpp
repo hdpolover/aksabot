@@ -14,7 +14,7 @@ static constexpr int MAX_SPEECH_FRAMES = 60;
 // Cooldown after detection to prevent rapid re-triggers
 static constexpr uint32_t COOLDOWN_MS = 3000;
 // Energy threshold for speech detection in wake word mode
-static constexpr float WAKE_ENERGY_THRESHOLD = 0.015f;
+static constexpr float WAKE_ENERGY_THRESHOLD = 0.0004f;
 
 // ── State ────────────────────────────────────────────────────
 

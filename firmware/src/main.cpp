@@ -444,13 +444,12 @@ static void onWsBinary(const uint8_t* data, size_t len) {
         frame.count = min(samples, (int)OPUS_FRAME_SAMPLES);
         memcpy(frame.samples, playbackBuffer, frame.count * sizeof(int16_t));
 
-        // Non-blocking enqueue — drop frame if queue full (better than blocking WS)
-        if (xQueueSend(playbackQueue, &frame, 0) != pdTRUE) {
-            static uint32_t lastDropLog = 0;
-            if (millis() - lastDropLog > 1000) {
-                Serial.println("[Main] Playback queue full — dropping frame");
-                lastDropLog = millis();
-            }
+        // Try to enqueue with a short wait — gives audio task time to drain
+        if (xQueueSend(playbackQueue, &frame, pdMS_TO_TICKS(50)) != pdTRUE) {
+            // Still full after 50ms — drop oldest frame to make room
+            PlaybackFrame discard;
+            xQueueReceive(playbackQueue, &discard, 0);
+            xQueueSend(playbackQueue, &frame, 0);
         }
     }
 
@@ -610,6 +609,21 @@ static void startHandsFreeRecording(ListenTrigger trigger) {
     // Stop wake word listening while recording (avoid echo trigger)
     wake_word::stopListening();
 
+    // Configure VAD for hands-free mode:
+    // - Lower energy threshold to match this mic's signal level
+    // - Shorter silence detection: 35 frames = 0.7s (push-to-talk uses HOLD_END instead)
+    vad::reset();
+    vad::setSilenceFrames(35);
+    // Re-init with lower threshold — mic RMS during speech is ~0.002-0.005
+    vad::init(vad::Config{
+        .energyThreshold = 0.002f,
+        .zcrThresholdLow = 0.05f,
+        .zcrThresholdHigh = 0.35f,
+        .silenceFramesForEnd = 35,
+        .speechFramesForStart = 3,
+        .adaptiveRate = 0.02f,  // Faster adaptation for hands-free
+    });
+
     // Play a short chime or visual cue so user knows bot is listening
     face::setExpression(face::Expression::LISTENING, 150);
 
@@ -692,6 +706,7 @@ static void audioCaptureLoop(void* param) {
                 appState.botState = BotState::IDLE;
                 syncFaceToState();
                 display::setTranscriptText("", "");  // Clear transcript overlay
+                vad::init();  // Restore default VAD config for push-to-talk
                 wake_word::startListening();  // Resume wake word detection
                 Serial.println("[Main] Playback complete");
             } else if (!playbackDone && (millis() - lastFrameReceivedMs) > 5000) {
@@ -779,6 +794,18 @@ static void audioCaptureLoop(void* param) {
 
         // VAD: check for end-of-speech (auto-stop recording)
         vad::Result vadResult = vad::analyze(pcmBuffer, samplesRead);
+
+        // Debug: log VAD state during hands-free recording
+        if (appState.listenTrigger != ListenTrigger::TOUCH) {
+            static int vadDebugCount = 0;
+            vadDebugCount++;
+            if (vadDebugCount % 50 == 0) {  // Every ~1s
+                Serial.printf("[VAD] energy=%.4f floor=%.4f speech=%d result=%d\n",
+                    vad::getLastEnergy(), vad::getNoiseFloor(),
+                    vad::hasSpeechStarted() ? 1 : 0, (int)vadResult);
+            }
+        }
+
         if (vadResult == vad::Result::END_OF_SPEECH && appState.wsConnected) {
             appState.botState = BotState::THINKING;
             syncFaceToState();
@@ -1328,10 +1355,31 @@ void loop() {
     static bool prevWifi = false;
     static bool prevWs = false;
     if (appState.wifiConnected != prevWifi || appState.wsConnected != prevWs) {
-        // WS just connected — send device info and ensure face is IDLE
+
+        // ── Face reactions to connectivity changes (only when idle) ──
+        if (appState.botState == BotState::IDLE || appState.botState == BotState::OFFLINE) {
+            if (!appState.wifiConnected && prevWifi) {
+                // WiFi lost → sad
+                face::setExpression(face::Expression::SAD, 300);
+                scheduleFaceRevert(3000);
+            } else if (appState.wifiConnected && !appState.wsConnected && prevWs) {
+                // WS dropped but WiFi still up → confused
+                face::setExpression(face::Expression::CONFUSED, 200);
+                scheduleFaceRevert(3000);
+            } else if (appState.wifiConnected && !appState.wsConnected && !prevWifi) {
+                // WiFi just recovered but WS not yet → confused (connecting...)
+                face::setExpression(face::Expression::CONFUSED, 200);
+                scheduleFaceRevert(3000);
+            }
+        }
+
+        // WS just connected — happy face + send device info
         if (appState.wsConnected && !prevWs) {
+            static bool wasEverConnected = false;  // Distinguish boot vs reconnect
+
             appState.botState = BotState::IDLE;
-            syncFaceToState();
+            face::setExpression(face::Expression::HAPPY, 200);
+            scheduleFaceRevert(2000);
 
             // Report device info to backend
             char infoPayload[128];
@@ -1339,11 +1387,30 @@ void loop() {
                 "{\"firmwareVersion\":\"%s\",\"wifiSsid\":\"%s\",\"wifiRssi\":%d}",
                 FIRMWARE_VERSION, WiFi.SSID().c_str(), WiFi.RSSI());
             ws_client::sendEvent("device:info", infoPayload);
+
+            // Tell backend this was a reconnect (not first boot)
+            // so it can roast the bad connection instead of a normal greeting
+            if (wasEverConnected) {
+                ws_client::sendEvent("reconnect:back");
+            }
+            wasEverConnected = true;
         }
         prevWifi = appState.wifiConnected;
         prevWs = appState.wsConnected;
         updateStatusBar();
         status_led::syncToState();
+    }
+
+    // Auto-resume wake word listening when IDLE and connected
+    // Delay 2s after going IDLE to avoid echo (hearing bot's own speech)
+    static uint32_t idleSinceMs = 0;
+    if (appState.botState == BotState::IDLE && appState.wsConnected) {
+        if (idleSinceMs == 0) idleSinceMs = now;
+        if (!wake_word::isListening() && (now - idleSinceMs) > 2000) {
+            wake_word::startListening();
+        }
+    } else {
+        idleSinceMs = 0;
     }
 
     vTaskDelay(pdMS_TO_TICKS(10));
