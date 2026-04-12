@@ -203,12 +203,13 @@ When Aksa has been idle for 8–20 seconds he performs small personality animati
 
 Aksa's voice is delivered through ElevenLabs TTS. All presets are male to match his identity. **Ziggy is the default** and recommended voice — it fits his gen-z, slightly unhinged personality best.
 
-| Preset key | Voice | Character | Recommended for |
-|------------|-------|-----------|----------------|
-| `ziggy` | Ziggy | Young, energetic, slightly synthetic | **Default.** Best match for Aksa's personality |
-| `fin` | Fin | Otherworldly, alien quality, cool texture | When you want him to sound more artificial/robotic |
-| `george` | George | Crisp British male, mildly robotic edge | A more polished but still artificial feel |
-| `roger` | Roger | Calm, grounded, most human-sounding | The only "normal" option — use if Ziggy feels too much |
+| Preset key | Voice | Recommended for |
+|------------|-------|----------------|
+| `ziggy` | Ziggy | **Default.** Best match for Aksa's personality |
+| `little_dude` | Little Dude | Alternative young/quirky option |
+| `sean` | Sean | Alternative option |
+| `nelson` | Nelson | Alternative option |
+| `nathan` | Nathan | Alternative option |
 
 **What to look for** when adding new voices: artificial texture, slight synthetic edge, clearly male, not too smooth or announcer-y. Avoid voices that sound like a news anchor or customer service bot — that's the opposite of Aksa's vibe.
 

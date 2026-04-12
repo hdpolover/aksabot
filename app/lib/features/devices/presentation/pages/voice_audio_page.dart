@@ -121,7 +121,9 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
         );
       },
       (audioBytes) async {
-        await _audioPlayer.play(BytesSource(audioBytes));
+        await _audioPlayer.play(
+          BytesSource(audioBytes, mimeType: 'audio/mpeg'),
+        );
       },
     );
   }
@@ -179,18 +181,11 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
                       isExpanded: true,
                       underline: const SizedBox.shrink(),
                       items: const [
-                        DropdownMenuItem(
-                            value: 'ziggy',
-                            child: Text('Ziggy — energetic, slightly synthetic')),
-                        DropdownMenuItem(
-                            value: 'fin',
-                            child: Text('Fin — alien, otherworldly')),
-                        DropdownMenuItem(
-                            value: 'george',
-                            child: Text('George — crisp British, robotic edge')),
-                        DropdownMenuItem(
-                            value: 'roger',
-                            child: Text('Roger — calm, most human')),
+                        DropdownMenuItem(value: 'ziggy',       child: Text('Ziggy')),
+                        DropdownMenuItem(value: 'little_dude', child: Text('Little Dude')),
+                        DropdownMenuItem(value: 'sean',        child: Text('Sean')),
+                        DropdownMenuItem(value: 'nelson',      child: Text('Nelson')),
+                        DropdownMenuItem(value: 'nathan',      child: Text('Nathan')),
                       ],
                       onChanged: _saving
                           ? null

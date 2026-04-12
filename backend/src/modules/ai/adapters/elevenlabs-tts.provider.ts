@@ -5,12 +5,12 @@ import type { ITtsProvider, TtsOptions } from '../interfaces';
 // Voice preset name → ElevenLabs voice ID mapping
 // All presets are male to match Aksa's identity.
 // Ziggy is the default — energetic, slightly synthetic, fits the gen-z personality.
-// Verify IDs in the ElevenLabs Voice Library if any stop working.
 const VOICE_PRESETS: Record<string, string> = {
-  ziggy:  '87n4zM8Wuy87vFILuKvE',  // Ziggy — young, energetic, slightly artificial (default)
-  fin:    'D38z5RcWu1voky8WS1ja',  // Fin — otherworldly, slightly alien quality
-  george: 'JBFqnCBsd6RMkjVDRZzb',  // George — crisp British male, mildly robotic edge
-  roger:  'CwhRBWXzGAHq8TQ4Fs17',  // Roger — calm, grounded, most human-sounding
+  ziggy:       '87n4zM8Wuy87vFILuKvE',  // Ziggy — young, energetic, slightly synthetic (default)
+  little_dude: 'fBD19tfE58bkETeiwUoC',  // Little Dude
+  sean:        '4NJLA7OQNVkeKe4jVdHw',  // Sean
+  nelson:      'EaX6rnyDKjJx35tchi80',  // Nelson
+  nathan:      'g2W4HAjKvdW93AmsjsOx',  // Nathan
 };
 
 const DEFAULT_VOICE_ID = VOICE_PRESETS.ziggy;
