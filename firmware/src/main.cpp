@@ -22,6 +22,7 @@
 #include "debug_log.h"
 #include "power_manager.h"
 #include "ble_manager.h"
+#include <NimBLEDevice.h>
 #include "boot_screen.h"
 #include "bios_menu.h"
 #include "device_server.h"
@@ -626,8 +627,15 @@ static void onTouchEvent(touch::Event event) {
 /// Start a hands-free recording session.
 /// Unlike push-to-talk, the user doesn't hold the screen — VAD handles end-of-speech.
 static void startHandsFreeRecording(ListenTrigger trigger) {
-    if (appState.botState != BotState::IDLE) return;
-    if (!appState.wsConnected) return;
+    if (appState.botState != BotState::IDLE) {
+        Serial.printf("[Main] Hands-free ignored — bot not idle (state=%d)\n",
+                      (int)appState.botState);
+        return;
+    }
+    if (!appState.wsConnected) {
+        Serial.println("[Main] Hands-free ignored — WebSocket not connected");
+        return;
+    }
 
     appState.listenTrigger = trigger;
     appState.botState = BotState::LISTENING;
@@ -1089,47 +1097,30 @@ void setup() {
         }
         boot_screen::showConnecting(ssidDisplay);
 
+        // Stop BLE completely before starting WiFi.
+        // On this ESP32-S3 board, BLE + WiFi radio coexistence is unreliable —
+        // WiFi drops if BLE is still active. Deiniting NimBLE releases the
+        // BLE controller and frees radio resources for a stable WiFi connection.
+        ble_manager::stopAdvertising();
+        NimBLEDevice::deinit(true);
+        delay(300);  // let radio settle
+
         wifi_manager::init();
         Serial.println("[Main] Waiting for Wi-Fi...");
         wifi_manager::waitForConnection(15000);
 
-        // Now stop BLE — WiFi status has been notified (or timed out)
-        ble_manager::stopAdvertising();
-
         if (wifi_manager::isConnected()) {
-            Serial.println("[Main] WiFi connected after provisioning");
-            appState.wifiConnected = true;
             boot_screen::showConnected(WiFi.localIP().toString().c_str());
+            nvs_store::markSetupComplete();
 
             if (MDNS.begin("aksabot")) {
                 MDNS.addService("aksabot", "tcp", 80);
             }
-            nvs_store::markSetupComplete();
-
-            // Start device server so the app can send the token via HTTP
-            device_server::setSetupMode(true);
             device_server::start(FIRMWARE_VERSION);
-            Serial.println("[Main] Device server started — waiting for app to send token");
 
-            // Wait for the app to discover us (mDNS), register with backend,
-            // and POST the token. Poll for up to 45 seconds.
-            uint32_t tokenWaitStart = millis();
-            bool gotToken = false;
-            while ((millis() - tokenWaitStart) < 45000) {
-                if (nvs_store::hasDeviceToken()) {
-                    gotToken = true;
-                    break;
-                }
-                delay(500);
-            }
-
-            if (gotToken) {
-                Serial.println("[Main] Token received from app!");
-                boot_screen::showSetupComplete(ssidDisplay);
-            } else {
-                Serial.println("[Main] Token wait timeout — app will retry later");
-                boot_screen::showSetupComplete(ssidDisplay);
-            }
+            // Token + backend URL were already written via BLE before WiFi started.
+            // No need to wait for HTTP delivery — just show success.
+            boot_screen::showSetupComplete(ssidDisplay);
         } else {
             Serial.println("[Main] WiFi failed after provisioning");
             boot_screen::showConnectionFailed("Check credentials and restart.");

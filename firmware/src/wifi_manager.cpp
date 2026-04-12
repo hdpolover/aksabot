@@ -40,7 +40,7 @@ static void onWiFiEvent(WiFiEvent_t event) {
 void wifi_manager::init() {
     WiFi.mode(WIFI_STA);
     WiFi.onEvent(onWiFiEvent);
-    WiFi.setAutoReconnect(false);  // we handle reconnect manually for backoff
+    WiFi.setAutoReconnect(true);   // auto-reconnect on disconnect
 
     // Try NVS credentials first, fall back to compile-time constants
     if (nvs_store::hasWifiCredentials() &&

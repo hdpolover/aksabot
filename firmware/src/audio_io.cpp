@@ -74,13 +74,16 @@ void audio_io::init() {
         return;
     }
 
-    // Set volume from NVS (default 80%) + 24dB mic gain
+    // Set volume from NVS (default 80%) + 42dB mic gain.
+    // Raised from 24dB: higher gain gives ~8x more headroom between voice
+    // and the wake word detector's noise floor threshold. Voice peaks at ~3%
+    // of full scale at 42dB so there is no clipping risk on a MEMS mic.
     uint8_t vol = nvs_store::getVolume();
     es8311_handle_t es_handle = es8311_create(I2C_NUM_0, ES8311_ADDRESS_0);
     es8311_voice_volume_set(es_handle, vol, NULL);
-    es8311_microphone_gain_set(es_handle, ES8311_MIC_GAIN_24DB);
+    es8311_microphone_gain_set(es_handle, ES8311_MIC_GAIN_42DB);
 
-    Serial.printf("[Audio] ES8311 codec ready (vol=%d%%, mic=24dB)\n", vol);
+    Serial.printf("[Audio] ES8311 codec ready (vol=%d%%, mic=42dB)\n", vol);
 }
 
 size_t audio_io::readMic(int16_t* buffer, size_t maxSamples) {

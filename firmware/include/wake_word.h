@@ -4,17 +4,16 @@
 
 /// Wake word detection module.
 ///
-/// Continuously monitors microphone audio for the wake phrase "Hey Aksa".
-/// When detected, fires a callback to trigger hands-free recording.
+/// Energy-based speech detector: triggers when a sound segment of the right
+/// duration (400ms–1.2s) crosses the adaptive noise floor threshold.
+/// Any speech phrase of that length will trigger it — not specifically "hey aksa".
 ///
-/// Implementation uses an energy-based keyword spotting approach:
-///   1. Mic audio is continuously read in a background FreeRTOS task
-///   2. Audio energy is monitored for speech onset
-///   3. When speech is detected, a short buffer (~2s) is captured
-///   4. The buffer is sent to the backend for wake word verification
+/// Detection quality depends on mic gain (set in audio_io::init via ES8311_MIC_GAIN_*).
+/// Higher gain → wider margin between voice and threshold → more reliable detection.
+/// Current tuning targets ES8311_MIC_GAIN_42DB.
 ///
-/// The detection runs on Core 0 alongside the audio capture task,
-/// sharing the I2S mic input.
+/// The detector piggybacks on the audio capture loop (Core 0).
+/// Mic frames are fed via wake_word_processMicFrame() — no separate task.
 ///
 /// Usage:
 ///   wake_word::init();

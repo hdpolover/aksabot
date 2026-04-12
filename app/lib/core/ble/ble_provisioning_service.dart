@@ -77,11 +77,11 @@ class BleProvisioningService {
 
   // ── Wi-Fi Provisioning ───────────────────────────────────────
 
-  /// Writes Wi-Fi credentials to the ESP32 and waits for connection.
+  /// Writes Wi-Fi credentials and returns raw byte notifications.
   ///
-  /// Returns a stream of wifi status updates (0=disconnected, 1=connecting,
-  /// 2=connected, 3=failed).
-  Future<Stream<int>> writeWifiCredentials(String ssid, String password) async {
+  /// The connected notification includes the IP: `[2, ip_bytes...]`.
+  /// Use this to extract the device IP and skip mDNS discovery.
+  Future<Stream<List<int>>> writeWifiCredentialsRaw(String ssid, String password) async {
     final wifiSvc = _findService(BleConstants.wifiService);
     if (wifiSvc == null) throw BleProvisioningException('Wi-Fi service not found');
 
@@ -95,15 +95,13 @@ class BleProvisioningService {
 
     // Subscribe to status notifications first
     await statusChar.setNotifyValue(true);
-    final statusStream = statusChar.onValueReceived.map(
-      (value) => value.isNotEmpty ? value[0] : 0,
-    );
 
     // Write credentials
     await ssidChar.write(utf8.encode(ssid), withoutResponse: false);
     await passChar.write(utf8.encode(password), withoutResponse: false);
 
-    return statusStream;
+    // Return raw byte stream — caller parses status + IP
+    return statusChar.onValueReceived;
   }
 
   /// Reads the current Wi-Fi connection status.
@@ -120,30 +118,20 @@ class BleProvisioningService {
 
   // ── Device Auth ──────────────────────────────────────────────
 
-  /// Writes the device token to the ESP32 and waits for auth validation.
+  /// Writes the device token (and optionally backend URL) to the ESP32.
   ///
-  /// Returns a stream of auth status updates (0=no token, 1=stored, 2=validated).
-  Future<Stream<int>> writeDeviceToken(String token) async {
+  /// For provisioning, pass `"token\nbackendUrl"` as the payload so the
+  /// firmware has everything it needs to connect to WebSocket after WiFi.
+  Future<void> writeDeviceToken(String payload) async {
     final authSvc = _findService(BleConstants.authService);
     if (authSvc == null) throw BleProvisioningException('Auth service not found');
 
     final tokenChar = _findCharacteristic(authSvc, BleConstants.deviceToken);
-    final statusChar = _findCharacteristic(authSvc, BleConstants.authStatus);
-
-    if (tokenChar == null || statusChar == null) {
-      throw BleProvisioningException('Auth characteristics not found');
+    if (tokenChar == null) {
+      throw BleProvisioningException('Token characteristic not found');
     }
 
-    // Subscribe to auth status notifications
-    await statusChar.setNotifyValue(true);
-    final statusStream = statusChar.onValueReceived.map(
-      (value) => value.isNotEmpty ? value[0] : 0,
-    );
-
-    // Write token
-    await tokenChar.write(utf8.encode(token), withoutResponse: false);
-
-    return statusStream;
+    await tokenChar.write(utf8.encode(payload), withoutResponse: false);
   }
 
   /// Reads the current auth status.

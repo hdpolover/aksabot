@@ -1,8 +1,8 @@
 import 'dart:async';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:go_router/go_router.dart';
 import 'package:wifi_scan/wifi_scan.dart';
 
 import '../../../../core/ble/ble_constants.dart';
@@ -11,7 +11,6 @@ import '../../../../core/constants/api.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/local/local_device_store.dart';
-import '../../../../core/local/mdns_discovery_service.dart';
 import '../../../../core/widgets/step_progress_bar.dart';
 import '../../../../core/widgets/success_screen.dart';
 import '../../domain/repositories/devices_repository.dart';
@@ -39,6 +38,7 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
   // Step 1: Scan
   List<ScanResult> _scanResults = [];
   bool _isScanning = false;
+  String? _connectingDeviceId; // remote ID of device being connected
   StreamSubscription? _scanSub;
 
   // Step 2: Wi-Fi
@@ -81,7 +81,10 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
     // Don't start another scan if one is already running
     if (_isScanning) return;
 
-    final btState = await FlutterBluePlus.adapterState.first;
+    // Skip `unknown` — iOS CoreBluetooth emits it briefly during init
+    // before settling to the real state.
+    final btState = await FlutterBluePlus.adapterState
+        .firstWhere((s) => s != BluetoothAdapterState.unknown);
     if (btState != BluetoothAdapterState.on) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -124,15 +127,19 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
     _scanSub?.cancel();
     setState(() {
       _isScanning = false;
+      _connectingDeviceId = device.remoteId.str;
       _connectedDeviceName = name.isNotEmpty ? name : 'Aksabot';
     });
 
     try {
       await _ble.connect(device);
+      if (!mounted) return;
+      setState(() => _connectingDeviceId = null);
       _goToStep(1);
       _scanWifiNetworks();
     } catch (e) {
       if (!mounted) return;
+      setState(() => _connectingDeviceId = null);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to connect: $e')),
       );
@@ -143,6 +150,7 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
 
   List<WiFiAccessPoint> _wifiNetworks = [];
   bool _isScanningWifi = false;
+  bool _wifiScanSupported = true; // false on iOS
   String _wifiSearchQuery = '';
 
   Future<void> _scanWifiNetworks() async {
@@ -150,10 +158,19 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
 
     try {
       final can = await WiFiScan.instance.canStartScan();
-      if (can == CanStartScan.yes) {
-        await WiFiScan.instance.startScan();
-        await Future.delayed(const Duration(seconds: 2));
+      if (can != CanStartScan.yes) {
+        // iOS doesn't allow WiFi scanning — go straight to manual entry
+        if (mounted) {
+          setState(() {
+            _wifiScanSupported = false;
+            _isScanningWifi = false;
+          });
+        }
+        return;
       }
+
+      await WiFiScan.instance.startScan();
+      await Future.delayed(const Duration(seconds: 2));
 
       final results = await WiFiScan.instance.getScannedResults();
       final seen = <String>{};
@@ -207,54 +224,49 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
     });
 
     try {
-      final statusStream = await _ble.writeWifiCredentials(ssid, password);
+      if (!widget.changeWifiMode) {
+        // ── Step 1: Register with backend while BLE is still alive ──
+        setState(() => _wifiError = null);
+        final result = await sl<DevicesRepository>().createDevice(
+          name: _connectedDeviceName,
+        );
 
-      // Listen for status with a timeout. The firmware may disconnect BLE
-      // when it starts WiFi, so we treat timeout/disconnect as success
-      // (credentials were already saved to NVS on the device).
-      bool resolved = false;
-      final sub = statusStream.listen((status) {
-        if (!mounted || resolved) return;
-        setState(() => _wifiStatus = status);
+        String? token;
+        result.fold(
+          (failure) => throw Exception('Backend registration failed: $failure'),
+          (device) => token = device.deviceToken,
+        );
 
-        if (status == BleConstants.wifiConnected) {
-          resolved = true;
-          _onProvisioningSuccess(ssid);
-        } else if (status == BleConstants.wifiFailed) {
-          resolved = true;
-          setState(() {
-            _isConnectingWifi = false;
-            _wifiError =
-                'Wi-Fi connection failed. Check your credentials and try again.';
-          });
+        if (token == null || token!.isEmpty) {
+          throw Exception('No device token received from backend');
         }
-      });
 
-      // Give the device up to 8 seconds to respond, then assume success
-      await Future.delayed(const Duration(seconds: 8));
-      await sub.cancel();
+        // ── Step 2: Write token + backend URL to device via BLE ──
+        final wsUrl = '${ApiConstants.baseUrl.replaceFirst('http', 'ws')}/ws';
+        final payload = '$token\n$wsUrl';
+        await _ble.writeDeviceToken(payload);
+      }
 
-      if (!resolved && mounted) {
-        await _onProvisioningSuccess(ssid);
+      // ── Step 3: Write WiFi credentials via BLE ──
+      // After this, firmware stops BLE and starts WiFi.
+      try {
+        await _ble.writeWifiCredentialsRaw(ssid, password);
+      } catch (_) {
+        // BLE disconnect is expected — firmware kills BLE before starting WiFi
       }
     } catch (e) {
       if (!mounted) return;
-      // BLE disconnect during WiFi transition is expected — treat as success
-      await _onProvisioningSuccess(ssid);
+      setState(() {
+        _isConnectingWifi = false;
+        _wifiError = 'Setup failed: $e';
+      });
+      return;
     }
-  }
 
-  String _setupStatus = '';
-  bool _setupDone = false;
-  bool _setupError = false;
-
-  Future<void> _onProvisioningSuccess(String ssid) async {
-    // Disconnect BLE — no longer needed
+    if (!mounted) return;
     _ble.disconnect();
 
     if (widget.changeWifiMode) {
-      // Already registered — just show a confirmation and pop.
-      if (!mounted) return;
       setState(() {
         _isConnectingWifi = false;
         _setupDone = true;
@@ -264,99 +276,71 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
       return;
     }
 
-    final device = LocalDeviceStore.create(
-      name: _connectedDeviceName,
-      ssid: ssid,
-    );
-    await LocalDeviceStore.save(device);
+    // Clean up local device store — device is now backend-registered
+    await LocalDeviceStore.clear();
 
-    if (!mounted) return;
     setState(() => _isConnectingWifi = false);
     _goToStep(2);
 
-    // Run the full cloud setup automatically
-    _autoSetup(device.name);
+    // ── Step 4: Poll backend until device comes online ──
+    _waitForDeviceOnline();
   }
 
-  Future<void> _autoSetup(String deviceName) async {
+  String _setupStatus = '';
+  bool _setupDone = false;
+  bool _setupError = false;
+
+  Future<void> _waitForDeviceOnline() async {
     try {
-      // Step 1: Wait for device to connect to WiFi and start HTTP server
-      setState(() => _setupStatus = 'Waiting for device to connect to WiFi...');
-      await Future.delayed(const Duration(seconds: 6));
+      setState(() => _setupStatus = 'Device is connecting to WiFi...');
 
-      if (!mounted) return;
+      // Poll backend to check if the device connected.
+      // Firmware needs ~15s: BLE deinit → WiFi connect → WS connect.
+      final devicesRepo = sl<DevicesRepository>();
 
-      // Step 2: Discover device on network
-      setState(() => _setupStatus = 'Finding device on network...');
-      final discovery = MdnsDiscoveryService();
-      String? deviceIp;
-
-      for (int attempt = 0; attempt < 4; attempt++) {
-        final found = await discovery.discoverFirst(
-          timeout: const Duration(seconds: 6),
-        );
-        if (found != null) {
-          deviceIp = found.ip;
-          break;
-        }
+      for (int attempt = 0; attempt < 20; attempt++) {
         if (!mounted) return;
-        if (attempt < 3) {
-          setState(() => _setupStatus = 'Searching for device... (attempt ${attempt + 2})');
-        }
-      }
 
-      if (deviceIp == null) {
-        if (mounted) {
+        await Future.delayed(const Duration(seconds: 3));
+
+        if (attempt > 2) {
+          setState(() => _setupStatus = 'Waiting for device to come online... (${attempt + 1})');
+        }
+
+        final result = await devicesRepo.getDevices();
+        bool online = false;
+        result.fold(
+          (_) {},
+          (devices) {
+            online = devices.any((d) => d.isOnline);
+          },
+        );
+
+        if (online) {
+          if (!mounted) return;
           setState(() {
-            _setupStatus = 'Could not find device on network. You can set it up later from the home screen.';
-            _setupError = true;
+            _setupStatus = 'All set! Your Aksabot is ready.';
+            _setupDone = true;
           });
+          // Short pause so the success state is visible before navigating.
+          await Future.delayed(const Duration(milliseconds: 800));
+          if (!mounted) return;
+          context.go('/home');
+          return;
         }
-        return;
       }
 
-      if (!mounted) return;
-
-      // Step 3: Register with backend
-      setState(() => _setupStatus = 'Registering with AI cloud...');
-      final result = await sl<DevicesRepository>().createDevice(name: deviceName);
-
-      String? token;
-      result.fold(
-        (failure) => throw Exception(failure.toString()),
-        (device) => token = device.deviceToken,
-      );
-
-      if (token == null || token!.isEmpty) {
-        throw Exception('No token received');
+      // Timeout — device didn't come online within ~60 seconds
+      if (mounted) {
+        setState(() {
+          _setupStatus = 'Device registered but not online yet. It may still be connecting — check the home screen.';
+          _setupError = true;
+        });
       }
-
-      if (!mounted) return;
-
-      // Step 4: Send token + backend URL to device
-      setState(() => _setupStatus = 'Activating your Aksabot...');
-      final wsUrl = '${ApiConstants.baseUrl.replaceFirst('http', 'ws')}/ws';
-      final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 5),
-        receiveTimeout: const Duration(seconds: 10),
-      ));
-      await dio.post('http://$deviceIp/token', data: {
-        'token': token,
-        'backendUrl': wsUrl,
-      });
-
-      // Clean up local device (now registered with backend)
-      await LocalDeviceStore.clear();
-
-      if (!mounted) return;
-      setState(() {
-        _setupStatus = 'All set! Your Aksabot is ready.';
-        _setupDone = true;
-      });
     } catch (e) {
       if (mounted) {
         setState(() {
-          _setupStatus = 'Setup incomplete. You can finish from the home screen.';
+          _setupStatus = 'Setup error: $e';
           _setupError = true;
         });
       }
@@ -494,10 +478,15 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
                           result.advertisementData.advName.isNotEmpty
                               ? result.advertisementData.advName
                               : 'Aksabot';
+                      final isConnecting =
+                          _connectingDeviceId == result.device.remoteId.str;
                       return _DeviceTile(
                         name: name,
                         rssi: result.rssi,
-                        onConnect: () => _selectDevice(result.device, name),
+                        isConnecting: isConnecting,
+                        onConnect: _connectingDeviceId != null
+                            ? null
+                            : () => _selectDevice(result.device, name),
                       );
                     },
                   ),
@@ -646,8 +635,52 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
           ),
         ],
 
-        // Network list (when no network selected)
-        if (selectedSsid.isEmpty) ...[
+        // Network list or manual entry (when no network selected)
+        if (selectedSsid.isEmpty && !_wifiScanSupported) ...[
+          // iOS: WiFi scanning not available — manual entry
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppConstants.spacingXxl,
+              ),
+              child: Column(
+                children: [
+                  const SizedBox(height: AppConstants.spacingXxl),
+                  Icon(
+                    Icons.wifi,
+                    size: AppConstants.iconXxl,
+                    color: colors.onSurfaceVariant.withValues(alpha: 0.3),
+                  ),
+                  const SizedBox(height: AppConstants.spacingMd),
+                  Text(
+                    'Enter your Wi-Fi network name\nand password below.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: AppConstants.spacingXxl),
+                  TextField(
+                    controller: _ssidController,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Wi-Fi Network Name',
+                      prefixIcon: Icon(Icons.wifi),
+                    ),
+                    onSubmitted: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: AppConstants.spacingMd),
+                  FilledButton(
+                    onPressed: _ssidController.text.trim().isNotEmpty
+                        ? () => setState(() {})
+                        : null,
+                    child: const Text('Continue'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ] else if (selectedSsid.isEmpty) ...[
           const SizedBox(height: AppConstants.spacingSm),
           // Search bar
           Padding(
@@ -755,9 +788,7 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
         subtitle: widget.changeWifiMode
             ? '$_connectedDeviceName will reconnect to the new network now.'
             : 'Your Aksabot is connected and online.\nSay hi — it might greet you back!',
-        onPressed: () {
-          Navigator.of(context).pop();
-        },
+        onPressed: () => context.go('/home'),
       );
     }
 
@@ -803,9 +834,7 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
             if (_setupError) ...[
               const SizedBox(height: AppConstants.spacingXxl),
               FilledButton(
-                onPressed: () {
-                  Navigator.of(context).popUntil((route) => route.isFirst);
-                },
+                onPressed: () => context.go('/home'),
                 child: const Text('Go to Home'),
               ),
             ],
@@ -856,11 +885,13 @@ class _ScanEmptyState extends StatelessWidget {
 class _DeviceTile extends StatelessWidget {
   final String name;
   final int rssi;
-  final VoidCallback onConnect;
+  final bool isConnecting;
+  final VoidCallback? onConnect;
 
   const _DeviceTile({
     required this.name,
     required this.rssi,
+    this.isConnecting = false,
     required this.onConnect,
   });
 
@@ -931,10 +962,16 @@ class _DeviceTile extends StatelessWidget {
                   ],
                 ),
               ),
-              TextButton(
-                onPressed: onConnect,
-                child: const Text('Connect'),
-              ),
+              isConnecting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : TextButton(
+                      onPressed: onConnect,
+                      child: const Text('Connect'),
+                    ),
             ],
           ),
         ),

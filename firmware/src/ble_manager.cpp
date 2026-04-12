@@ -125,19 +125,17 @@ class PasswordCallback : public NimBLECharacteristicCallbacks {
             nvs_store::setWifiPassword(pendingPass);
             Serial.printf("[BLE] Password received (%d chars)\n", value.length());
 
-            // Both credentials now set — trigger WiFi connect
+            // Both credentials now set — signal main loop to handle WiFi.
+            // Don't start WiFi here: wifi_manager::init() needs to run first
+            // (registers event handler, sets STA mode) and calling reconnect()
+            // from this callback causes a double-init that delays connection.
             if (strlen(pendingSsid) > 0) {
                 ble_manager::notifyWifiStatus(1);  // connecting
-                wifi_manager::reconnect(pendingSsid, pendingPass);
 
-                // Signal provisioning complete
                 provisioned = true;
                 if (provisionedSem) {
                     xSemaphoreGive(provisionedSem);
                 }
-
-                // Spawn task to watch WiFi connect and notify status
-                xTaskCreate(wifiStatusWatchTask, "ble_wifi", 2048, nullptr, 2, nullptr);
             }
         }
     }
@@ -148,11 +146,25 @@ class PasswordCallback : public NimBLECharacteristicCallbacks {
 class TokenCallback : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pChar, NimBLEConnInfo& connInfo) override {
         std::string value = pChar->getValue();
-        if (value.length() > 0) {
+        if (value.length() == 0) return;
+
+        // The app sends "token\nbackendUrl" — parse both.
+        size_t sep = value.find('\n');
+        if (sep != std::string::npos) {
+            std::string token = value.substr(0, sep);
+            std::string url   = value.substr(sep + 1);
+            nvs_store::setDeviceToken(token.c_str());
+            if (!url.empty()) {
+                nvs_store::setBackendUrl(url.c_str());
+                Serial.printf("[BLE] Backend URL saved: %s\n", url.c_str());
+            }
+            Serial.printf("[BLE] Device token stored (%d chars)\n", token.length());
+        } else {
+            // Legacy: plain token without URL
             nvs_store::setDeviceToken(value.c_str());
-            ble_manager::notifyAuthStatus(1);  // token stored
             Serial.printf("[BLE] Device token stored (%d chars)\n", value.length());
         }
+        ble_manager::notifyAuthStatus(1);  // token stored
     }
 };
 
@@ -361,6 +373,20 @@ void ble_manager::notifyWifiStatus(uint8_t status) {
         if (clientConnected) {
             pWifiStatus->notify();
         }
+    }
+}
+
+void ble_manager::notifyWifiConnectedWithIp(const char* ip) {
+    if (!pWifiStatus) return;
+    // Pack status + IP into one notification: [2, '1','9','2','.','1','6','8',...]
+    size_t ipLen = strlen(ip);
+    uint8_t buf[32];
+    buf[0] = 2;  // connected
+    if (ipLen > sizeof(buf) - 1) ipLen = sizeof(buf) - 1;
+    memcpy(buf + 1, ip, ipLen);
+    pWifiStatus->setValue(buf, 1 + ipLen);
+    if (clientConnected) {
+        pWifiStatus->notify();
     }
 }
 

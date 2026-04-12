@@ -40,6 +40,10 @@ void stopAdvertising();
 /// 0=disconnected, 1=connecting, 2=connected, 3=failed
 void notifyWifiStatus(uint8_t status);
 
+/// Notify WiFi connected with IP address embedded in the payload.
+/// Sends [2, ip_bytes...] so the app can skip mDNS discovery.
+void notifyWifiConnectedWithIp(const char* ip);
+
 /// Notify auth status to connected BLE client.
 /// 0=no token, 1=token stored, 2=token validated
 void notifyAuthStatus(uint8_t status);
