@@ -891,7 +891,11 @@ static void audioCaptureLoop(void* param) {
         }
 
         size_t samplesRead = audio_io::readMic(pcmBuffer, OPUS_FRAME_SAMPLES);
-        if (samplesRead == 0) continue;
+        if (samplesRead == 0) {
+            // I2S returned nothing — small yield so IDLE0 can run if this persists.
+            vTaskDelay(pdMS_TO_TICKS(5));
+            continue;
+        }
 
         // VAD: check for end-of-speech (auto-stop recording)
         vad::Result vadResult = vad::analyze(pcmBuffer, samplesRead);
@@ -937,6 +941,11 @@ static void audioCaptureLoop(void* param) {
         if (opusBytes > 0 && appState.wsConnected) {
             ws_client::sendBinary(opusBuffer, opusBytes);
         }
+
+        // Yield 1ms after every frame so IDLE0 can run. Without this, the task
+        // drains the I2S DMA backlog (which builds up during wake-word listening)
+        // with rapid non-blocking reads, starving IDLE0 and triggering the WDT.
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 

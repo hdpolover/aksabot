@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -19,9 +20,15 @@ import {
 import { CurrentUser } from '../../core/common/decorators/current-user.decorator';
 import type { RequestUser } from '../../core/common/decorators/current-user.decorator';
 import { AudioGateway } from '../gateway/audio.gateway';
+import { TTS_PROVIDER } from '../ai/interfaces/tokens';
+import type { ITtsProvider } from '../ai/interfaces';
 import { DevicesService } from './devices.service';
 import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
+import { VoicePreviewDto } from './dto/voice-preview.dto';
+
+/** Sample phrase used for every voice preview. Short, punchy, Aksa-style. */
+const PREVIEW_PHRASE = "Yo, I'm Aksa — Hendra's desk companion. Built different, fr.";
 
 @Controller('devices')
 @UseGuards(JwtAuthGuard, RateLimitGuard)
@@ -30,6 +37,7 @@ export class DevicesController {
   constructor(
     private readonly devicesService: DevicesService,
     private readonly gateway: AudioGateway,
+    @Inject(TTS_PROVIDER) private readonly tts: ITtsProvider,
   ) {}
 
   @Post()
@@ -76,6 +84,32 @@ export class DevicesController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.devicesService.getStats(id, user.userId);
+  }
+
+  /** Generate a short TTS preview in MP3 format for in-app playback.
+   *  Returns base64-encoded MP3 so the app can play it directly.
+   *  Rate-limited to 10 calls/min per user — TTS isn't free. */
+  @Post(':id/voice/preview')
+  @RateLimit({ limit: 10, windowSeconds: 60, keyType: 'user' })
+  async voicePreview(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+    @Body() dto: VoicePreviewDto,
+  ) {
+    // Verify device ownership — throws NotFoundException/ForbiddenException if wrong
+    await this.devicesService.findById(id, user.userId);
+
+    const mp3Buffer = await this.tts.synthesize(PREVIEW_PHRASE, {
+      voice: dto.voice_preset,
+      speed: dto.voice_speed,
+      stability: dto.voice_stability,
+      outputFormat: 'mp3_44100_128',
+    });
+
+    return {
+      audio: mp3Buffer.toString('base64'),
+      mimeType: 'audio/mpeg',
+    };
   }
 
   @Delete(':id')

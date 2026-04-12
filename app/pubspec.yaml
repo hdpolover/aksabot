@@ -52,6 +52,9 @@ dependencies:
   wifi_scan: ^0.4.1
   geolocator: ^14.0.2
 
+  # Audio playback (voice preview)
+  audioplayers: ^6.1.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

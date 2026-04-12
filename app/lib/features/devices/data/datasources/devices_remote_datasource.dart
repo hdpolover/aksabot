@@ -1,3 +1,9 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
+
+import '../../../../core/error/exceptions.dart';
 import '../../../../core/network/api_client.dart';
 import '../models/device_model.dart';
 
@@ -55,5 +61,40 @@ class DevicesRemoteDatasource {
   Future<Map<String, dynamic>> getStats(String id) async {
     final data = await _client.get('/devices/$id/stats');
     return data as Map<String, dynamic>;
+  }
+
+  /// Calls the backend to synthesize a short preview phrase with the given
+  /// voice settings and returns the decoded MP3 bytes.
+  Future<Uint8List> previewVoice(
+    String id, {
+    String? voicePreset,
+    double? speed,
+    double? stability,
+  }) async {
+    try {
+      final response = await _client.dio.post(
+        '/devices/$id/voice/preview',
+        data: {
+          'voice_preset': voicePreset,
+          'voice_speed': speed,
+          'voice_stability': stability,
+        }..removeWhere((_, v) => v == null),
+        options: Options(responseType: ResponseType.json),
+      );
+
+      // Response is wrapped in { data: { audio: base64, mimeType: 'audio/mpeg' } }
+      final body = response.data as Map<String, dynamic>;
+      final payload = body['data'] as Map<String, dynamic>;
+      final base64Audio = payload['audio'] as String;
+      return base64Decode(base64Audio);
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      String message = 'Preview failed';
+      if (data is Map) {
+        final msg = data['message'];
+        if (msg is String) message = msg;
+      }
+      throw ServerException(message, statusCode: e.response?.statusCode);
+    }
   }
 }

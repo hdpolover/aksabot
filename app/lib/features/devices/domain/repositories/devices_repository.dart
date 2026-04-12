@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dartz/dartz.dart';
 
 import '../../../../core/error/failures.dart';
@@ -11,4 +13,10 @@ abstract class DevicesRepository {
   Future<Either<Failure, Device>> claimByToken(String deviceToken);
   Future<Either<Failure, void>> deleteDevice(String id);
   Future<Either<Failure, Map<String, dynamic>>> getStats(String id);
+  Future<Either<Failure, Uint8List>> previewVoice(
+    String id, {
+    String? voicePreset,
+    double? speed,
+    double? stability,
+  });
 }

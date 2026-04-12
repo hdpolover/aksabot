@@ -1,3 +1,4 @@
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/di/injection.dart';
@@ -16,24 +17,35 @@ class VoiceAudioPage extends StatefulWidget {
 
 class _VoiceAudioPageState extends State<VoiceAudioPage> {
   final _devicesRepo = sl<DevicesRepository>();
+  final _audioPlayer = AudioPlayer();
 
   bool _loading = true;
   bool _saving = false;
+  bool _previewing = false;
+  PlayerState _playerState = PlayerState.stopped;
 
   // Voice settings fields — mirror the keys stored in settingsJson.
   String _voicePreset = 'ziggy';
-  double _speed = 0.8;
+  double _speed = 0.7;
   double _stability = 0.6;
   bool _wakeSound = true;
   bool _sleepSound = true;
   bool _reminderChime = true;
   double _vadSensitivity = 0.5;
 
-
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    _audioPlayer.onPlayerStateChanged.listen((state) {
+      if (mounted) setState(() => _playerState = state);
+    });
+  }
+
+  @override
+  void dispose() {
+    _audioPlayer.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSettings() async {
@@ -50,7 +62,7 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
     final s = device.settingsJson;
     setState(() {
       _voicePreset = s['voice_preset'] as String? ?? 'ziggy';
-      _speed = (s['voice_speed'] as num?)?.toDouble() ?? 0.8;
+      _speed = (s['voice_speed'] as num?)?.toDouble() ?? 0.7;
       _stability = (s['voice_stability'] as num?)?.toDouble() ?? 0.6;
       _wakeSound = s['audio_wake_sound'] as bool? ?? true;
       _sleepSound = s['audio_sleep_sound'] as bool? ?? true;
@@ -83,6 +95,37 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
     );
   }
 
+  Future<void> _togglePreview() async {
+    // If already playing, stop it.
+    if (_playerState == PlayerState.playing) {
+      await _audioPlayer.stop();
+      return;
+    }
+
+    setState(() => _previewing = true);
+
+    final result = await _devicesRepo.previewVoice(
+      widget.deviceId,
+      voicePreset: _voicePreset,
+      speed: _speed,
+      stability: _stability,
+    );
+
+    if (!mounted) return;
+    setState(() => _previewing = false);
+
+    result.fold(
+      (failure) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Preview failed: ${failure.message}')),
+        );
+      },
+      (audioBytes) async {
+        await _audioPlayer.play(BytesSource(audioBytes));
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -94,6 +137,8 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
         body: const AppLoadingIndicator(),
       );
     }
+
+    final isPlaying = _playerState == PlayerState.playing;
 
     return Scaffold(
       appBar: AppBar(
@@ -113,7 +158,7 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Voice settings
+          // ── Voice settings ──────────────────────────────────
           Text('Voice', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           Card(
@@ -203,23 +248,61 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  FilledButton.tonal(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content:
-                                Text('Voice preview not yet implemented')),
-                      );
-                    },
-                    child: const Text('Preview Voice'),
+                  // ── Preview button ──────────────────────────
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.tonal(
+                      onPressed: (_saving || _previewing) ? null : _togglePreview,
+                      child: _previewing
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isPlaying
+                                      ? Icons.stop_rounded
+                                      : Icons.play_arrow_rounded,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(isPlaying ? 'Stop' : 'Preview voice'),
+                              ],
+                            ),
+                    ),
                   ),
+                  if (isPlaying) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: colors.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Playing Aksa\'s voice...',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
           ),
           const SizedBox(height: 24),
 
-          // Audio toggles
+          // ── Audio toggles ────────────────────────────────────
           Text('Audio', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           Card(
@@ -263,7 +346,7 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
           ),
           const SizedBox(height: 24),
 
-          // VAD
+          // ── Advanced (VAD) ───────────────────────────────────
           Text('Advanced', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           Card(

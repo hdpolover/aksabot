@@ -38,8 +38,10 @@ export class ElevenLabsTtsProvider implements ITtsProvider {
     const stability = options?.stability ?? DEFAULT_STABILITY;
     const speed = options?.speed ?? DEFAULT_SPEED;
 
+    const outputFormat = options?.outputFormat ?? 'pcm_16000';
+
     const res = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=pcm_16000`,
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=${outputFormat}`,
       {
         method: 'POST',
         signal,

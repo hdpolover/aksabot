@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dartz/dartz.dart';
 
 import '../../../../core/error/exceptions.dart';
@@ -79,6 +81,26 @@ class DevicesRepositoryImpl implements DevicesRepository {
     try {
       final stats = await _datasource.getStats(id);
       return Right(stats);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
+
+  @override
+  Future<Either<Failure, Uint8List>> previewVoice(
+    String id, {
+    String? voicePreset,
+    double? speed,
+    double? stability,
+  }) async {
+    try {
+      final bytes = await _datasource.previewVoice(
+        id,
+        voicePreset: voicePreset,
+        speed: speed,
+        stability: stability,
+      );
+      return Right(bytes);
     } on ServerException catch (e) {
       return Left(ServerFailure(e.message, statusCode: e.statusCode));
     }

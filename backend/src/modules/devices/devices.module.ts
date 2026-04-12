@@ -8,6 +8,7 @@ import {
   ResponsePool,
 } from '../../core/database/entities';
 import { GatewayModule } from '../gateway/gateway.module';
+import { AiModule } from '../ai/ai.module';
 import { DevicesService } from './devices.service';
 import { DevicesController } from './devices.controller';
 
@@ -15,6 +16,7 @@ import { DevicesController } from './devices.controller';
   imports: [
     TypeOrmModule.forFeature([Device, Conversation, Message, Memory, ResponsePool]),
     GatewayModule,
+    AiModule,
   ],
   controllers: [DevicesController],
   providers: [DevicesService],
