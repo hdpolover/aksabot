@@ -28,8 +28,7 @@ static ws_client::BinaryCallback binaryCb;
 
 static uint32_t reconnectDelay = WS_RECONNECT_BASE_MS;
 static uint32_t lastConnectAttemptMs = 0;
-static bool everAttempted = false;    // First attempt always allowed
-static const uint32_t MIN_CONNECT_INTERVAL_MS = 5000;
+static bool everAttempted = false;
 static bool shouldReconnect = true;
 
 // Keepalive
@@ -106,18 +105,13 @@ static void onEvent(WebsocketsEvent event, String data) {
 // ── Internal connect (always called under mutex) ────────
 
 static bool doConnect() {
-    uint32_t now = millis();
-    // Enforce minimum interval between connect attempts (skip for first attempt)
-    if (everAttempted && (now - lastConnectAttemptMs) < MIN_CONNECT_INTERVAL_MS) {
-        return false;
-    }
     // Don't connect if already connected
     if (appState.wsConnected) {
         return true;
     }
 
     everAttempted = true;
-    lastConnectAttemptMs = now;
+    lastConnectAttemptMs = millis();
     Serial.printf("[WS] Connecting to %s...\n", wsUrlBuf);
     Serial.printf("[WS] Free heap: %u, PSRAM: %u\n", ESP.getFreeHeap(), ESP.getFreePsram());
     uint32_t connectStart = millis();

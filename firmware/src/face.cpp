@@ -84,7 +84,11 @@ static bool canBlink(face::Expression e) {
            e == face::Expression::FOCUSED ||
            e == face::Expression::HAPPY ||
            e == face::Expression::OFFLINE ||
-           e == face::Expression::SHRUG;
+           e == face::Expression::SHRUG ||
+           e == face::Expression::SURPRISED ||
+           e == face::Expression::DISTURBED;
+    // SHOCKED: eyes frozen wide — no blink
+    // ANGRY:   tense squint held — no blink
 }
 
 // ── Public API ─────────────────────────────────────────
@@ -186,6 +190,32 @@ void face::tick(uint32_t nowMs) {
             driftTX = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 24.0f;
             driftTY = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 8.0f;
             nextDriftSwitch = nowMs + 800 + (esp_random() % 1200);
+        }
+    } else if (active == Expression::SURPRISED) {
+        // Look slightly upward — "oh wow!" reaction
+        state.driftX = flerp(state.driftX, 0, 0.04f);
+        state.driftY = flerp(state.driftY, -8.0f, 0.05f);
+    } else if (active == Expression::SHOCKED) {
+        // Tiny rapid tremor — frozen in disbelief
+        state.driftX = flerp(state.driftX, driftTX, 0.12f);
+        state.driftY = flerp(state.driftY, driftTY, 0.12f);
+        if (nowMs >= nextDriftSwitch) {
+            driftTX = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 6.0f;
+            driftTY = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 4.0f;
+            nextDriftSwitch = nowMs + 150 + (esp_random() % 200);
+        }
+    } else if (active == Expression::ANGRY) {
+        // Tense minimal drift — staring intensely forward
+        state.driftX = flerp(state.driftX, 0, 0.08f);
+        state.driftY = flerp(state.driftY, 2.0f, 0.06f);  // slight downward stare
+    } else if (active == Expression::DISTURBED) {
+        // Unsettled wide random drift — can't stop looking around nervously
+        state.driftX = flerp(state.driftX, driftTX, 0.06f);
+        state.driftY = flerp(state.driftY, driftTY, 0.05f);
+        if (nowMs >= nextDriftSwitch) {
+            driftTX = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 28.0f;
+            driftTY = ((float)(esp_random() % 100) / 100.0f - 0.5f) * 14.0f;
+            nextDriftSwitch = nowMs + 400 + (esp_random() % 600);
         }
     } else if (active == Expression::IDLE || active == Expression::CALM ||
                active == Expression::SPEAKING || isSpeechActive) {

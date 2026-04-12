@@ -490,11 +490,32 @@ static void onTouchEvent(touch::Event event) {
 
     switch (event) {
         case touch::Event::HOLD_START: {
-            // Accept HOLD_START when IDLE, or when already LISTENING from a
-            // hands-free trigger (wake word/gesture stole the state — override to PTT)
+            // Accept in four situations:
+            //   1. IDLE          — normal push-to-talk start
+            //   2. LISTENING (hands-free) — override wake-word/gesture session with PTT
+            //   3. SPEAKING      — interrupt response and start speaking immediately
+            //   4. THINKING      — cancel pending response and start speaking immediately
             bool wasHandsFree = (appState.botState == BotState::LISTENING &&
                                  appState.listenTrigger != ListenTrigger::TOUCH);
-            if (appState.botState == BotState::IDLE || wasHandsFree) {
+            bool wasActive    = (appState.botState == BotState::SPEAKING ||
+                                 appState.botState == BotState::THINKING);
+
+            if (appState.botState == BotState::IDLE || wasHandsFree || wasActive) {
+
+                // Tear down whatever was in progress before starting PTT
+                if (wasActive) {
+                    if (appState.botState == BotState::SPEAKING) {
+                        playbackActive = false;
+                        playbackDone   = false;
+                        xQueueReset(playbackQueue);
+                        audio_io::stopSpeaker();
+                        face::feedAudioAmplitude(0);
+                        display::setTranscriptText("", "");
+                    }
+                    appState.interrupted = true;
+                    ws_client::sendEvent("audio:interrupt");
+                    Serial.println("[Main] Interrupted by hold — starting PTT");
+                }
 
                 // If overriding a hands-free session, restore default VAD
                 if (wasHandsFree) {
@@ -504,15 +525,15 @@ static void onTouchEvent(touch::Event event) {
                 }
 
                 appState.listenTrigger = ListenTrigger::TOUCH;
-                appState.botState = BotState::LISTENING;
+                appState.botState      = BotState::LISTENING;
                 syncFaceToState();
                 wake_word::stopListening();
                 if (appState.wsConnected) {
+                    // hands-free already sent audio:start; all other paths need it
                     if (!wasHandsFree) {
                         ws_client::sendEvent("audio:start");
                     }
-                    // If was hands-free, audio:start was already sent
-                    Serial.println("[Main] Recording started (backend/PTT)");
+                    Serial.println("[Main] Recording started (PTT)");
                 } else {
                     // Echo mode — allocate buffer on first use, record raw stereo
                     if (!echoFrames) {
@@ -525,7 +546,7 @@ static void onTouchEvent(touch::Event event) {
                         Serial.printf("[Main] Echo buffer allocated — PSRAM free: %u\n", ESP.getFreePsram());
                     }
                     echoFrameCount = 0;
-                    echoRecording = true;
+                    echoRecording  = true;
                     Serial.println("[Main] Recording started (echo mode)");
                 }
             }
@@ -553,19 +574,25 @@ static void onTouchEvent(touch::Event event) {
             break;
 
         case touch::Event::TAP:
-            if (appState.botState == BotState::SPEAKING) {
-                // Interrupt playback — stop audio task and flush queue
-                playbackActive = false;
-                playbackDone = false;
-                xQueueReset(playbackQueue);
+            if (appState.botState == BotState::SPEAKING ||
+                appState.botState == BotState::THINKING) {
+                // Interrupt — stop whatever is happening and show confusion.
+                // Playback-specific teardown only applies when actually speaking.
+                if (appState.botState == BotState::SPEAKING) {
+                    playbackActive = false;
+                    playbackDone   = false;
+                    xQueueReset(playbackQueue);
+                    audio_io::stopSpeaker();
+                    face::feedAudioAmplitude(0);
+                    display::setTranscriptText("", "");
+                }
                 appState.interrupted = true;
-                appState.botState = BotState::IDLE;
-                syncFaceToState();
+                appState.botState    = BotState::IDLE;
                 ws_client::sendEvent("audio:interrupt");
-                audio_io::stopSpeaker();
-                face::feedAudioAmplitude(0);
-                display::setTranscriptText("", "");  // Clear transcript
-                Serial.println("[Main] Interrupted");
+                face::setExpression(face::Expression::CONFUSED, 200);
+                scheduleFaceRevert(2000);
+                wake_word::startListening();  // resume — won't go through normal playback path
+                Serial.println("[Main] Interrupted by tap");
             }
             else if (display::getMode() == display::Mode::REMINDER) {
                 // Dismiss reminder
@@ -573,9 +600,27 @@ static void onTouchEvent(touch::Event event) {
                 ws_client::sendEvent("proactive:dismiss");
             }
             else if (appState.botState == BotState::IDLE) {
-                // Idle tap — acknowledge with a brief expression change
-                face::setExpression(face::Expression::ENCOURAGING, 150);
-                scheduleFaceRevert(800);
+                // Idle tap — cycle through a sequence of fun/reactive expressions
+                static const face::Expression TAP_POOL[] = {
+                    face::Expression::SURPRISED,
+                    face::Expression::HAPPY,
+                    face::Expression::SHOCKED,
+                    face::Expression::ANGRY,
+                    face::Expression::CONFUSED,
+                    face::Expression::DISTURBED,
+                    face::Expression::ENCOURAGING,
+                    face::Expression::SHRUG,
+                };
+                static const uint8_t TAP_POOL_LEN = sizeof(TAP_POOL) / sizeof(TAP_POOL[0]);
+                // Pick randomly, but avoid repeating the same expression twice in a row
+                static uint8_t lastTapIdx = 0xFF;
+                uint8_t pick;
+                do { pick = esp_random() % TAP_POOL_LEN; } while (pick == lastTapIdx);
+                lastTapIdx = pick;
+
+                face::setExpression(TAP_POOL[pick], 150);
+                scheduleFaceRevert(1500);
+                Serial.printf("[Main] Idle tap — expression %d\n", (int)TAP_POOL[pick]);
             }
             break;
 

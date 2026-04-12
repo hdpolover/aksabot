@@ -97,6 +97,10 @@ static const Palette PAL[EXPR_COUNT] = {
     /* HAPPY */   { rgb(0,0,0),    rgb(255,100,180), rgb(200,60,140),  rgb(255,120,200), rgb(250,195,215), rgb(255,110,190), rgb(245,245,250) },
     /* SAD */     { rgb(0,0,0),    rgb(100,120,180), rgb(70,85,140),   rgb(80,100,160),  rgb(135,145,175), rgb(110,130,190), rgb(245,245,250) },
     /* SHRUG */   { rgb(0,0,0),    rgb(180,180,200), rgb(130,130,160), rgb(200,200,220), rgb(170,170,190), rgb(190,190,210), rgb(240,240,245) },
+    /* SURPR */   { rgb(0,0,0),    rgb(255,210,60),  rgb(200,165,20),  rgb(255,230,100), rgb(250,220,160), rgb(255,225,80),  rgb(245,245,250) },
+    /* SHOCK */   { rgb(0,0,0),    rgb(200,230,255), rgb(140,185,230), rgb(220,240,255), rgb(240,245,255), rgb(210,235,255), rgb(250,252,255) },
+    /* ANGRY */   { rgb(0,0,0),    rgb(255,60,40),   rgb(200,30,20),   rgb(255,80,60),   rgb(180,80,70),   rgb(255,70,50),   rgb(245,200,200) },
+    /* DISTR */   { rgb(0,0,0),    rgb(160,255,80),  rgb(110,200,40),  rgb(180,255,100), rgb(170,220,130), rgb(170,240,90),  rgb(240,250,230) },
 };
 
 struct EyeShape {
@@ -118,6 +122,10 @@ static const EyeShape EYES[EXPR_COUNT] = {
     /* HAPPY */   { 44, 11,   0,  -6, true,  true  },
     /* SAD */     { 38, 13,   0,  10, false, false },
     /* SHRUG */   { 40, 12,   0,   0, true,  true  },
+    /* SURPR */   { 48, 10,   0,  -4, true,  true  },  // very wide, small pupils up, raised brows
+    /* SHOCK */   { 50,  7,   0,   0, false, false },  // max wide, tiny pupils, no blink
+    /* ANGRY */   { 32, 12,   0,   4, false, true  },  // narrow squint, brows on, no blink
+    /* DISTR */   { 40, 12,   6,  -2, true,  false },  // offset pupils (asymmetric handled in tick)
 };
 
 // ── Display hardware implementation ───────────────────
@@ -441,6 +449,50 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             }
             break;
         }
+        case face::Expression::SURPRISED: {
+            // Wide open "O" mouth — "oh wow!"
+            float pulse = sinf(breathPhase * 2 * 3.14159f) * 0.1f + 0.9f;
+            int ow = (int)(26 * pulse);
+            int oh = (int)(28 * pulse);
+            s.fillEllipse(CX, my, ow, oh, pal.mouth);
+            s.fillEllipse(CX, my + 1, ow - 5, oh - 5, blendRGB565(pal.accent, pal.bg, 25));
+            break;
+        }
+        case face::Expression::SHOCKED: {
+            // Maximum gape — jaw dropped open, trembling slightly
+            float trem = sinf(breathPhase * 6.28f * 5) * 1.5f;
+            int ow = 32;
+            int oh = 34 + (int)trem;
+            s.fillEllipse(CX, my + 4, ow, oh, pal.mouth);
+            s.fillEllipse(CX, my + 5, ow - 6, oh - 6, blendRGB565(pal.accent, pal.bg, 20));
+            break;
+        }
+        case face::Expression::ANGRY: {
+            if (talking) {
+                // Aggressive choppy talking mouth
+                int ow = 28 + (int)(a * 12);
+                int oh = 10 + (int)(a * 20);
+                s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
+            } else {
+                // Tight clenched frown
+                thickBezier(s, CX - 20, my + 2, CX, my - 6, CX + 20, my + 2, 3, pal.mouth);
+                // Teeth-clenched line
+                thickBezier(s, CX - 12, my + 2, CX, my - 2, CX + 12, my + 2, 1,
+                            blendRGB565(TFT_WHITE, pal.mouth, 100), 12);
+            }
+            break;
+        }
+        case face::Expression::DISTURBED: {
+            // Wobbly asymmetric mouth — unsettled
+            float t = breathPhase * 2 * 3.14159f;
+            float wobble = sinf(t * 2.3f) * 3.0f;
+            float twist = sinf(t * 1.7f) * 4.0f;
+            int lx = CX - 22, rx = CX + 22;
+            int lOff = (int)(wobble + twist);
+            int rOff = (int)(-wobble * 0.5f);
+            thickBezier(s, lx, my + 4 + lOff, CX, my - 2, rx, my + 4 + rOff, 2, pal.mouth);
+            break;
+        }
         default: break;
     }
 }
@@ -494,6 +546,14 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     rightEye.r = (int16_t)(eye.r * fs.rightEyeScale * ps);
     rightEye.pupilR = (int16_t)(eye.pupilR * fs.rightEyeScale * ps);
 
+    // DISTURBED: asymmetric eye sizes — left eye wide, right eye squinting
+    if (fs.expression == face::Expression::DISTURBED) {
+        leftEye.r  = (int16_t)(leftEye.r  * 1.20f);
+        leftEye.pupilR = (int16_t)(leftEye.pupilR * 1.10f);
+        rightEye.r = (int16_t)(rightEye.r * 0.80f);
+        rightEye.pupilR = (int16_t)(rightEye.pupilR * 0.85f);
+    }
+
     if (fs.expression == face::Expression::SLEEPING) {
         float bOff = sinf(fs.breathPhase * 2 * 3.14159f) * 3;
         drawEyeClosed(s, leftEyeX,  eyeY + (int)bOff, 24, false);
@@ -521,9 +581,18 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
             drawEyeOpen(s, rightEyeX, eyeY, rightEye, rightScale, fs.driftX, fs.driftY);
         }
         if (eye.hasBrows || drawPeakBrows) {
-            bool raised = (fs.expression == face::Expression::HAPPY) || drawPeakBrows;
-            drawBrow(s, leftEyeX,  eyeY, leftEye.r, pal.accent, raised);
-            drawBrow(s, rightEyeX, eyeY, rightEye.r, pal.accent, raised);
+            if (fs.expression == face::Expression::ANGRY) {
+                // V-shape angry brows — inner corners angled down toward nose
+                int lby = eyeY - leftEye.r - 6;
+                int rby = eyeY - rightEye.r - 6;
+                thickBezier(s, leftEyeX  - 14, lby - 6, leftEyeX  + 2, lby + 3, leftEyeX  + 14, lby + 8, 2, pal.accent, 16);
+                thickBezier(s, rightEyeX - 14, rby + 8, rightEyeX - 2, rby + 3, rightEyeX + 14, rby - 6, 2, pal.accent, 16);
+            } else {
+                bool raised = (fs.expression == face::Expression::HAPPY ||
+                               fs.expression == face::Expression::SURPRISED) || drawPeakBrows;
+                drawBrow(s, leftEyeX,  eyeY, leftEye.r, pal.accent, raised);
+                drawBrow(s, rightEyeX, eyeY, rightEye.r, pal.accent, raised);
+            }
         }
     }
 
@@ -576,6 +645,19 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
         uint16_t tearCol = blendRGB565(rgb(100, 150, 255), pal.bg, 180);
         s.fillSmoothCircle(tx, ty + 3, 3, tearCol);
         s.fillTriangle(tx - 2, ty + 2, tx + 2, ty + 2, tx, ty - 3, tearCol);
+    }
+
+    // ── Shocked "!!" — two exclamation marks shake above face ──
+    if (fs.expression == face::Expression::SHOCKED) {
+        float trem = sinf(fs.glowPhase * 8.0f) * 3.0f;  // rapid tremor
+        float bobY  = sinf(fs.glowPhase * 1.2f) * 4.0f;
+        int qy = eyeY - 72 + (int)bobY;
+        s.setTextSize(5);
+        s.setTextColor(pal.accent);
+        s.setTextDatum(lgfx::middle_center);
+        s.drawString("!", CX - 16 + (int)trem, qy);
+        s.drawString("!", CX + 16 - (int)trem, qy);
+        s.setTextDatum(lgfx::top_left);
     }
 
     // ── Confused question mark (floating above face) ──

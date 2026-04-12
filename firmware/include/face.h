@@ -23,6 +23,10 @@ enum class Expression : uint8_t {
     HAPPY,          // Wide grin, bouncing
     SAD,            // Frown, teardrops
     SHRUG,          // Head shake + bubble blow — "idk/whatever"
+    SURPRISED,      // Wide eyes, raised brows, O-mouth — "oh wow!"
+    SHOCKED,        // Max-wide eyes, tiny pupils, agape — frozen disbelief
+    ANGRY,          // Squinted eyes, V-brows, tight frown — irritated
+    DISTURBED,      // Asymmetric eyes, wobbly mouth — creeped out
     COUNT
 };
 
