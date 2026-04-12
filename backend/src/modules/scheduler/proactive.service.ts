@@ -72,15 +72,12 @@ export class ProactiveService {
   // ── Morning briefing ──────────────────────────────────
 
   /**
-   * Called when a device starts its first audio interaction.
-   * If it's the first interaction of the day, generates a morning briefing.
+   * Called on every device connection. Generates a greeting every time —
+   * varied by time of day, whether it's the first session today, and mood.
    */
   async checkGreeting(deviceId: string): Promise<string | null> {
     const today = new Date().toISOString().slice(0, 10);
-    if (this.lastGreetingDate.get(deviceId) === today) {
-      return null; // Already greeted today
-    }
-
+    const isFirstToday = this.lastGreetingDate.get(deviceId) !== today;
     this.lastGreetingDate.set(deviceId, today);
 
     const hour = new Date().getHours();
@@ -92,9 +89,6 @@ export class ProactiveService {
 
     try {
       const memories = await this.memoriesService.getRelevant(deviceId, 5);
-      const device = await this.devicesRepo.findOne({
-        where: { id: deviceId },
-      });
       const name = BOT_NAME;
 
       const memoryContext =
@@ -102,17 +96,36 @@ export class ProactiveService {
           ? `You know these things about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
           : '';
 
+      // Different prompts for first connect of the day vs reconnects
+      const firstOfDayPrompts = [
+        `It's ${timeOfDay} (${hour}:00). Give a proper greeting to start the day. Reference the time of day naturally. One sentence, max 15 words.`,
+        `It's ${timeOfDay} (${hour}:00). Greet them like you've been waiting for them to show up. One sentence.`,
+        `It's ${timeOfDay} (${hour}:00). Morning briefing energy — acknowledge what time it is and hype them up (or judge them for being late). One sentence.`,
+      ];
+
+      const reconnectPrompts = [
+        `The user just came back online. Say something casual like "oh you're back" or "miss me?" vibes. One sentence, max 12 words.`,
+        `The device just reconnected. React like they walked back into the room — casual, maybe a little sarcastic about them leaving. One sentence.`,
+        `You just got reconnected. Be dramatic about being abandoned, or act like nothing happened. Pick one. One sentence.`,
+        `The user is back. Say a quick "hello again" type greeting — not a full morning briefing, just acknowledge they're here. One sentence.`,
+        `Device just booted up again. React naturally — could be "we're back baby", could be "not you again", could be wholesome. Surprise me. One sentence.`,
+        `The user reconnected. Reference something from your memories about them if you can, otherwise just be your chaotic self. One sentence.`,
+      ];
+
+      const prompts = isFirstToday ? firstOfDayPrompts : reconnectPrompts;
+      const prompt = prompts[Math.floor(Math.random() * prompts.length)];
+
       const { text } = await this.llm.generate(
         `You are ${name}, a gen-z desk buddy. Sarcastic, funny, uses slang. Keep it short and punchy.`,
         [
           {
             role: 'user',
-            content: `${memoryContext}\n\nIt's ${timeOfDay} (${hour}:00). Greet them gen-z style. One sentence, max 12 words. Be funny or sarcastic.`,
+            content: `${memoryContext}\n\n${prompt}`,
           },
         ],
       );
 
-      this.logger.log(`Greeting for device ${deviceId}: ${text.slice(0, 50)}...`);
+      this.logger.log(`Greeting for device ${deviceId} (${isFirstToday ? 'first today' : 'reconnect'}): ${text.slice(0, 50)}...`);
       return text;
     } catch (err: any) {
       this.logger.warn(`Greeting failed: ${err.message}`);
@@ -457,8 +470,8 @@ export class ProactiveService {
   // ── Cleanup on device disconnect ──────────────────────
 
   clearDevice(deviceId: string) {
-    // Keep lastGreetingDate — daily dedup must survive disconnect/reconnect cycles.
-    // Only cleared at midnight via the date check in checkGreeting().
+    // Keep lastGreetingDate — used to distinguish first-of-day vs reconnect greetings.
+    // Resets naturally at midnight via the date check in checkGreeting().
     this.lastActivity.delete(deviceId);
     this.stopIdleChat(deviceId);
     this.stopScreenTimeTracking(deviceId);
