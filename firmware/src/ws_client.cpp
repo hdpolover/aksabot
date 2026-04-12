@@ -1,4 +1,5 @@
 #include "ws_client.h"
+#include "ble_manager.h"
 #include "config.h"
 #include "state.h"
 #include "nvs_store.h"
@@ -110,6 +111,13 @@ static bool doConnect() {
         return true;
     }
 
+    // Pause BLE presence scanning during SSL handshake.
+    // The TLS handshake needs ~40KB of heap. BLE scanning runs concurrently
+    // and can consume enough heap to push the allocator below that threshold,
+    // causing MBEDTLS_ERR_SSL_ALLOC_FAILED. Pause for the duration of the
+    // connect call and resume immediately after regardless of outcome.
+    ble_manager::pausePresenceScan();
+
     everAttempted = true;
     lastConnectAttemptMs = millis();
     Serial.printf("[WS] Connecting to %s...\n", wsUrlBuf);
@@ -122,6 +130,8 @@ static bool doConnect() {
     } else {
         Serial.printf("[WS] Connect failed (%ums)\n", connectMs);
     }
+
+    ble_manager::resumePresenceScan();
     return ok;
 }
 

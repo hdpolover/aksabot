@@ -401,47 +401,63 @@ void ble_manager::notifyAuthStatus(uint8_t status) {
 
 static PresenceScanCallbacks presenceScanCb;
 static bool presenceScanActive = false;
+static bool presenceScanPaused = false;
+
+static void configureAndStartScan() {
+    NimBLEScan* pScan = NimBLEDevice::getScan();
+    // Passive scan, low duty cycle: 160/20 = ~12.5% air time.
+    // Previous 100/50 (50%) starved WiFi and ate heap with result buffers.
+    pScan->setActiveScan(false);
+    pScan->setInterval(160);   // 160 * 0.625ms = 100ms scan interval
+    pScan->setWindow(20);      //  20 * 0.625ms =  12.5ms active window
+    pScan->setMaxResults(0);   // Don't buffer results in heap — we use callbacks
+    presenceFoundThisCycle = false;
+    uint32_t scanSec = presence_detector::getRecommendedScanIntervalMs() / 1000;
+    if (scanSec < 1) scanSec = 1;
+    pScan->start(scanSec, false);
+}
 
 void ble_manager::startPresenceScan() {
     NimBLEScan* pScan = NimBLEDevice::getScan();
     pScan->setScanCallbacks(&presenceScanCb, false);
-    pScan->setActiveScan(false);
-    pScan->setInterval(100);
-    pScan->setWindow(50);
     presenceScanActive = true;
-
-    uint32_t scanSec = presence_detector::getRecommendedScanIntervalMs() / 1000;
-    if (scanSec < 1) scanSec = 1;
-    presenceFoundThisCycle = false;
-    pScan->start(scanSec, false);  // non-blocking, auto-stops after scanSec
+    presenceScanPaused = false;
+    configureAndStartScan();
     Serial.println("[BLE] Presence scanning started");
 }
 
 void ble_manager::stopPresenceScan() {
     presenceScanActive = false;
-    NimBLEScan* pScan = NimBLEDevice::getScan();
-    pScan->stop();
+    presenceScanPaused = false;
+    NimBLEDevice::getScan()->stop();
     Serial.println("[BLE] Presence scanning stopped");
 }
 
-// Called from loop() to restart scans after each cycle completes
-static uint32_t lastScanStartMs = 0;
+void ble_manager::pausePresenceScan() {
+    if (!presenceScanActive || presenceScanPaused) return;
+    presenceScanPaused = true;
+    NimBLEDevice::getScan()->stop();
+    Serial.println("[BLE] Presence scan paused");
+}
 
+void ble_manager::resumePresenceScan() {
+    if (!presenceScanActive || !presenceScanPaused) return;
+    presenceScanPaused = false;
+    configureAndStartScan();
+    Serial.println("[BLE] Presence scan resumed");
+}
+
+// Called from loop() to restart scans after each cycle completes
 void ble_manager::tickPresenceScan(uint32_t nowMs) {
-    if (!presenceScanActive) return;
+    if (!presenceScanActive || presenceScanPaused) return;
 
     NimBLEScan* pScan = NimBLEDevice::getScan();
     if (!pScan->isScanning()) {
-        // Previous scan ended — process results
+        // Previous scan ended — feed a miss if phone wasn't seen this cycle
         if (!presenceFoundThisCycle) {
             presence_detector::feedMiss();
         }
-
-        // Restart scan
-        uint32_t scanSec = presence_detector::getRecommendedScanIntervalMs() / 1000;
-        if (scanSec < 1) scanSec = 1;
-        presenceFoundThisCycle = false;
-        pScan->start(scanSec, false);
+        configureAndStartScan();
     }
 }
 

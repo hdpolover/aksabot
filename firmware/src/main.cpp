@@ -307,7 +307,7 @@ static void onWsJson(const char* event, const char* data) {
             strncpy(gd.time, t, sizeof(gd.time) - 1);
             strncpy(gd.date, d, sizeof(gd.date) - 1);
 
-            if (doc.containsKey("weather")) {
+            if (!doc["weather"].isNull()) {
                 const char* w = doc["weather"] | "";
                 strncpy(gd.weather, w, sizeof(gd.weather) - 1);
                 gd.temp = doc["temp"] | 0;
@@ -375,14 +375,14 @@ static void onWsJson(const char* event, const char* data) {
         JsonDocument doc;
         if (deserializeJson(doc, data) == DeserializationError::Ok) {
             // Volume — save to NVS and apply to ES8311 codec immediately
-            if (doc.containsKey("volume")) {
+            if (!doc["volume"].isNull()) {
                 uint8_t vol = doc["volume"] | 80;
                 nvs_store::setVolume(vol);
                 audio_io::setVolume(vol);
                 Serial.printf("[Main] Config: volume=%d\n", vol);
             }
             // Brightness
-            if (doc.containsKey("brightness")) {
+            if (!doc["brightness"].isNull()) {
                 uint8_t br = doc["brightness"] | 70;
                 nvs_store::setBrightness(br);
                 display::setBrightness(br);
@@ -392,7 +392,7 @@ static void onWsJson(const char* event, const char* data) {
                 Serial.printf("[Main] Config: brightness=%d\n", br);
             }
             // Presence RSSI threshold
-            if (doc.containsKey("presence_rssi_threshold")) {
+            if (!doc["presence_rssi_threshold"].isNull()) {
                 int rssi = doc["presence_rssi_threshold"] | -75;
                 nvs_store::setPresenceRssiThreshold(rssi);
                 presence_detector::Config presCfg;
@@ -402,7 +402,7 @@ static void onWsJson(const char* event, const char* data) {
                 Serial.printf("[Main] Config: presence RSSI=%d\n", rssi);
             }
             // Presence grace period
-            if (doc.containsKey("presence_grace_period")) {
+            if (!doc["presence_grace_period"].isNull()) {
                 int grace = doc["presence_grace_period"] | 45;
                 nvs_store::setPresenceGracePeriodSec(grace);
                 presence_detector::Config presCfg;
@@ -412,7 +412,7 @@ static void onWsJson(const char* event, const char* data) {
                 Serial.printf("[Main] Config: presence grace=%ds\n", grace);
             }
             // Audio jitter buffer (ms → frames at 20ms/frame)
-            if (doc.containsKey("audio_jitter_ms")) {
+            if (!doc["audio_jitter_ms"].isNull()) {
                 int ms = doc["audio_jitter_ms"] | 300;
                 if (ms < 100) ms = 100;
                 if (ms > 500) ms = 500;
@@ -420,7 +420,7 @@ static void onWsJson(const char* event, const char* data) {
                 Serial.printf("[Main] Config: jitter buffer=%dms (%d frames)\n", ms, JITTER_BUFFER_FRAMES);
             }
             // Idle animation speed
-            if (doc.containsKey("idle_animation_speed")) {
+            if (!doc["idle_animation_speed"].isNull()) {
                 const char* speed = doc["idle_animation_speed"] | "normal";
                 if (strcmp(speed, "slow") == 0) {
                     face::setIdleInterval(15000, 15000);  // 15-30s
@@ -432,13 +432,13 @@ static void onWsJson(const char* event, const char* data) {
                 Serial.printf("[Main] Config: idle animation speed=%s\n", speed);
             }
             // Show transcript overlay
-            if (doc.containsKey("display_transcript")) {
+            if (!doc["display_transcript"].isNull()) {
                 bool show = doc["display_transcript"] | true;
                 display::setTranscriptOverlay(show);
                 Serial.printf("[Main] Config: display_transcript=%s\n", show ? "true" : "false");
             }
             // Presence detection enable/disable at runtime
-            if (doc.containsKey("presence_enabled")) {
+            if (!doc["presence_enabled"].isNull()) {
                 bool enabled = doc["presence_enabled"] | false;
                 nvs_store::setPresenceEnabled(enabled);
                 if (enabled) {
@@ -451,7 +451,7 @@ static void onWsJson(const char* event, const char* data) {
                 }
             }
             // Idle timeout
-            if (doc.containsKey("idle_timeout_seconds")) {
+            if (!doc["idle_timeout_seconds"].isNull()) {
                 int timeout = doc["idle_timeout_seconds"] | 300;
                 power_manager::Config pwrCfg;
                 pwrCfg.sleepTimeoutSec = timeout;
@@ -767,15 +767,16 @@ static void audioCaptureLoop(void* param) {
                     playbackBuffering = false;
                     Serial.printf("[Main] Jitter buffer ready — %d frames queued\n", queued);
                 } else {
-                    // Starvation: if buffering takes too long, connection is likely dead
-                    static uint32_t bufferStartMs = 0;
-                    if (bufferStartMs == 0) bufferStartMs = millis();
-                    if ((millis() - bufferStartMs) > 8000) {
+                    // Starvation: if no frames arrive within 8s of response:start, abort.
+                    // Uses lastFrameReceivedMs which is reset to millis() in the
+                    // response:start handler — always fresh at the start of each session.
+                    // (Old approach used a static local that was never reset on success,
+                    //  causing immediate starvation on every conversation after the first.)
+                    if ((millis() - lastFrameReceivedMs) > 8000) {
                         Serial.println("[Main] Playback starvation — no frames received in 8s, aborting");
                         playbackActive = false;
                         playbackDone = false;
                         playbackBuffering = true;
-                        bufferStartMs = 0;
                         face::feedAudioAmplitude(0);
                         appState.botState = BotState::IDLE;
                         syncFaceToState();

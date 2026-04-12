@@ -26,7 +26,9 @@ using StateChangeCallback = std::function<void(PresenceState, PresenceState, uin
 
 /// Configuration for the presence detector.
 struct Config {
-    int8_t rssiThreshold = -75;       // dBm — below this = not present
+    int8_t rssiThreshold = -75;       // dBm — above this = present (entry threshold)
+    int8_t hysteresisDb = 6;          // dBm — must drop this far below threshold to start leaving
+                                      // e.g. threshold=-75, hysteresis=6 → leave at -81
     uint8_t gracePeriodSec = 45;      // Seconds in LEAVING before transitioning to AWAY
     uint8_t rssiWindowSize = 5;       // Number of readings for rolling average
     uint32_t scanIntervalMs = 5000;   // How often to scan (ms)

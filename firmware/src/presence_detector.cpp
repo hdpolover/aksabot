@@ -97,25 +97,31 @@ void presence_detector::feedRssi(int8_t rssi) {
 
     int8_t smoothed = computeSmoothedRssi();
 
-    // State transitions based on smoothed RSSI
+    // Entry threshold: become PRESENT if signal is strong enough.
+    // Leave threshold: only start LEAVING once signal drops hysteresisDb below
+    // the entry threshold, preventing flapping when RSSI hovers near the edge.
+    int8_t leaveThreshold = cfg.rssiThreshold - cfg.hysteresisDb;
+
     if (smoothed >= cfg.rssiThreshold) {
         // Signal is strong enough — user is present
         if (currentState != PresenceState::PRESENT) {
             transition(PresenceState::PRESENT, now);
         }
-    } else {
-        // Signal is weak — start leaving if currently present
+    } else if (smoothed < leaveThreshold) {
+        // Signal has dropped well below threshold — start leaving
         if (currentState == PresenceState::PRESENT) {
             leavingStartMs = now;
             transition(PresenceState::LEAVING, now);
         }
-        // If LEAVING, grace period is checked in tick()
         // If UNKNOWN, transition to LEAVING to start grace timer
         if (currentState == PresenceState::UNKNOWN) {
             leavingStartMs = now;
             transition(PresenceState::LEAVING, now);
         }
+        // If LEAVING, grace period is checked in tick()
     }
+    // If smoothed is between leaveThreshold and rssiThreshold (the hysteresis
+    // band), hold the current state — no transition in either direction.
 }
 
 void presence_detector::feedMiss() {

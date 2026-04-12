@@ -53,6 +53,11 @@ void notifyAuthStatus(uint8_t status);
 void startPresenceScan();
 void stopPresenceScan();
 
+/// Temporarily pause/resume presence scanning without losing the enabled flag.
+/// Use before operations that need the radio or heap (e.g. SSL handshake).
+void pausePresenceScan();
+void resumePresenceScan();
+
 /// Returns true if a BLE client is currently connected.
 bool isClientConnected();
 
