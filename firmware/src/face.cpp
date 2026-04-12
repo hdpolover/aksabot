@@ -54,6 +54,16 @@ static int8_t actParam = 0;         // e.g., which side to wink
 static uint32_t idleMinMs = 8000;
 static uint32_t idleRangeMs = 12000;
 
+// Drowsiness: tracks continuous idle time → progressive sleepiness
+static uint32_t idleSinceMs = 0;         // When IDLE expression started
+static bool idleTracking = false;
+static const uint32_t DROWSY_START_MS = 60000;   // Start getting drowsy after 1 min
+static const uint32_t DROWSY_FULL_MS  = 240000;  // Fully drowsy at 4 min (before 5min sleep)
+
+// Sleepy idle acts (indices into IdleAct enum)
+static const IdleAct SLEEPY_ACTS[] = { IdleAct::DOZE, IdleAct::YAWN, IdleAct::SIGH };
+static const uint8_t SLEEPY_ACT_COUNT = 3;
+
 // Sad teardrop
 static uint32_t lastTearSpawnMs = 0;
 
@@ -263,14 +273,49 @@ void face::tick(uint32_t nowMs) {
     }
 
     if (active == Expression::IDLE) {
+        // Track continuous idle time for drowsiness
+        if (!idleTracking) {
+            idleSinceMs = nowMs;
+            idleTracking = true;
+        }
+        uint32_t idleDuration = nowMs - idleSinceMs;
+
+        // Drowsiness factor: 0.0 (alert) → 1.0 (fully drowsy)
+        float drowsy = 0.0f;
+        if (idleDuration > DROWSY_START_MS) {
+            drowsy = (float)(idleDuration - DROWSY_START_MS) / (float)(DROWSY_FULL_MS - DROWSY_START_MS);
+            if (drowsy > 1.0f) drowsy = 1.0f;
+        }
+
+        // Progressive eye droop when drowsy (eyes half-close)
+        if (drowsy > 0.0f && currentAct == IdleAct::NONE) {
+            float droop = 1.0f - drowsy * 0.35f;  // 1.0 → 0.65 (not fully closed)
+            state.leftEyeScale = droop;
+            state.rightEyeScale = droop;
+            // Subtle downward gaze
+            driftTY = flerp(driftTY, drowsy * 6.0f, 0.02f);
+        }
+
         // Base fidget (subtle position jitter)
         state.fidgetX = flerp(state.fidgetX, 0, 0.05f);
         state.fidgetY = flerp(state.fidgetY, 0, 0.05f);
 
         // Schedule next micro-animation
+        // When drowsy: shorter intervals + bias toward sleepy acts
         if (currentAct == IdleAct::NONE && nowMs >= nextActMs) {
-            uint8_t pick = esp_random() % IDLE_ACT_COUNT;
-            currentAct = (IdleAct)(pick + 1);
+            bool pickSleepy = false;
+            if (drowsy > 0.1f) {
+                // Chance of sleepy act increases with drowsiness: 30% at start → 80% fully drowsy
+                float sleepyChance = 0.3f + drowsy * 0.5f;
+                pickSleepy = ((esp_random() % 100) / 100.0f) < sleepyChance;
+            }
+
+            if (pickSleepy) {
+                currentAct = SLEEPY_ACTS[esp_random() % SLEEPY_ACT_COUNT];
+            } else {
+                uint8_t pick = esp_random() % IDLE_ACT_COUNT;
+                currentAct = (IdleAct)(pick + 1);
+            }
             actStartMs = nowMs;
             actParam = (esp_random() % 2) ? -1 : 1;  // random side
         }
@@ -537,12 +582,20 @@ void face::tick(uint32_t nowMs) {
             }
 
             // When act finishes, schedule next one
+            // Drowsy: shorter intervals (4-8s) vs normal (8-20s)
             if (currentAct == IdleAct::NONE) {
-                nextActMs = nowMs + idleMinMs + (esp_random() % idleRangeMs);
+                if (drowsy > 0.3f) {
+                    uint32_t drowsyMin = (uint32_t)(idleMinMs * (1.0f - drowsy * 0.5f));  // 8s → 4s
+                    uint32_t drowsyRange = (uint32_t)(idleRangeMs * (1.0f - drowsy * 0.6f));  // 12s → 4.8s
+                    nextActMs = nowMs + drowsyMin + (esp_random() % (drowsyRange > 0 ? drowsyRange : 1));
+                } else {
+                    nextActMs = nowMs + idleMinMs + (esp_random() % idleRangeMs);
+                }
             }
         }
     } else {
-        // Not idle — reset
+        // Not idle — reset drowsiness and fidget
+        idleTracking = false;
         state.fidgetX = flerp(state.fidgetX, 0, 0.1f);
         state.fidgetY = flerp(state.fidgetY, 0, 0.1f);
         if (currentAct != IdleAct::NONE) {

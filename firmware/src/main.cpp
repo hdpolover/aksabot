@@ -26,6 +26,8 @@
 #include "bios_menu.h"
 #include "device_server.h"
 #include "status_led.h"
+#include "wake_word.h"
+#include "gesture.h"
 
 // Global application state
 AppState appState;
@@ -58,6 +60,7 @@ static volatile bool playbackActive = false;  // true while audio task should dr
 static volatile bool playbackDone = false;    // set by response:end to signal no more frames
 static volatile bool playbackBuffering = true;  // jitter buffer: accumulate before playing
 static int JITTER_BUFFER_FRAMES = 15;           // wait for 300ms of audio before starting
+static volatile uint32_t lastFrameReceivedMs = 0;  // starvation detection
 
 // ── Echo mode (hold-to-record, release-to-playback) ───
 // Records raw stereo I2S frames to PSRAM (same as audio-pipeline test firmware).
@@ -105,6 +108,15 @@ static void updateStatusBar() {
     sb.batteryPercent = 255;  // USB-powered
     sb.focusModeActive = false;
     sb.pomodoroActive = false;
+    // Stall detection: speaking/thinking but no data flowing for 3+ seconds
+    sb.connectionStalled = false;
+    if (appState.botState == BotState::SPEAKING && playbackActive && !playbackDone) {
+        sb.connectionStalled = (millis() - lastFrameReceivedMs) > 3000;
+    } else if (appState.botState == BotState::THINKING) {
+        // In thinking state, we expect response:start within reasonable time
+        // (stuckCheckMs tracks when we entered the state)
+        // No extra stall flag here — the thinking dots already indicate waiting
+    }
     display::updateStatusBar(sb);
 }
 
@@ -142,6 +154,7 @@ static void onWsJson(const char* event, const char* data) {
         playbackDone = false;
         playbackBuffering = true;  // accumulate frames before playing
         playbackActive = true;
+        lastFrameReceivedMs = millis();  // Init starvation timer
         audio_io::flushSpeaker();  // Clear stale DMA data
         Serial.println("[Main] Response start — buffering audio");
     }
@@ -466,8 +479,10 @@ static void onTouchEvent(touch::Event event) {
     switch (event) {
         case touch::Event::HOLD_START:
             if (appState.botState == BotState::IDLE) {
+                appState.listenTrigger = ListenTrigger::TOUCH;
                 appState.botState = BotState::LISTENING;
                 syncFaceToState();
+                wake_word::stopListening();  // Pause wake word during PTT
                 if (appState.wsConnected) {
                     ws_client::sendEvent("audio:start");
                     Serial.println("[Main] Recording started (backend)");
@@ -579,6 +594,43 @@ static void onTouchEvent(touch::Event event) {
     }
 }
 
+// ── Hands-free recording (wake word / gesture) ──────────
+
+/// Start a hands-free recording session.
+/// Unlike push-to-talk, the user doesn't hold the screen — VAD handles end-of-speech.
+static void startHandsFreeRecording(ListenTrigger trigger) {
+    if (appState.botState != BotState::IDLE) return;
+    if (!appState.wsConnected) return;
+
+    appState.listenTrigger = trigger;
+    appState.botState = BotState::LISTENING;
+    syncFaceToState();
+    power_manager::recordInteraction();
+
+    // Stop wake word listening while recording (avoid echo trigger)
+    wake_word::stopListening();
+
+    // Play a short chime or visual cue so user knows bot is listening
+    face::setExpression(face::Expression::LISTENING, 150);
+
+    ws_client::sendEvent("audio:start");
+    Serial.printf("[Main] Hands-free recording started (trigger=%s)\n",
+                  trigger == ListenTrigger::WAKE_WORD ? "wake_word" : "gesture");
+}
+
+/// Called by VAD END_OF_SPEECH during hands-free mode.
+/// For push-to-talk, HOLD_END handles this instead.
+static void onHandsFreeEndOfSpeech() {
+    if (appState.botState != BotState::LISTENING) return;
+    if (appState.listenTrigger == ListenTrigger::TOUCH) return;  // PTT handles its own end
+
+    audio_io::stopMic();
+    appState.botState = BotState::THINKING;
+    syncFaceToState();
+    ws_client::sendEvent("audio:end");
+    Serial.println("[Main] Hands-free recording ended (VAD end-of-speech)");
+}
+
 // ── Audio capture task (Core 0, high priority) ──────────
 
 static bool audioInitialized = false;
@@ -601,6 +653,20 @@ static void audioCaptureLoop(void* param) {
                     playbackBuffering = false;
                     Serial.printf("[Main] Jitter buffer ready — %d frames queued\n", queued);
                 } else {
+                    // Starvation: if buffering takes too long, connection is likely dead
+                    static uint32_t bufferStartMs = 0;
+                    if (bufferStartMs == 0) bufferStartMs = millis();
+                    if ((millis() - bufferStartMs) > 8000) {
+                        Serial.println("[Main] Playback starvation — no frames received in 8s, aborting");
+                        playbackActive = false;
+                        playbackDone = false;
+                        playbackBuffering = true;
+                        bufferStartMs = 0;
+                        face::feedAudioAmplitude(0);
+                        appState.botState = BotState::IDLE;
+                        syncFaceToState();
+                        display::setTranscriptText("", "");
+                    }
                     vTaskDelay(pdMS_TO_TICKS(20));
                     continue;
                 }
@@ -609,6 +675,7 @@ static void audioCaptureLoop(void* param) {
             PlaybackFrame frame;
             if (xQueueReceive(playbackQueue, &frame, pdMS_TO_TICKS(150)) == pdTRUE) {
                 audio_io::writeSpeaker(frame.samples, frame.count);
+                lastFrameReceivedMs = millis();  // Track last successful frame
 
                 // Feed amplitude to face for mouth animation
                 int32_t sum = 0;
@@ -625,7 +692,19 @@ static void audioCaptureLoop(void* param) {
                 appState.botState = BotState::IDLE;
                 syncFaceToState();
                 display::setTranscriptText("", "");  // Clear transcript overlay
+                wake_word::startListening();  // Resume wake word detection
                 Serial.println("[Main] Playback complete");
+            } else if (!playbackDone && (millis() - lastFrameReceivedMs) > 5000) {
+                // Queue empty for 5s but response:end never came — connection stalled
+                Serial.println("[Main] Playback starvation mid-speech — aborting");
+                playbackActive = false;
+                playbackDone = false;
+                playbackBuffering = true;
+                face::feedAudioAmplitude(0);
+                appState.botState = BotState::IDLE;
+                syncFaceToState();
+                display::setTranscriptText("", "");
+                wake_word::startListening();  // Resume wake word detection
             }
             continue;
         }
@@ -696,7 +775,9 @@ static void audioCaptureLoop(void* param) {
             ws_client::sendEvent("audio:end");
             audio_io::stopMic();
             vad::reset();
-            Serial.println("[Main] VAD: end-of-speech, stopping");
+            Serial.printf("[Main] VAD: end-of-speech, stopping (trigger=%s)\n",
+                appState.listenTrigger == ListenTrigger::TOUCH ? "touch" :
+                appState.listenTrigger == ListenTrigger::WAKE_WORD ? "wake_word" : "gesture");
             continue;
         }
 
@@ -1017,6 +1098,60 @@ void setup() {
         Serial.println("[Main] BLE presence scanning disabled (enable in app settings)");
     }
 
+    // ── 14. Wake word detection ─────────────────────────────
+    wake_word::init();
+    wake_word::onWake([]() {
+        startHandsFreeRecording(ListenTrigger::WAKE_WORD);
+    });
+    wake_word::startListening();
+    Serial.println("[Main] Wake word detection active");
+
+    // ── 15. Gesture sensor (APDS-9960) ────────────────────
+    if (gesture::init()) {
+        gesture::onGesture([](gesture::Type g) {
+            power_manager::recordInteraction();
+            switch (g) {
+                case gesture::Type::WAVE:
+                    // Wave to start hands-free recording
+                    startHandsFreeRecording(ListenTrigger::GESTURE);
+                    break;
+                case gesture::Type::SWIPE_UP:
+                    // Volume up
+                    audio_io::setVolume(constrain(nvs_store::getVolume() + 10, 0, 100));
+                    nvs_store::setVolume(constrain(nvs_store::getVolume() + 10, 0, 100));
+                    Serial.println("[Gesture] Volume up");
+                    break;
+                case gesture::Type::SWIPE_DOWN:
+                    // Volume down
+                    audio_io::setVolume(constrain(nvs_store::getVolume() - 10, 0, 100));
+                    nvs_store::setVolume(constrain(nvs_store::getVolume() - 10, 0, 100));
+                    Serial.println("[Gesture] Volume down");
+                    break;
+                case gesture::Type::SWIPE_LEFT:
+                case gesture::Type::SWIPE_RIGHT:
+                    // Dismiss current display/reminder
+                    if (display::getMode() == display::Mode::REMINDER) {
+                        display::setMode(display::Mode::FACE);
+                        ws_client::sendEvent("proactive:dismiss");
+                    }
+                    break;
+                default:
+                    break;
+            }
+        });
+
+        gesture::onProximity([](bool near) {
+            if (near) {
+                power_manager::recordInteraction();  // Wake display when someone approaches
+                Serial.println("[Gesture] Proximity: near");
+            }
+        });
+
+        Serial.println("[Main] Gesture sensor active");
+    } else {
+        Serial.println("[Main] Gesture sensor not found — skipping");
+    }
+
     Serial.println("\n[Main] Boot complete.\n");
 }
 
@@ -1140,6 +1275,9 @@ void loop() {
     presence_detector::tick(now);
     ble_manager::tickPresenceScan(now);
 
+    // Tick gesture sensor (APDS-9960)
+    gesture::tick(now);
+
     // Tick power management and status LED
     power_manager::tick(now);
     status_led::tick(now);
@@ -1169,6 +1307,11 @@ void loop() {
 
     if (appState.botState != prevState) {
         syncFaceToState();
+    }
+
+    // Refresh status bar during active states (for stall indicator blinking)
+    if (appState.botState == BotState::SPEAKING || appState.botState == BotState::THINKING) {
+        updateStatusBar();
     }
 
     // Throttle status bar updates — only refresh when connectivity actually changes

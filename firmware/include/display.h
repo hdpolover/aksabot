@@ -27,6 +27,7 @@ struct StatusBar {
     int8_t wifiRssi;            // Wi-Fi signal strength (-30 to -90)
     bool wifiConnected;
     bool wsConnected;
+    bool connectionStalled;     // Data flow stalled during active state
     uint8_t batteryPercent;     // 0-100 or 255 = USB-powered
     bool focusModeActive;
     bool pomodoroActive;

@@ -92,6 +92,11 @@
 #define GPIO_SPARE_3  14
 #define GPIO_SPARE_4  21
 
+// ── APDS-9960 Gesture/Proximity Sensor ────────────────
+// I2C: shared bus with touch + audio codec (GPIO16 SDA, GPIO15 SCL)
+// Address: 0x39 (no conflict with FT6336G 0x38 or ES8311)
+#define GESTURE_INT   GPIO_SPARE_3  // GPIO14 — interrupt pin
+
 // ── Opus codec ─────────────────────────────────────────
 #ifndef OPUS_FRAME_MS
 #define OPUS_FRAME_MS 20

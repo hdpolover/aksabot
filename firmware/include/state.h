@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 
 // Bot state machine — mirrors backend session states
 enum class BotState {
@@ -18,6 +19,13 @@ enum class PresenceState {
     AWAY,       // Phone not detected, bot should sleep
 };
 
+/// How the current LISTENING session was triggered.
+enum class ListenTrigger : uint8_t {
+    TOUCH,       // Push-to-talk (touch hold)
+    WAKE_WORD,   // "Hey Aksa" wake word detection
+    GESTURE,     // APDS-9960 hand wave
+};
+
 // Global state (accessed from multiple FreeRTOS tasks)
 struct AppState {
     volatile BotState botState = BotState::OFFLINE;
@@ -26,6 +34,7 @@ struct AppState {
     volatile bool wsConnected = false;
     volatile bool touchActive = false;
     volatile bool interrupted = false;
+    volatile ListenTrigger listenTrigger = ListenTrigger::TOUCH;
 };
 
 extern AppState appState;

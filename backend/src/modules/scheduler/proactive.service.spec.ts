@@ -64,11 +64,11 @@ describe('ProactiveService', () => {
       expect(mockLlm.generate).toHaveBeenCalledTimes(1);
     });
 
-    it('returns null on subsequent calls within the same day', async () => {
+    it('returns a reconnect greeting on subsequent calls within the same day', async () => {
       await service.checkGreeting(DEVICE_ID);
       const second = await service.checkGreeting(DEVICE_ID);
-      expect(second).toBeNull();
-      expect(mockLlm.generate).toHaveBeenCalledTimes(1);
+      expect(second).toBe('Good morning!');
+      expect(mockLlm.generate).toHaveBeenCalledTimes(2);
     });
 
     it('generates a new greeting the next day', async () => {
@@ -313,16 +313,16 @@ describe('ProactiveService', () => {
   // ── clearDevice ───────────────────────────────────────
 
   describe('clearDevice', () => {
-    it('preserves greeting dedup across disconnect — no repeat greeting same day', async () => {
+    it('preserves greeting date tracking across disconnect — reconnect greeting same day', async () => {
       jest.setSystemTime(ts('2026-04-10T09:00:00'));
       await service.checkGreeting(DEVICE_ID);
 
       service.clearDevice(DEVICE_ID);
 
-      // Same day — greeting should NOT fire again (daily dedup preserved)
+      // Same day — should generate a reconnect greeting (not first-of-day)
       const result = await service.checkGreeting(DEVICE_ID);
-      expect(result).toBeNull();
-      expect(mockLlm.generate).toHaveBeenCalledTimes(1);
+      expect(result).toBe('Good morning!');
+      expect(mockLlm.generate).toHaveBeenCalledTimes(2);
     });
 
     it('removes activity tracking so idle nudge is not fired', async () => {

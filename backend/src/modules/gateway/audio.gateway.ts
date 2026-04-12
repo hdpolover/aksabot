@@ -13,8 +13,10 @@ import { AuthService } from '../auth/auth.service';
 import { AiService } from '../ai/ai.service';
 import { MemoriesService } from '../memories/memories.service';
 import { SchedulerService } from '../scheduler/scheduler.service';
+import { PomodoroService } from '../scheduler/pomodoro.service';
 import { ProactiveService } from '../scheduler/proactive.service';
 import { MoodJournalService } from '../scheduler/mood-journal.service';
+import { VoiceCommandService } from './voice-command.service';
 import { SessionManager } from './session.manager';
 import { ConversationPersistence } from './conversation.persistence';
 import type { SttResult } from '../ai/interfaces';
@@ -46,10 +48,13 @@ export class AudioGateway
     private readonly memoriesService: MemoriesService,
     @Inject(forwardRef(() => SchedulerService))
     private readonly scheduler: SchedulerService,
+    @Inject(forwardRef(() => PomodoroService))
+    private readonly pomodoro: PomodoroService,
     @Inject(forwardRef(() => ProactiveService))
     private readonly proactive: ProactiveService,
     @Inject(forwardRef(() => MoodJournalService))
     private readonly moodJournal: MoodJournalService,
+    private readonly voiceCommands: VoiceCommandService,
     private readonly sessions: SessionManager,
     private readonly persistence: ConversationPersistence,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
@@ -664,6 +669,13 @@ export class AudioGateway
       return;
     }
 
+    // Check for voice commands before hitting the LLM
+    const commandMatch = this.voiceCommands.match(result.transcript);
+    if (commandMatch) {
+      await this.handleVoiceCommand(deviceId, commandMatch, result.transcript);
+      return;
+    }
+
     // Save user message
     if (session.conversationId) {
       await this.persistence.saveMessage(
@@ -740,6 +752,176 @@ export class AudioGateway
     // Resume idle personality chat
     this.proactive.startIdleChat(deviceId).catch(() => {});
 
+    this.sessions.resetIdleTimer(deviceId, () => {
+      this.endConversation(deviceId);
+    });
+  }
+
+  // ── Voice command handler ─────────────────────────────────────
+
+  private async handleVoiceCommand(
+    deviceId: string,
+    match: { command: string; args?: string },
+    transcript: string,
+  ) {
+    const session = this.sessions.get(deviceId);
+    if (!session) return;
+
+    this.logger.log(`Voice command for ${deviceId}: ${match.command}`);
+
+    let responseText: string;
+    let expression = 'happy';
+
+    switch (match.command) {
+      case 'pomodoro:start': {
+        await this.pomodoro.start(deviceId);
+        responseText = "Pomodoro started — 25 minutes of focus, let's lock in.";
+        expression = 'focused';
+        break;
+      }
+
+      case 'pomodoro:stop': {
+        this.pomodoro.stop(deviceId);
+        responseText = 'Pomodoro stopped. Take a breather.';
+        expression = 'calm';
+        break;
+      }
+
+      case 'focus:start': {
+        this.scheduler.startFocusMode(deviceId, 60);
+        responseText = "Focus mode on — I'll shut up for an hour. You got this.";
+        expression = 'focused';
+        break;
+      }
+
+      case 'focus:stop': {
+        this.scheduler.clearFocusMode(deviceId);
+        responseText = "Focus mode off — I'm back baby, did you miss me?";
+        expression = 'happy';
+        break;
+      }
+
+      case 'sleep': {
+        this.proactive.stopIdleChat(deviceId);
+        this.sendToDevice(deviceId, 'power:sleep', {});
+        responseText = 'Fine, going to sleep. Wake me when you need me.';
+        expression = 'calm';
+        break;
+      }
+
+      case 'memories:list': {
+        const memories = await this.memoriesService.getRelevant(deviceId, 10);
+        if (memories.length === 0) {
+          responseText = "I don't know anything about you yet. We should talk more.";
+          expression = 'confused';
+        } else {
+          const list = memories.slice(0, 5).map((m) => m.fact).join('. ');
+          responseText = `Here's what I know about you: ${list}.`;
+          expression = 'encouraging';
+        }
+        break;
+      }
+
+      case 'mood:history': {
+        const moods = await this.moodJournal.getRecentMoods(deviceId, 7);
+        if (moods.length === 0) {
+          responseText = "I don't have any mood data yet. Give it a few days.";
+          expression = 'confused';
+        } else {
+          const summary = moods
+            .slice(0, 5)
+            .map((m) => `${m.mood} on ${m.date}`)
+            .join(', ');
+          responseText = `Your recent vibes: ${summary}.`;
+          expression = 'calm';
+        }
+        break;
+      }
+
+      case 'cancel': {
+        responseText = 'Alright, never mind.';
+        expression = 'idle';
+        break;
+      }
+
+      case 'reminder:set': {
+        if (!match.args) {
+          responseText = 'Remind you about what?';
+          expression = 'confused';
+        } else {
+          // Store as a proactive nudge text — fire in 30 minutes by default
+          const reminderText = match.args;
+          setTimeout(() => {
+            this.sendToDevice(deviceId, 'proactive:reminder', {
+              text: `Hey, you asked me to remind you: ${reminderText}`,
+              display: {
+                expression: 'encouraging',
+                screenMode: 'reminder',
+                durationMs: 15_000,
+              },
+            });
+          }, 30 * 60_000);
+          responseText = `Got it, I'll remind you in 30 minutes: ${reminderText}.`;
+          expression = 'happy';
+        }
+        break;
+      }
+
+      default:
+        responseText = "I heard you but I'm not sure what to do with that.";
+        expression = 'confused';
+    }
+
+    // Send face expression
+    this.sendToDevice(deviceId, 'face:expression', { expression });
+
+    // Send response as TTS audio
+    const device = await this.persistence.getDevice(deviceId);
+    const settings = device?.settingsJson ?? {};
+    const voiceOptions = {
+      voice: settings.voice_preset as string | undefined,
+      speed: settings.voice_speed as number | undefined,
+      stability: settings.voice_stability as number | undefined,
+    };
+
+    try {
+      this.sendToDevice(deviceId, 'response:start', { type: 'command' });
+      this.sendToDevice(deviceId, 'response:text', {
+        text: responseText,
+        isFinal: true,
+      });
+
+      const { opusAudio } = await this.aiService.synthesizeWithCache(
+        responseText,
+        undefined,
+        voiceOptions,
+      );
+      await this.sendFramedOpusToDevice(deviceId, opusAudio);
+
+      this.sendToDevice(deviceId, 'response:end', {
+        fullText: responseText,
+        cacheKeys: [],
+      });
+    } catch (err: any) {
+      this.logger.error(`Voice command TTS failed: ${err.message}`);
+      // Still send the text even if TTS fails
+      this.sendToDevice(deviceId, 'response:end', {
+        fullText: responseText,
+        cacheKeys: [],
+      });
+    }
+
+    // Save command and response to conversation
+    if (session.conversationId) {
+      await this.persistence.saveMessage(session.conversationId, 'user', transcript);
+      await this.persistence.saveMessage(session.conversationId, 'assistant', responseText);
+    }
+
+    session.state = 'idle';
+    this.sendToDevice(deviceId, 'state:update', { state: 'idle' });
+
+    // Resume idle chat
+    this.proactive.startIdleChat(deviceId).catch(() => {});
     this.sessions.resetIdleTimer(deviceId, () => {
       this.endConversation(deviceId);
     });

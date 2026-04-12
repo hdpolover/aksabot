@@ -602,15 +602,24 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     }
 
     // ── Connection indicator (top-left dot) ────────────
-    // Green = online (WiFi + WS), Yellow = WiFi only, Red = offline
+    // Green = online, Yellow = WiFi only, Red = offline
+    // Blinks orange when data flow stalls during speaking/thinking
     uint16_t dotCol;
-    if (status.wifiConnected && status.wsConnected)
+    bool blinkDot = false;
+    if (status.connectionStalled) {
+        dotCol = rgb(255, 140, 0);  // orange — stalled
+        blinkDot = true;
+    } else if (status.wifiConnected && status.wsConnected) {
         dotCol = rgb(0, 200, 80);   // green — fully online
-    else if (status.wifiConnected)
+    } else if (status.wifiConnected) {
         dotCol = rgb(220, 180, 0);  // yellow — WiFi but no backend
-    else
+    } else {
         dotCol = rgb(200, 50, 40);  // red — offline
-    s.fillSmoothCircle(8, 8, 4, dotCol);
+    }
+    // Blink: 500ms on / 500ms off
+    if (!blinkDot || ((millis() / 500) % 2 == 0)) {
+        s.fillSmoothCircle(8, 8, 4, dotCol);
+    }
 
     // ── Status icon (bottom) — small icon instead of text label ──
     {

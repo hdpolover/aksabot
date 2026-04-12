@@ -12,6 +12,7 @@ import { SchedulerModule } from '../scheduler/scheduler.module';
 import { AudioGateway } from './audio.gateway';
 import { SessionManager } from './session.manager';
 import { ConversationPersistence } from './conversation.persistence';
+import { VoiceCommandService } from './voice-command.service';
 
 @Module({
   imports: [
@@ -21,7 +22,7 @@ import { ConversationPersistence } from './conversation.persistence';
     MemoriesModule,
     forwardRef(() => SchedulerModule),
   ],
-  providers: [AudioGateway, SessionManager, ConversationPersistence],
+  providers: [AudioGateway, SessionManager, ConversationPersistence, VoiceCommandService],
   exports: [AudioGateway, SessionManager],
 })
 export class GatewayModule {}
