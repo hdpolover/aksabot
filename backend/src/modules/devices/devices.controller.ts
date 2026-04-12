@@ -28,7 +28,7 @@ import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { VoicePreviewDto } from './dto/voice-preview.dto';
 
 /** Sample phrase used for every voice preview. Short, punchy, Aksa-style. */
-const PREVIEW_PHRASE = "Yo, I'm Aksa — Hendra's desk companion. Built different, fr.";
+const PREVIEW_PHRASE = "Yo, I'm Aksa — Hendra's desk companion. Built different, for real.";
 
 @Controller('devices')
 @UseGuards(JwtAuthGuard, RateLimitGuard)
