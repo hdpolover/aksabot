@@ -136,13 +136,16 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
                       items: const [
                         DropdownMenuItem(
                             value: 'ziggy',
-                            child: Text('Ziggy (energetic boy)')),
+                            child: Text('Ziggy — energetic, slightly synthetic')),
                         DropdownMenuItem(
-                            value: 'aria', child: Text('Aria (warm female)')),
+                            value: 'fin',
+                            child: Text('Fin — alien, otherworldly')),
                         DropdownMenuItem(
-                            value: 'roger', child: Text('Roger (calm male)')),
+                            value: 'george',
+                            child: Text('George — crisp British, robotic edge')),
                         DropdownMenuItem(
-                            value: 'sarah', child: Text('Sarah (friendly)')),
+                            value: 'roger',
+                            child: Text('Roger — calm, most human')),
                       ],
                       onChanged: _saving
                           ? null
