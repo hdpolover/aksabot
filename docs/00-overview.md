@@ -73,3 +73,4 @@ Total estimated timeline: **14 weeks** for a fully functional prototype. Phases 
 | [17-audio-assets.md](17-audio-assets.md) | Sound effects and UI audio clips — ElevenLabs prompts, SD layout, Opus conversion |
 | [18-brand-guidelines.md](18-brand-guidelines.md) | Aksa brand guidelines — personality, voice, tone, face expressions, audio identity |
 | [19-sd-card-storage.md](19-sd-card-storage.md) | SD card storage layout — what's stored, why, sprite sheets, offline resilience, config snapshots |
+| [20-face-sprite-spec.md](20-face-sprite-spec.md) | Face sprite design brief — 40 frames across 13 expressions, visual style, canvas specs, delivery format |
