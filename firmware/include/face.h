@@ -115,4 +115,8 @@ const FaceState& getState();
 /// Default: minMs=8000, rangeMs=12000 (8-20s between animations).
 void setIdleInterval(uint32_t minMs, uint32_t rangeMs);
 
+/// Trigger the yawn animation immediately, interrupting any current idle act.
+/// Used by the departure sequence to play yawn before sleeping.
+void triggerYawn();
+
 }  // namespace face

@@ -10,8 +10,8 @@
 ///
 /// State machine:
 ///   UNKNOWN → PRESENT  (RSSI above threshold)
-///   PRESENT → LEAVING  (RSSI drops below threshold)
-///   LEAVING → PRESENT  (RSSI recovers within grace period)
+///   PRESENT → LEAVING  (phone not seen for missingTimeoutSec)
+///   LEAVING → PRESENT  (RSSI above threshold within grace period)
 ///   LEAVING → AWAY     (grace period expires)
 ///   AWAY    → PRESENT  (RSSI above threshold — triggers greeting)
 ///
@@ -26,12 +26,16 @@ using StateChangeCallback = std::function<void(PresenceState, PresenceState, uin
 
 /// Configuration for the presence detector.
 struct Config {
-    int8_t rssiThreshold = -75;       // dBm — above this = present (entry threshold)
-    int8_t hysteresisDb = 6;          // dBm — must drop this far below threshold to start leaving
-                                      // e.g. threshold=-75, hysteresis=6 → leave at -81
-    uint8_t gracePeriodSec = 45;      // Seconds in LEAVING before transitioning to AWAY
-    uint8_t rssiWindowSize = 5;       // Number of readings for rolling average
-    uint32_t scanIntervalMs = 5000;   // How often to scan (ms)
+    int8_t rssiThreshold = -75;          // dBm — above this = present (entry threshold)
+    int8_t hysteresisDb = 6;             // dBm — must drop this far below threshold to
+                                         // trigger a leaving transition from feedRssi()
+                                         // e.g. threshold=-75, hysteresis=6 → leave at -81
+    uint8_t gracePeriodSec = 45;         // Seconds in LEAVING before transitioning to AWAY
+    uint16_t missingTimeoutSec = 30;     // Seconds since last phone sighting before LEAVING
+                                         // starts. Longer than scan interval + iOS ad jitter.
+                                         // iOS background advertising can pause 10-20s.
+    uint8_t rssiWindowSize = 5;          // Number of readings for rolling average
+    uint32_t scanIntervalMs = 5000;      // How often to scan (ms)
     uint32_t awayScanIntervalMs = 30000; // Scan interval when AWAY (power saving)
 };
 
@@ -45,12 +49,9 @@ void onStateChange(StateChangeCallback callback);
 /// The state machine will update based on the smoothed RSSI value.
 void feedRssi(int8_t rssi);
 
-/// Call this when a scan completes and the target was NOT found.
-/// Advances the grace period timer when in PRESENT/LEAVING state.
-void feedMiss();
-
-/// Must be called periodically (e.g., from loop or a task) to advance
-/// the grace period timer. Pass current millis().
+/// Must be called periodically (e.g., from loop or a task) to advance timers.
+/// Handles PRESENT→LEAVING (missing timeout) and LEAVING→AWAY (grace period).
+/// Pass current millis().
 void tick(uint32_t nowMs);
 
 /// Get the current presence state.

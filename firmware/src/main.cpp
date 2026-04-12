@@ -1061,10 +1061,25 @@ void setup() {
                 if (appState.wsConnected) {
                     ws_client::sendEvent("presence:departed");
                 }
-                // Show sad face briefly, then sleep via power_manager
-                // (don't call display::sleep() directly — keeps power_manager in sync)
+                // Departure animation: sad → calm → yawn → sleeping → device sleep
+                // Runs in a one-shot task so the state-change callback returns quickly.
                 face::setExpression(face::Expression::SAD, 300);
-                power_manager::setState(power_manager::PowerState::SLEEPING);
+                xTaskCreate([](void*) {
+                    // Brief sad pause
+                    vTaskDelay(pdMS_TO_TICKS(800));
+                    // Fade to calm — winding down
+                    face::setExpression(face::Expression::CALM, 600);
+                    vTaskDelay(pdMS_TO_TICKS(900));
+                    // Yawn (3000ms animation)
+                    face::triggerYawn();
+                    vTaskDelay(pdMS_TO_TICKS(3200));
+                    // Transition to sleeping expression while the device is still on
+                    face::setExpression(face::Expression::SLEEPING, 800);
+                    vTaskDelay(pdMS_TO_TICKS(1500));
+                    // Sleep the display (keeps power_manager in sync)
+                    power_manager::setState(power_manager::PowerState::SLEEPING);
+                    vTaskDelete(nullptr);
+                }, "departure_anim", 2048, nullptr, 1, nullptr);
             }
         });
     }

@@ -703,3 +703,10 @@ void face::setIdleInterval(uint32_t minMs, uint32_t rangeMs) {
     idleRangeMs = rangeMs;
     Serial.printf("[Face] Idle interval: %lu-%lums\n", minMs, minMs + rangeMs);
 }
+
+void face::triggerYawn() {
+    currentAct = IdleAct::YAWN;
+    actStartMs = millis();
+    actParam   = 0;
+    Serial.println("[Face] Yawn triggered");
+}

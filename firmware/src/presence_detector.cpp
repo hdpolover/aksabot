@@ -124,35 +124,30 @@ void presence_detector::feedRssi(int8_t rssi) {
     // band), hold the current state — no transition in either direction.
 }
 
-void presence_detector::feedMiss() {
-    uint32_t now = millis();
-
-    // Target not found in scan
-    switch (currentState) {
-        case PresenceState::PRESENT:
-            // Start grace period
-            leavingStartMs = now;
-            transition(PresenceState::LEAVING, now);
-            break;
-
-        case PresenceState::UNKNOWN:
-            // No device ever seen — stay unknown until first sighting
-            break;
-
-        case PresenceState::LEAVING:
-        case PresenceState::AWAY:
-            // Already transitioning or away — tick() handles the rest
-            break;
-    }
-}
-
 void presence_detector::tick(uint32_t nowMs) {
     if (currentState == PresenceState::LEAVING) {
+        // Grace period: stay in LEAVING until it expires, then declare AWAY.
+        // The user can still come back (feedRssi → PRESENT) within this window.
         uint32_t elapsed = nowMs - leavingStartMs;
         uint32_t graceMs = (uint32_t)cfg.gracePeriodSec * 1000;
-
         if (elapsed >= graceMs) {
             transition(PresenceState::AWAY, nowMs);
+        }
+    } else if (currentState == PresenceState::PRESENT) {
+        // Time-based departure detection: if phone not seen for missingTimeoutSec,
+        // start the LEAVING grace period.
+        //
+        // This is deliberately NOT driven by per-scan-cycle miss counts. iOS
+        // background advertising pauses unpredictably (2-20s gaps). Treating a
+        // missed 5-second scan window as "phone gone" causes constant flapping
+        // even when the user is sitting right at the desk. The time-based check
+        // is immune to per-cycle detection gaps.
+        if (lastScanHitMs > 0) {
+            uint32_t missingMs = (uint32_t)cfg.missingTimeoutSec * 1000;
+            if ((nowMs - lastScanHitMs) >= missingMs) {
+                leavingStartMs = nowMs;
+                transition(PresenceState::LEAVING, nowMs);
+            }
         }
     }
 }
@@ -174,9 +169,12 @@ uint32_t presence_detector::getRecommendedScanIntervalMs() {
     switch (currentState) {
         case PresenceState::AWAY:
             return cfg.awayScanIntervalMs;
-        case PresenceState::LEAVING:
-            return cfg.scanIntervalMs / 2;  // Scan faster during grace period
         default:
+            // Use the same full scan interval for PRESENT, LEAVING, and UNKNOWN.
+            // Halving the interval during LEAVING makes detections less reliable
+            // (shorter windows = fewer chances to catch iOS background advertising),
+            // which is the opposite of what we want. The 45s grace period already
+            // gives plenty of time to re-detect before transitioning to AWAY.
             return cfg.scanIntervalMs;
     }
 }
@@ -185,11 +183,12 @@ void presence_detector::updateConfig(const Config& config) {
     cfg = config;
     if (cfg.rssiWindowSize > MAX_WINDOW) cfg.rssiWindowSize = MAX_WINDOW;
 
-    // Reset RSSI window on config change
-    rssiCount = 0;
-    rssiIndex = 0;
-    rssiSum = 0;
+    // Reset RSSI window and hit timestamp so the new timeout starts fresh
+    rssiCount    = 0;
+    rssiIndex    = 0;
+    rssiSum      = 0;
+    lastScanHitMs = 0;
 
-    Serial.printf("[Presence] Config updated — threshold=%ddBm, grace=%us\n",
-        cfg.rssiThreshold, cfg.gracePeriodSec);
+    Serial.printf("[Presence] Config updated — threshold=%ddBm, grace=%us, timeout=%us\n",
+        cfg.rssiThreshold, cfg.gracePeriodSec, cfg.missingTimeoutSec);
 }

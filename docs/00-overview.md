@@ -66,3 +66,9 @@ Total estimated timeline: **14 weeks** for a fully functional prototype. Phases 
 | [10-risks-and-scope.md](10-risks-and-scope.md) | Risks, mitigations, and deliberately excluded features |
 | [11-future-extensions.md](11-future-extensions.md) | Post-V1 extensions — expressive servos, desk mobility, integrations, camera |
 | [12-features.md](12-features.md) | Bot capabilities — reactive features, proactive reminders, pomodoro, display modes |
+| [13-first-setup.md](13-first-setup.md) | First-time setup — backend, firmware flash, app, pairing, troubleshooting |
+| [14-remaining-features.md](14-remaining-features.md) | Remaining features buildable without hardware — roadmap and checklist |
+| [15-hardware-spec.md](15-hardware-spec.md) | ES3C28P board spec — GPIO pinout, display, touch, audio, SD, battery, dimensions |
+| [16-hardware-capabilities.md](16-hardware-capabilities.md) | Hardware capabilities inventory — what's used, planned, and untapped, with priority tiers |
+| [17-audio-assets.md](17-audio-assets.md) | Sound effects and UI audio clips — ElevenLabs prompts, SD layout, Opus conversion |
+| [18-brand-guidelines.md](18-brand-guidelines.md) | Aksa brand guidelines — personality, voice, tone, face expressions, audio identity |

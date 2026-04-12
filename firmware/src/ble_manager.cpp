@@ -198,15 +198,50 @@ class BrightnessCallback : public NimBLECharacteristicCallbacks {
 };
 
 // ── Presence scan callbacks ─────────────────────────────
+//
+// The phone advertises every ~100ms. Over a 5-second scan window that's ~50
+// onResult callbacks. Feeding the state machine on every callback causes
+// rapid flapping. Instead:
+//   onResult  — accumulate RSSI readings for this cycle (no state change)
+//   onScanEnd — feed ONE averaged reading to the state machine, then restart
+//
+// This guarantees exactly one state transition evaluation per scan cycle.
 
-static volatile bool presenceFoundThisCycle = false;
+static volatile bool    presenceFoundThisCycle  = false;
+static volatile int32_t presenceCycleRssiSum    = 0;
+static volatile int16_t presenceCycleRssiCount  = 0;
+// Set by onScanEnd (NimBLE host task context).
+// Consumed by tickPresenceScan (main loop context).
+// Never call scan->start() from within onScanEnd — it deadlocks the nimble_host
+// task and triggers the task watchdog.
+static volatile bool    presenceScanEndPending  = false;
+
+static bool presenceScanActive = false;
+static bool presenceScanPaused = false;
+
+static void resetCycleCounters() {
+    presenceFoundThisCycle = false;
+    presenceCycleRssiSum   = 0;
+    presenceCycleRssiCount = 0;
+}
 
 class PresenceScanCallbacks : public NimBLEScanCallbacks {
+    // Called for every BLE advertisement received during the scan window.
+    // Only accumulate RSSI — never touch the state machine or call scan->start().
     void onResult(const NimBLEAdvertisedDevice* device) override {
         if (device->isAdvertisingService(NimBLEUUID(UUID_PRESENCE_SVC))) {
-            presence_detector::feedRssi(device->getRSSI());
-            presenceFoundThisCycle = true;
+            presenceCycleRssiSum   += device->getRSSI();
+            presenceCycleRssiCount += 1;
+            presenceFoundThisCycle  = true;
         }
+    }
+
+    // Called exactly once when the scan duration elapses (or stop() is called).
+    // IMPORTANT: Do NOT call scan->start() here — this runs inside the nimble_host
+    // FreeRTOS task. Calling start() from within a NimBLE callback causes a
+    // deadlock that fires the task watchdog. Just set the pending flag and return.
+    void onScanEnd(const NimBLEScanResults& /*results*/, int /*reason*/) override {
+        presenceScanEndPending = true;
     }
 };
 
@@ -400,18 +435,18 @@ void ble_manager::notifyAuthStatus(uint8_t status) {
 }
 
 static PresenceScanCallbacks presenceScanCb;
-static bool presenceScanActive = false;
-static bool presenceScanPaused = false;
 
 static void configureAndStartScan() {
     NimBLEScan* pScan = NimBLEDevice::getScan();
-    // Passive scan, low duty cycle: 160/20 = ~12.5% air time.
-    // Previous 100/50 (50%) starved WiFi and ate heap with result buffers.
+    // Passive scan, ~25% duty cycle: 80/20 = 25% air time.
+    // iOS background advertising can be 2-10s between packets. 12.5% duty caused
+    // missed detections on ~50% of scan cycles. 25% duty significantly improves
+    // reliability without saturating the shared WiFi/BLE radio.
     pScan->setActiveScan(false);
-    pScan->setInterval(160);   // 160 * 0.625ms = 100ms scan interval
-    pScan->setWindow(20);      //  20 * 0.625ms =  12.5ms active window
-    pScan->setMaxResults(0);   // Don't buffer results in heap — we use callbacks
-    presenceFoundThisCycle = false;
+    pScan->setInterval(80);    //  80 * 0.625ms =  50ms scan interval
+    pScan->setWindow(20);      //  20 * 0.625ms = 12.5ms active window  → 25%
+    pScan->setMaxResults(0);   // Don't buffer results in heap — use callbacks only
+    resetCycleCounters();
     uint32_t scanSec = presence_detector::getRecommendedScanIntervalMs() / 1000;
     if (scanSec < 1) scanSec = 1;
     pScan->start(scanSec, false);
@@ -427,15 +462,19 @@ void ble_manager::startPresenceScan() {
 }
 
 void ble_manager::stopPresenceScan() {
-    presenceScanActive = false;
-    presenceScanPaused = false;
+    presenceScanActive     = false;
+    presenceScanPaused     = false;
+    presenceScanEndPending = false;   // discard any pending scan-end result
+    resetCycleCounters();
     NimBLEDevice::getScan()->stop();
     Serial.println("[BLE] Presence scanning stopped");
 }
 
 void ble_manager::pausePresenceScan() {
     if (!presenceScanActive || presenceScanPaused) return;
-    presenceScanPaused = true;
+    presenceScanPaused     = true;
+    presenceScanEndPending = false;   // discard result from interrupted scan cycle
+    resetCycleCounters();
     NimBLEDevice::getScan()->stop();
     Serial.println("[BLE] Presence scan paused");
 }
@@ -447,16 +486,36 @@ void ble_manager::resumePresenceScan() {
     Serial.println("[BLE] Presence scan resumed");
 }
 
-// Called from loop() to restart scans after each cycle completes
+// Called from main loop (safe context — not inside any NimBLE callback).
+// Processes the scan-end flag set by onScanEnd and restarts the next cycle.
+// Also acts as a watchdog: if the scan died without firing onScanEnd, restart it.
 void ble_manager::tickPresenceScan(uint32_t nowMs) {
     if (!presenceScanActive || presenceScanPaused) return;
 
-    NimBLEScan* pScan = NimBLEDevice::getScan();
-    if (!pScan->isScanning()) {
-        // Previous scan ended — feed a miss if phone wasn't seen this cycle
-        if (!presenceFoundThisCycle) {
-            presence_detector::feedMiss();
+    if (presenceScanEndPending) {
+        presenceScanEndPending = false;
+
+        if (presenceFoundThisCycle && presenceCycleRssiCount > 0) {
+            // Phone seen this cycle — feed the averaged RSSI into the state machine.
+            // This also updates lastScanHitMs, which resets the missing-timeout clock.
+            int8_t avgRssi = (int8_t)(presenceCycleRssiSum / presenceCycleRssiCount);
+            presence_detector::feedRssi(avgRssi);
         }
+        // Phone not seen this cycle — do nothing here. Departure is handled by a
+        // time-based timeout in presence_detector::tick(): if lastScanHitMs hasn't
+        // been updated for missingTimeoutSec seconds, tick() starts LEAVING.
+        // Per-cycle miss counts are unreliable because iOS background advertising
+        // can pause for 10-20 seconds even when the user is at their desk.
+
+        resetCycleCounters();
+        configureAndStartScan();
+        return;
+    }
+
+    // Watchdog: scan may have died without firing onScanEnd (NimBLE internal error).
+    // Don't feed a miss — the cycle data is incomplete, just restart cleanly.
+    if (!NimBLEDevice::getScan()->isScanning()) {
+        resetCycleCounters();
         configureAndStartScan();
     }
 }
