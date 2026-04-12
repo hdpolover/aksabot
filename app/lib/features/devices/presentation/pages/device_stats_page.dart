@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../../domain/entities/device_entity.dart';
 import '../../domain/repositories/devices_repository.dart';
 import '../../../scheduler/domain/repositories/scheduler_repository.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
+import '../../../../core/widgets/status_dot.dart';
 
-/// Device statistics screen — wired to GET /devices/:id/stats and pool endpoints.
+/// Device statistics screen — wired to GET /devices/:id/stats.
 class DeviceStatsPage extends StatefulWidget {
   final String deviceId;
   const DeviceStatsPage({super.key, required this.deviceId});
@@ -21,15 +23,12 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
   bool _isLoading = true;
   String? _error;
 
-  // Stats from backend
+  Device? _device;
+
   int _conversationsToday = 0;
   int _totalConversations = 0;
   int _totalMemories = 0;
   int _poolSize = 0;
-
-  // Pool stats (separate endpoint)
-  int _poolTotal = 0;
-  int _poolUsed = 0;
 
   bool _isRefilling = false;
 
@@ -47,35 +46,40 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
       _error = null;
     });
 
-    final statsResult = await _devicesRepo.getStats(widget.deviceId);
+    // Load device info and stats in parallel
+    final results = await Future.wait([
+      _devicesRepo.getDevice(widget.deviceId),
+      _devicesRepo.getStats(widget.deviceId),
+    ]);
+
+    final deviceResult = results[0];
+    final statsResult = results[1];
+
+    // Device info — needed for System section
+    deviceResult.fold(
+      (_) => null, // best-effort, non-fatal
+      (device) => _device = device as Device,
+    );
+
+    // Stats — if this fails, show error
     statsResult.fold(
-      (failure) => setState(() {
-        _error = failure.message;
-        _isLoading = false;
-      }),
+      (failure) {
+        setState(() {
+          _error = failure.message;
+          _isLoading = false;
+        });
+        return;
+      },
       (stats) {
         setState(() {
-          _conversationsToday = stats['conversationsToday'] as int? ?? 0;
-          _totalConversations = stats['totalConversations'] as int? ?? 0;
-          _totalMemories = stats['totalMemories'] as int? ?? 0;
-          _poolSize = stats['poolSize'] as int? ?? 0;
+          final s = stats as Map<String, dynamic>;
+          _conversationsToday = s['conversationsToday'] as int? ?? 0;
+          _totalConversations = s['totalConversations'] as int? ?? 0;
+          _totalMemories = s['totalMemories'] as int? ?? 0;
+          _poolSize = s['poolSize'] as int? ?? 0;
           _isLoading = false;
         });
       },
-    );
-
-    // Also load pool stats (best effort)
-    final poolResult = await _schedulerRepo.getPoolStats(widget.deviceId);
-    poolResult.fold(
-      (_) => null,
-      (stats) => setState(() {
-        final total = stats.fold<int>(
-          0,
-          (sum, item) => sum + (item['count'] as int? ?? 0),
-        );
-        _poolTotal = total;
-        _poolUsed = 0; // backend tracks per-category counts, not used/unused
-      }),
     );
   }
 
@@ -94,7 +98,7 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Pool refill triggered')),
         );
-        _loadAll(); // Refresh stats
+        _loadAll();
       },
     );
     if (mounted) setState(() => _isRefilling = false);
@@ -106,7 +110,7 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
     final colors = theme.colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Stats')),
+      appBar: AppBar(title: const Text('Stats & History')),
       body: _isLoading
           ? const AppLoadingIndicator()
           : _error != null
@@ -114,8 +118,7 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(_error!,
-                          style: TextStyle(color: colors.error)),
+                      Text(_error!, style: TextStyle(color: colors.error)),
                       const SizedBox(height: 16),
                       FilledButton.tonal(
                         onPressed: _loadAll,
@@ -127,41 +130,45 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
               : RefreshIndicator(
                   onRefresh: _loadAll,
                   child: ListView(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                     children: [
-                      // Today's stats
-                      Text('Today', style: theme.textTheme.titleMedium),
+                      // ── Conversations ──────────────────────────────────
+                      Text('Conversations', style: theme.textTheme.titleMedium),
                       const SizedBox(height: 8),
                       Row(
                         children: [
                           Expanded(
                             child: _StatCard(
                               value: '$_conversationsToday',
-                              label: 'Conversations',
-                              icon: Icons.chat_bubble_outline,
+                              label: 'Today',
+                              icon: Icons.chat_bubble_outline_rounded,
                               color: colors.primary,
                             ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: _StatCard(
-                              value: '$_totalMemories',
-                              label: 'Memories',
-                              icon: Icons.psychology,
-                              color: colors.tertiary,
+                              value: '$_totalConversations',
+                              label: 'All time',
+                              icon: Icons.history_rounded,
+                              color: colors.primary,
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 24),
+
+                      // ── Memory & Pool ──────────────────────────────────
+                      Text('Memory & Pool', style: theme.textTheme.titleMedium),
+                      const SizedBox(height: 8),
                       Row(
                         children: [
                           Expanded(
                             child: _StatCard(
-                              value: '$_totalConversations',
-                              label: 'Total convos',
-                              icon: Icons.history,
-                              color: colors.secondary,
+                              value: '$_totalMemories',
+                              label: 'Memories',
+                              icon: Icons.psychology_rounded,
+                              color: colors.tertiary,
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -170,72 +177,63 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
                               value: '$_poolSize',
                               label: 'Pool entries',
                               icon: Icons.inventory_2_outlined,
-                              color: colors.primary,
+                              color: colors.tertiary,
                             ),
                           ),
                         ],
                       ),
+                      const SizedBox(height: 12),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: ListTile(
+                          title: const Text('Response pool'),
+                          subtitle: Text(
+                            'Pre-generated bot messages — refill adds more',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colors.onSurfaceVariant,
+                            ),
+                          ),
+                          trailing: SizedBox(
+                            width: 90,
+                            height: 36,
+                            child: FilledButton.tonal(
+                              onPressed: _isRefilling ? null : _refillPool,
+                              style: FilledButton.styleFrom(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12),
+                              ),
+                              child:
+                                  Text(_isRefilling ? 'Refilling...' : 'Refill'),
+                            ),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 24),
 
-                      // Cache info
-                      Text('Response Pool', style: theme.textTheme.titleMedium),
+                      // ── Device ─────────────────────────────────────────
+                      Text('Device', style: theme.textTheme.titleMedium),
                       const SizedBox(height: 8),
                       Card(
                         clipBehavior: Clip.antiAlias,
                         child: Column(
                           children: [
-                            ListTile(
-                              title: const Text('Pool entries'),
-                              trailing: Text(
-                                '$_poolUsed / $_poolTotal',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: colors.onSurfaceVariant,
-                                ),
-                              ),
+                            _buildStatusTile(theme, colors),
+                            const Divider(height: 1),
+                            _InfoTile(
+                              label: 'Uptime',
+                              value: _formatUptime(),
                             ),
                             const Divider(height: 1),
-                            ListTile(
-                              title: const Text('Refill pool'),
-                              trailing: SizedBox(
-                                width: 90,
-                                height: 36,
-                                child: FilledButton.tonal(
-                                  onPressed: _isRefilling ? null : _refillPool,
-                                  style: FilledButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                                  ),
-                                  child: Text(
-                                      _isRefilling ? 'Refilling...' : 'Refill'),
-                                ),
-                              ),
+                            _InfoTile(
+                              label: 'Wi-Fi signal',
+                              value: _formatRssi(),
+                            ),
+                            const Divider(height: 1),
+                            _InfoTile(
+                              label: 'Firmware',
+                              value: _device?.firmwareVersion ?? '--',
                             ),
                           ],
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-
-                      // System info (from BLE — placeholder for now)
-                      Text('System', style: theme.textTheme.titleMedium),
-                      const SizedBox(height: 8),
-                      Card(
-                        clipBehavior: Clip.antiAlias,
-                        child: Column(
-                          children: [
-                            _InfoTile(label: 'Uptime', value: '--'),
-                            const Divider(height: 1),
-                            _InfoTile(label: 'Free PSRAM', value: '--'),
-                            const Divider(height: 1),
-                            _InfoTile(label: 'Wi-Fi RSSI', value: '--'),
-                            const Divider(height: 1),
-                            _InfoTile(label: 'Flash used', value: '--'),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'System stats require BLE connection to device.',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -243,7 +241,56 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
                 ),
     );
   }
+
+  Widget _buildStatusTile(ThemeData theme, ColorScheme colors) {
+    final online = _device?.isOnline ?? false;
+    return ListTile(
+      title: const Text('Status'),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          StatusDot(
+            variant: online ? StatusDotVariant.online : StatusDotVariant.offline,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            online ? 'Online' : 'Offline',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: online ? colors.primary : colors.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatUptime() {
+    final device = _device;
+    if (device == null || device.lastSeenAt == null) return '--';
+    if (!device.isOnline) return 'Offline';
+    final d = DateTime.now().difference(device.lastSeenAt!);
+    if (d.inDays > 0) return '${d.inDays}d ${d.inHours % 24}h';
+    if (d.inHours > 0) return '${d.inHours}h ${d.inMinutes % 60}m';
+    return '${d.inMinutes}m';
+  }
+
+  String _formatRssi() {
+    final rssi = _device?.wifiRssi;
+    if (rssi == null) return '--';
+    final label = rssi >= -50
+        ? 'Excellent'
+        : rssi >= -60
+            ? 'Good'
+            : rssi >= -70
+                ? 'Fair'
+                : rssi >= -80
+                    ? 'Weak'
+                    : 'Poor';
+    return '$label ($rssi dBm)';
+  }
 }
+
+// ---------------------------------------------------------------------------
 
 class _StatCard extends StatelessWidget {
   final String value;

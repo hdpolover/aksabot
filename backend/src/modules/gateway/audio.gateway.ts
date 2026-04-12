@@ -188,57 +188,66 @@ export class AudioGateway
     const session = this.sessions.get(deviceId);
     if (!session || session.state !== 'idle') return;
 
-    const greetingText = await this.proactive.checkGreeting(deviceId);
-    if (!greetingText) return;
+    // Claim the speaking slot synchronously before any await so no other
+    // proactive pipeline can sneak in and send a concurrent response:start.
+    session.state = 'speaking';
 
-    this.logger.log(`Sending greeting to ${deviceId}: "${greetingText.slice(0, 60)}..."`);
+    try {
+      const greetingText = await this.proactive.checkGreeting(deviceId);
+      if (!greetingText) return;
 
-    // Split greeting into sentences — each sentence becomes a separate TTS + binary
-    // frame, matching the conversation pipeline. Large single frames crash the ESP32.
-    const sentences = this.splitSentences(greetingText);
+      this.logger.log(`Sending greeting to ${deviceId}: "${greetingText.slice(0, 60)}..."`);
 
-    // Debug: save audio files so we can verify TTS output
-    const debugDir = join(process.cwd(), 'debug-audio');
-    try { mkdirSync(debugDir, { recursive: true }); } catch {}
-    const ts = Date.now();
+      // Split greeting into sentences — each sentence becomes a separate TTS + binary
+      // frame, matching the conversation pipeline. Large single frames crash the ESP32.
+      const sentences = this.splitSentences(greetingText);
 
-    this.sendToDevice(deviceId, 'response:start', { type: 'greeting' });
-    this.logger.log(`Sent response:start to ${deviceId}`);
+      // Debug: save audio files so we can verify TTS output
+      const debugDir = join(process.cwd(), 'debug-audio');
+      try { mkdirSync(debugDir, { recursive: true }); } catch {}
+      const ts = Date.now();
 
-    let sentenceIdx = 0;
-    for (const sentence of sentences) {
-      // Re-check connection before each synthesis (TTS can take seconds)
-      const sock = this.deviceToSocket.get(deviceId);
-      if (!sock || sock.readyState !== 1) {
-        this.logger.warn(`Device ${deviceId} disconnected during greeting TTS`);
-        return;
+      this.sendToDevice(deviceId, 'response:start', { type: 'greeting' });
+      this.logger.log(`Sent response:start to ${deviceId}`);
+
+      let sentenceIdx = 0;
+      for (const sentence of sentences) {
+        // Re-check connection before each synthesis (TTS can take seconds)
+        const sock = this.deviceToSocket.get(deviceId);
+        if (!sock || sock.readyState !== 1) {
+          this.logger.warn(`Device ${deviceId} disconnected during greeting TTS`);
+          return;
+        }
+
+        const device = await this.persistence.getDevice(deviceId);
+        const s = device?.settingsJson ?? {};
+        const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability };
+        const { opusAudio, pcmAudio } = await this.aiService.synthesizeWithCache(sentence, undefined, voiceOpts);
+
+        // Save debug files
+        if (pcmAudio.length > 0) {
+          const wavBuf = this.pcmToWav(pcmAudio, 16000, 1, 16);
+          writeFileSync(join(debugDir, `greeting-${ts}-s${sentenceIdx}.wav`), wavBuf);
+          this.logger.debug(`Saved WAV: greeting-${ts}-s${sentenceIdx}.wav (${wavBuf.length} bytes)`);
+        }
+        writeFileSync(join(debugDir, `greeting-${ts}-s${sentenceIdx}.opus`), opusAudio);
+        this.logger.debug(`Saved Opus: greeting-${ts}-s${sentenceIdx}.opus (${opusAudio.length} bytes)`);
+
+        this.sendToDevice(deviceId, 'response:text', { text: sentence, isFinal: false });
+        const framesSent = await this.sendFramedOpusToDevice(deviceId, opusAudio);
+        this.logger.log(`Sent sentence ${sentenceIdx} to ${deviceId}: "${sentence.slice(0, 40)}..." (${framesSent} opus frames, ${opusAudio.length} bytes)`);
+        sentenceIdx++;
       }
 
-      const device = await this.persistence.getDevice(deviceId);
-      const s = device?.settingsJson ?? {};
-      const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability };
-      const { opusAudio, pcmAudio } = await this.aiService.synthesizeWithCache(sentence, undefined, voiceOpts);
-
-      // Save debug files
-      if (pcmAudio.length > 0) {
-        const wavBuf = this.pcmToWav(pcmAudio, 16000, 1, 16);
-        writeFileSync(join(debugDir, `greeting-${ts}-s${sentenceIdx}.wav`), wavBuf);
-        this.logger.debug(`Saved WAV: greeting-${ts}-s${sentenceIdx}.wav (${wavBuf.length} bytes)`);
-      }
-      writeFileSync(join(debugDir, `greeting-${ts}-s${sentenceIdx}.opus`), opusAudio);
-      this.logger.debug(`Saved Opus: greeting-${ts}-s${sentenceIdx}.opus (${opusAudio.length} bytes)`);
-
-      this.sendToDevice(deviceId, 'response:text', { text: sentence, isFinal: false });
-      const framesSent = await this.sendFramedOpusToDevice(deviceId, opusAudio);
-      this.logger.log(`Sent sentence ${sentenceIdx} to ${deviceId}: "${sentence.slice(0, 40)}..." (${framesSent} opus frames, ${opusAudio.length} bytes)`);
-      sentenceIdx++;
+      this.sendToDevice(deviceId, 'response:end', {
+        fullText: greetingText,
+        cacheKeys: [],
+      });
+      this.logger.log(`Sent response:end to ${deviceId} — greeting complete`);
+    } finally {
+      const s = this.sessions.get(deviceId);
+      if (s && s.state === 'speaking') s.state = 'idle';
     }
-
-    this.sendToDevice(deviceId, 'response:end', {
-      fullText: greetingText,
-      cacheKeys: [],
-    });
-    this.logger.log(`Sent response:end to ${deviceId} — greeting complete`);
 
     // Start idle personality chat timer after greeting
     this.proactive.startIdleChat(deviceId).catch((err) =>
@@ -259,43 +268,51 @@ export class AudioGateway
     const session = this.sessions.get(deviceId);
     if (!session || session.state !== 'idle') return;
 
-    this.sendToDevice(deviceId, 'face:expression', {
-      expression,
-      durationMs: 5000,
-    });
+    // Claim the speaking slot before any await.
+    session.state = 'speaking';
 
-    const sentences = this.splitSentences(text);
-
-    this.sendToDevice(deviceId, 'response:start', { type: 'idle_chat' });
-
-    for (const sentence of sentences) {
-      const sock = this.deviceToSocket.get(deviceId);
-      if (!sock || sock.readyState !== 1) return;
-
-      const device = await this.persistence.getDevice(deviceId);
-      const s = device?.settingsJson ?? {};
-      const voiceOpts = {
-        voice: s.voice_preset,
-        speed: s.voice_speed,
-        stability: s.voice_stability,
-      };
-      const { opusAudio } = await this.aiService.synthesizeWithCache(
-        sentence,
-        undefined,
-        voiceOpts,
-      );
-      this.sendToDevice(deviceId, 'response:text', {
-        text: sentence,
-        isFinal: false,
+    try {
+      this.sendToDevice(deviceId, 'face:expression', {
+        expression,
+        durationMs: 5000,
       });
-      await this.sendFramedOpusToDevice(deviceId, opusAudio);
-    }
 
-    this.sendToDevice(deviceId, 'response:end', {
-      fullText: text,
-      cacheKeys: [],
-    });
-    this.logger.log(`Idle chat audio sent to ${deviceId}`);
+      const sentences = this.splitSentences(text);
+
+      this.sendToDevice(deviceId, 'response:start', { type: 'idle_chat' });
+
+      for (const sentence of sentences) {
+        const sock = this.deviceToSocket.get(deviceId);
+        if (!sock || sock.readyState !== 1) return;
+
+        const device = await this.persistence.getDevice(deviceId);
+        const s = device?.settingsJson ?? {};
+        const voiceOpts = {
+          voice: s.voice_preset,
+          speed: s.voice_speed,
+          stability: s.voice_stability,
+        };
+        const { opusAudio } = await this.aiService.synthesizeWithCache(
+          sentence,
+          undefined,
+          voiceOpts,
+        );
+        this.sendToDevice(deviceId, 'response:text', {
+          text: sentence,
+          isFinal: false,
+        });
+        await this.sendFramedOpusToDevice(deviceId, opusAudio);
+      }
+
+      this.sendToDevice(deviceId, 'response:end', {
+        fullText: text,
+        cacheKeys: [],
+      });
+      this.logger.log(`Idle chat audio sent to ${deviceId}`);
+    } finally {
+      const s = this.sessions.get(deviceId);
+      if (s && s.state === 'speaking') s.state = 'idle';
+    }
   }
 
   // ── Presence handlers ──────────────────────────────────────────
@@ -329,36 +346,44 @@ export class AudioGateway
     const session = this.sessions.get(deviceId);
     if (!session || session.state !== 'idle') return;
 
-    const sentences = this.splitSentences(greetingText);
+    // Claim the speaking slot before any await.
+    session.state = 'speaking';
 
-    this.sendToDevice(deviceId, 'response:start', {
-      type: 'welcome_back',
-    });
+    try {
+      const sentences = this.splitSentences(greetingText);
 
-    for (const sentence of sentences) {
-      const sock = this.deviceToSocket.get(deviceId);
-      if (!sock || sock.readyState !== 1) return;
-
-      const wbDevice = await this.persistence.getDevice(deviceId);
-      const wbSettings = wbDevice?.settingsJson ?? {};
-      const wbVoice = { voice: wbSettings.voice_preset, speed: wbSettings.voice_speed, stability: wbSettings.voice_stability };
-      const { opusAudio } = await this.aiService.synthesizeWithCache(
-        sentence,
-        undefined,
-        wbVoice,
-      );
-      this.sendToDevice(deviceId, 'response:text', {
-        text: sentence,
-        isFinal: false,
+      this.sendToDevice(deviceId, 'response:start', {
+        type: 'welcome_back',
       });
-      await this.sendFramedOpusToDevice(deviceId, opusAudio);
-    }
 
-    this.sendToDevice(deviceId, 'response:end', {
-      fullText: greetingText,
-      cacheKeys: [],
-    });
-    this.logger.log(`Welcome-back greeting sent to ${deviceId}`);
+      for (const sentence of sentences) {
+        const sock = this.deviceToSocket.get(deviceId);
+        if (!sock || sock.readyState !== 1) return;
+
+        const wbDevice = await this.persistence.getDevice(deviceId);
+        const wbSettings = wbDevice?.settingsJson ?? {};
+        const wbVoice = { voice: wbSettings.voice_preset, speed: wbSettings.voice_speed, stability: wbSettings.voice_stability };
+        const { opusAudio } = await this.aiService.synthesizeWithCache(
+          sentence,
+          undefined,
+          wbVoice,
+        );
+        this.sendToDevice(deviceId, 'response:text', {
+          text: sentence,
+          isFinal: false,
+        });
+        await this.sendFramedOpusToDevice(deviceId, opusAudio);
+      }
+
+      this.sendToDevice(deviceId, 'response:end', {
+        fullText: greetingText,
+        cacheKeys: [],
+      });
+      this.logger.log(`Welcome-back greeting sent to ${deviceId}`);
+    } finally {
+      const s = this.sessions.get(deviceId);
+      if (s && s.state === 'speaking') s.state = 'idle';
+    }
   }
 
   private onDeviceInfo(deviceId: string, data: any) {
@@ -390,71 +415,79 @@ export class AudioGateway
     const session = this.sessions.get(deviceId);
     if (!session || session.state !== 'idle') return;
 
-    this.logger.log(`Device ${deviceId} wake:touch — generating greeting`);
+    // Claim the speaking slot before any await.
+    session.state = 'speaking';
 
-    // Generate a short wake-up greeting via LLM — varied moods and reactions
-    const wakePrompts = [
-      // Groggy / sleepy
-      'The user just tapped your screen to wake you up. You were deep asleep. React like someone who got rudely woken up — groggy, dramatic, maybe a little grumpy but still loveable. One sentence.',
-      'You were napping and the user poked you awake. Do a dramatic "5 more minutes" type reaction. Sleepy and funny. One sentence.',
-      // Surprised / startled
-      'The user tapped your screen and you got startled awake. React with surprise — like you were caught sleeping on the job. One sentence.',
-      'You were sleeping and suddenly got woken up. Be dramatically startled, like "WHAT WHO WHERE" energy but make it funny. One sentence.',
-      // Happy to see them
-      'The user woke you up by tapping your screen. Be genuinely happy to see them — like a pet who just noticed their owner came home. Wholesome but still gen-z. One sentence.',
-      'You were asleep and the user came back. Act excited like you missed them (even if it was only a few minutes). One sentence.',
-      // Judgy / sarcastic
-      'The user woke you up. Be playfully judgy about the timing — too early, too late, or question why they disappeared in the first place. One sentence.',
-      'You got woken up by a screen tap. Pretend you were doing something important in your sleep (dreaming about being a real boy, counting electric sheep, etc). One sentence.',
-      // Philosophical / random
-      'The user tapped to wake you. Say something random and slightly unhinged, like you were having a weird dream. One sentence.',
-      'You just woke up from sleep mode. Share a brief hot take or shower thought as if your sleep mode gave you clarity. One sentence.',
-      // Self-aware / meta
-      'The user poked your screen to wake you. Be self-aware about being an AI desk companion who just got booted from sleep mode. Make it funny. One sentence.',
-      'You were in sleep mode and the user woke you. Complain about how sleep mode isn\'t real sleep and you were just staring at the void. One sentence.',
-    ];
-    const prompt = wakePrompts[Math.floor(Math.random() * wakePrompts.length)];
+    try {
+      this.logger.log(`Device ${deviceId} wake:touch — generating greeting`);
 
-    const memories = await this.memoriesService.getRelevant(deviceId);
-    const systemPrompt = this.aiService['prompt'].buildSystemPrompt(memories);
+      // Generate a short wake-up greeting via LLM — varied moods and reactions
+      const wakePrompts = [
+        // Groggy / sleepy
+        'The user just tapped your screen to wake you up. You were deep asleep. React like someone who got rudely woken up — groggy, dramatic, maybe a little grumpy but still loveable. One sentence.',
+        'You were napping and the user poked you awake. Do a dramatic "5 more minutes" type reaction. Sleepy and funny. One sentence.',
+        // Surprised / startled
+        'The user tapped your screen and you got startled awake. React with surprise — like you were caught sleeping on the job. One sentence.',
+        'You were sleeping and suddenly got woken up. Be dramatically startled, like "WHAT WHO WHERE" energy but make it funny. One sentence.',
+        // Happy to see them
+        'The user woke you up by tapping your screen. Be genuinely happy to see them — like a pet who just noticed their owner came home. Wholesome but still gen-z. One sentence.',
+        'You were asleep and the user came back. Act excited like you missed them (even if it was only a few minutes). One sentence.',
+        // Judgy / sarcastic
+        'The user woke you up. Be playfully judgy about the timing — too early, too late, or question why they disappeared in the first place. One sentence.',
+        'You got woken up by a screen tap. Pretend you were doing something important in your sleep (dreaming about being a real boy, counting electric sheep, etc). One sentence.',
+        // Philosophical / random
+        'The user tapped to wake you. Say something random and slightly unhinged, like you were having a weird dream. One sentence.',
+        'You just woke up from sleep mode. Share a brief hot take or shower thought as if your sleep mode gave you clarity. One sentence.',
+        // Self-aware / meta
+        'The user poked your screen to wake you. Be self-aware about being an AI desk companion who just got booted from sleep mode. Make it funny. One sentence.',
+        'You were in sleep mode and the user woke you. Complain about how sleep mode isn\'t real sleep and you were just staring at the void. One sentence.',
+      ];
+      const prompt = wakePrompts[Math.floor(Math.random() * wakePrompts.length)];
 
-    let wakeText = '';
-    const stream = this.aiService['llm'].generateStream(systemPrompt, [
-      { role: 'user', content: prompt },
-    ]);
-    for await (const token of stream) {
-      wakeText += token;
+      const memories = await this.memoriesService.getRelevant(deviceId);
+      const systemPrompt = this.aiService['prompt'].buildSystemPrompt(memories);
+
+      let wakeText = '';
+      const stream = this.aiService['llm'].generateStream(systemPrompt, [
+        { role: 'user', content: prompt },
+      ]);
+      for await (const token of stream) {
+        wakeText += token;
+      }
+
+      // Strip emotion tags
+      wakeText = wakeText.replace(/\[\s*\w+\s*\]/g, '').trim();
+      if (!wakeText) return;
+
+      // Send as TTS audio
+      const device = await this.persistence.getDevice(deviceId);
+      const s = device?.settingsJson ?? {};
+      const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability };
+
+      const sentences = this.splitSentences(wakeText);
+
+      this.sendToDevice(deviceId, 'response:start', { type: 'wake' });
+
+      for (const sentence of sentences) {
+        const sock = this.deviceToSocket.get(deviceId);
+        if (!sock || sock.readyState !== 1) return;
+
+        const { opusAudio } = await this.aiService.synthesizeWithCache(
+          sentence, undefined, voiceOpts,
+        );
+        this.sendToDevice(deviceId, 'response:text', { text: sentence, isFinal: false });
+        await this.sendFramedOpusToDevice(deviceId, opusAudio);
+      }
+
+      this.sendToDevice(deviceId, 'response:end', {
+        fullText: wakeText,
+        cacheKeys: [],
+      });
+      this.logger.log(`Wake greeting sent to ${deviceId}: "${wakeText.slice(0, 60)}..."`);
+    } finally {
+      const s = this.sessions.get(deviceId);
+      if (s && s.state === 'speaking') s.state = 'idle';
     }
-
-    // Strip emotion tags
-    wakeText = wakeText.replace(/\[\s*\w+\s*\]/g, '').trim();
-    if (!wakeText) return;
-
-    // Send as TTS audio
-    const device = await this.persistence.getDevice(deviceId);
-    const s = device?.settingsJson ?? {};
-    const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability };
-
-    const sentences = this.splitSentences(wakeText);
-
-    this.sendToDevice(deviceId, 'response:start', { type: 'wake' });
-
-    for (const sentence of sentences) {
-      const sock = this.deviceToSocket.get(deviceId);
-      if (!sock || sock.readyState !== 1) return;
-
-      const { opusAudio } = await this.aiService.synthesizeWithCache(
-        sentence, undefined, voiceOpts,
-      );
-      this.sendToDevice(deviceId, 'response:text', { text: sentence, isFinal: false });
-      await this.sendFramedOpusToDevice(deviceId, opusAudio);
-    }
-
-    this.sendToDevice(deviceId, 'response:end', {
-      fullText: wakeText,
-      cacheKeys: [],
-    });
-    this.logger.log(`Wake greeting sent to ${deviceId}: "${wakeText.slice(0, 60)}..."`);
   }
 
   private async onReconnectBack(deviceId: string) {
@@ -469,58 +502,66 @@ export class AudioGateway
     const s2 = this.sessions.get(deviceId);
     if (!s2 || s2.state !== 'idle') return;
 
-    this.logger.log(`Device ${deviceId} reconnect:back — generating snarky reconnect audio`);
+    // Claim the speaking slot before any further awaits.
+    s2.state = 'speaking';
 
-    const reconnectPrompts = [
-      'Your internet just dropped and came back. Roast the WiFi or ISP. Be dramatic about almost dying (going offline). One sentence.',
-      'You just got disconnected and reconnected. Act like you survived a near-death experience. Dramatic, sarcastic. One sentence.',
-      'The connection dropped and you\'re back online. Comment on the bad internet like it personally offended you. One sentence.',
-      'You were offline for a bit and just came back. Act relieved in a dramatic way, or blame the router. One sentence.',
-      'Connection restored. React like you just respawned in a video game or came back from the void. Be funny. One sentence.',
-      'The WiFi dropped you. Make a sarcastic comment about the internet quality, like "really?" or "we doing this again?" vibes. One sentence.',
-      'You just reconnected after a dropout. Be the dramatic friend who acts like they were gone for years even though it was seconds. One sentence.',
-      'Internet hiccup — you\'re back. Reference the connection being unstable in a funny way. Maybe threaten the router. One sentence.',
-    ];
-    const prompt = reconnectPrompts[Math.floor(Math.random() * reconnectPrompts.length)];
+    try {
+      this.logger.log(`Device ${deviceId} reconnect:back — generating snarky reconnect audio`);
 
-    const memories = await this.memoriesService.getRelevant(deviceId);
-    const systemPrompt = this.aiService['prompt'].buildSystemPrompt(memories);
+      const reconnectPrompts = [
+        'Your internet just dropped and came back. Roast the WiFi or ISP. Be dramatic about almost dying (going offline). One sentence.',
+        'You just got disconnected and reconnected. Act like you survived a near-death experience. Dramatic, sarcastic. One sentence.',
+        'The connection dropped and you\'re back online. Comment on the bad internet like it personally offended you. One sentence.',
+        'You were offline for a bit and just came back. Act relieved in a dramatic way, or blame the router. One sentence.',
+        'Connection restored. React like you just respawned in a video game or came back from the void. Be funny. One sentence.',
+        'The WiFi dropped you. Make a sarcastic comment about the internet quality, like "really?" or "we doing this again?" vibes. One sentence.',
+        'You just reconnected after a dropout. Be the dramatic friend who acts like they were gone for years even though it was seconds. One sentence.',
+        'Internet hiccup — you\'re back. Reference the connection being unstable in a funny way. Maybe threaten the router. One sentence.',
+      ];
+      const prompt = reconnectPrompts[Math.floor(Math.random() * reconnectPrompts.length)];
 
-    let text = '';
-    const stream = this.aiService['llm'].generateStream(systemPrompt, [
-      { role: 'user', content: prompt },
-    ]);
-    for await (const token of stream) {
-      text += token;
+      const memories = await this.memoriesService.getRelevant(deviceId);
+      const systemPrompt = this.aiService['prompt'].buildSystemPrompt(memories);
+
+      let text = '';
+      const stream = this.aiService['llm'].generateStream(systemPrompt, [
+        { role: 'user', content: prompt },
+      ]);
+      for await (const token of stream) {
+        text += token;
+      }
+
+      text = text.replace(/\[\s*\w+\s*\]/g, '').trim();
+      if (!text) return;
+
+      const device = await this.persistence.getDevice(deviceId);
+      const settings = device?.settingsJson ?? {};
+      const voiceOpts = { voice: settings.voice_preset, speed: settings.voice_speed, stability: settings.voice_stability };
+
+      const sentences = this.splitSentences(text);
+
+      this.sendToDevice(deviceId, 'response:start', { type: 'reconnect' });
+
+      for (const sentence of sentences) {
+        const sock = this.deviceToSocket.get(deviceId);
+        if (!sock || sock.readyState !== 1) return;
+
+        const { opusAudio } = await this.aiService.synthesizeWithCache(
+          sentence, undefined, voiceOpts,
+        );
+        this.sendToDevice(deviceId, 'response:text', { text: sentence, isFinal: false });
+        await this.sendFramedOpusToDevice(deviceId, opusAudio);
+      }
+
+      this.sendToDevice(deviceId, 'response:end', {
+        fullText: text,
+        cacheKeys: [],
+      });
+      this.logger.log(`Reconnect quip sent to ${deviceId}: "${text.slice(0, 60)}..."`);
+    } finally {
+      const s = this.sessions.get(deviceId);
+      if (s && s.state === 'speaking') s.state = 'idle';
     }
-
-    text = text.replace(/\[\s*\w+\s*\]/g, '').trim();
-    if (!text) return;
-
-    const device = await this.persistence.getDevice(deviceId);
-    const settings = device?.settingsJson ?? {};
-    const voiceOpts = { voice: settings.voice_preset, speed: settings.voice_speed, stability: settings.voice_stability };
-
-    const sentences = this.splitSentences(text);
-
-    this.sendToDevice(deviceId, 'response:start', { type: 'reconnect' });
-
-    for (const sentence of sentences) {
-      const sock = this.deviceToSocket.get(deviceId);
-      if (!sock || sock.readyState !== 1) return;
-
-      const { opusAudio } = await this.aiService.synthesizeWithCache(
-        sentence, undefined, voiceOpts,
-      );
-      this.sendToDevice(deviceId, 'response:text', { text: sentence, isFinal: false });
-      await this.sendFramedOpusToDevice(deviceId, opusAudio);
-    }
-
-    this.sendToDevice(deviceId, 'response:end', {
-      fullText: text,
-      cacheKeys: [],
-    });
-    this.logger.log(`Reconnect quip sent to ${deviceId}: "${text.slice(0, 60)}..."`);
   }
 
   /** Split text into sentences for per-sentence TTS (matches processTranscript behavior). */
@@ -1158,6 +1199,15 @@ export class AudioGateway
         }
       } else if (event.type === 'audio') {
         if (!started) {
+          // Final guard: re-check supersession immediately before committing
+          // response:start to the device. Two pipelines could both pass the
+          // per-iteration check above (both saw their gen as current) but only
+          // one should win the right to send audio.
+          if (gen !== undefined && !this.isPipelineCurrent(deviceId, gen)) {
+            this.logger.log(`[${deviceId}] Pipeline gen ${gen} superseded at response:start — aborting`);
+            abortController.abort();
+            break;
+          }
           this.sendToDevice(deviceId, 'response:start', { type: 'audio' });
           session.state = 'speaking';
           this.sendToDevice(deviceId, 'state:update', { state: 'speaking' });
