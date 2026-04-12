@@ -873,6 +873,7 @@ static void audioCaptureLoop(void* param) {
             }
             stackLogged = false;
 
+#if HANDS_FREE_ENABLED
             // Wake word detection — read mic while idle and check for wake phrase
             if (appState.botState == BotState::IDLE && wake_word::isListening()) {
                 size_t read = audio_io::readMic(pcmBuffer, OPUS_FRAME_SAMPLES);
@@ -883,6 +884,11 @@ static void audioCaptureLoop(void* param) {
             } else {
                 vTaskDelay(pdMS_TO_TICKS(10));
             }
+#else
+            // Hands-free disabled — don't drain the mic in idle. The I2S DMA ring
+            // buffer wraps naturally (~400ms), so when PTT fires the backlog is small.
+            vTaskDelay(pdMS_TO_TICKS(50));
+#endif
             continue;
         }
 
@@ -1309,12 +1315,16 @@ void setup() {
     }
 
     // ── 14. Wake word detection ─────────────────────────────
+#if HANDS_FREE_ENABLED
     wake_word::init();
     wake_word::onWake([]() {
         startHandsFreeRecording(ListenTrigger::WAKE_WORD);
     });
     wake_word::startListening();
     Serial.println("[Main] Wake word detection active");
+#else
+    Serial.println("[Main] Wake word detection disabled (PTT only)");
+#endif
 
     // ── 15. Gesture sensor (APDS-9960) ────────────────────
     if (gesture::init()) {
@@ -1322,8 +1332,12 @@ void setup() {
             power_manager::recordInteraction();
             switch (g) {
                 case gesture::Type::WAVE:
+#if HANDS_FREE_ENABLED
                     // Wave to start hands-free recording
                     startHandsFreeRecording(ListenTrigger::GESTURE);
+#else
+                    Serial.println("[Gesture] Wave ignored — hands-free disabled");
+#endif
                     break;
                 case gesture::Type::SWIPE_UP:
                     // Volume up
@@ -1574,8 +1588,9 @@ void loop() {
         status_led::syncToState();
     }
 
-    // Auto-resume wake word listening when IDLE and connected
-    // Delay 2s after going IDLE to avoid echo (hearing bot's own speech)
+#if HANDS_FREE_ENABLED
+    // Auto-resume wake word listening when IDLE and connected.
+    // Delay 2s after going IDLE to avoid echo (hearing bot's own speech).
     static uint32_t idleSinceMs = 0;
     if (appState.botState == BotState::IDLE && appState.wsConnected) {
         if (idleSinceMs == 0) idleSinceMs = now;
@@ -1585,6 +1600,7 @@ void loop() {
     } else {
         idleSinceMs = 0;
     }
+#endif
 
     vTaskDelay(pdMS_TO_TICKS(10));
 }
