@@ -756,7 +756,17 @@ static void audioCaptureLoop(void* param) {
                 recording_buffer::stopBuffering();
             }
             stackLogged = false;
-            vTaskDelay(pdMS_TO_TICKS(10));
+
+            // Wake word detection — read mic while idle and check for wake phrase
+            if (appState.botState == BotState::IDLE && wake_word::isListening()) {
+                size_t read = audio_io::readMic(pcmBuffer, OPUS_FRAME_SAMPLES);
+                if (read > 0) {
+                    wake_word_processMicFrame(pcmBuffer, read);
+                }
+                vTaskDelay(pdMS_TO_TICKS(1));
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
             continue;
         }
 

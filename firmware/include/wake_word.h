@@ -48,3 +48,8 @@ bool isListening();
 void setSensitivity(float sensitivity);
 
 }  // namespace wake_word
+
+/// Process a mic PCM frame for wake word detection.
+/// Called from audioCaptureLoop when bot is IDLE (no separate task needed).
+/// Returns true if wake word was detected.
+bool wake_word_processMicFrame(const int16_t* pcm, size_t sampleCount);
