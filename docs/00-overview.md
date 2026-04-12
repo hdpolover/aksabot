@@ -72,3 +72,4 @@ Total estimated timeline: **14 weeks** for a fully functional prototype. Phases 
 | [16-hardware-capabilities.md](16-hardware-capabilities.md) | Hardware capabilities inventory — what's used, planned, and untapped, with priority tiers |
 | [17-audio-assets.md](17-audio-assets.md) | Sound effects and UI audio clips — ElevenLabs prompts, SD layout, Opus conversion |
 | [18-brand-guidelines.md](18-brand-guidelines.md) | Aksa brand guidelines — personality, voice, tone, face expressions, audio identity |
+| [19-sd-card-storage.md](19-sd-card-storage.md) | SD card storage layout — what's stored, why, sprite sheets, offline resilience, config snapshots |

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../../../core/widgets/status_dot.dart';
 import '../../domain/entities/device_entity.dart';
@@ -28,8 +29,7 @@ class _DeviceDetailView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
+    final colors = Theme.of(context).colorScheme;
 
     return BlocConsumer<DevicesBloc, DevicesState>(
       listener: (context, state) {
@@ -40,8 +40,7 @@ class _DeviceDetailView extends StatelessWidget {
         }
       },
       builder: (context, state) {
-        final device =
-            state is DeviceDetailLoaded ? state.device : null;
+        final device = state is DeviceDetailLoaded ? state.device : null;
 
         return Scaffold(
           appBar: AppBar(
@@ -74,7 +73,7 @@ class _DeviceDetailView extends StatelessWidget {
                         ],
                       ),
                     )
-                  : _DashboardTab(device: device),
+                  : _DashboardBody(device: device),
         );
       },
     );
@@ -99,7 +98,6 @@ class _DeviceDetailView extends StatelessWidget {
               Navigator.of(dialogContext).pop();
               final bloc = context.read<DevicesBloc>();
               bloc.add(DeleteDevice(device.id));
-              // Wait for the bloc to finish the delete before popping
               await bloc.stream.firstWhere(
                 (s) => s is DevicesLoaded || s is DevicesError,
               );
@@ -114,107 +112,192 @@ class _DeviceDetailView extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Dashboard tab
+// Dashboard body
 // ---------------------------------------------------------------------------
 
-class _DashboardTab extends StatelessWidget {
+class _DashboardBody extends StatelessWidget {
   final Device device;
-  const _DashboardTab({required this.device});
+  const _DashboardBody({required this.device});
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    final online = device.isOnline;
+    final id = device.id;
+    final cs = Theme.of(context).colorScheme;
+    final ac = Theme.of(context).extension<AppColors>()!;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      padding: const EdgeInsets.fromLTRB(
+        AppConstants.spacingLg,
+        AppConstants.spacingMd,
+        AppConstants.spacingLg,
+        AppConstants.spacingXxxl,
+      ),
       children: [
-        // Compact status bar
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 12,
-            ),
-            child: Row(
-              children: [
-                StatusDot(
-                  variant: online
-                      ? StatusDotVariant.online
-                      : StatusDotVariant.offline,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  online ? 'Connected' : 'Offline',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: online ? colors.primary : colors.onSurfaceVariant,
-                  ),
-                ),
-                if (online && device.wifiSsid != null) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    device.wifiSsid!,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colors.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-                const Spacer(),
-                if (device.lastSeenAt != null)
-                  Text(
-                    online
-                        ? 'Up ${_formatUptime(DateTime.now().difference(device.lastSeenAt!))}'
-                        : 'Last seen ${_formatTimeAgo(device.lastSeenAt!)}',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: colors.outline,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: AppConstants.spacingLg),
+        _StatusCard(device: device),
+        const SizedBox(height: AppConstants.spacingXxl),
 
-        // Quick actions
-        Text('Quick Actions', style: theme.textTheme.titleMedium),
+        // ── Right now ──────────────────────────────────────────────────────
+        const _SectionLabel('Right now'),
         const SizedBox(height: AppConstants.spacingMd),
-        GridView.count(
-          crossAxisCount: 3,
-          mainAxisSpacing: AppConstants.spacingSm,
-          crossAxisSpacing: AppConstants.spacingSm,
-          childAspectRatio: 1.0,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final action in [
-              (Icons.face, 'Personality', 'personality'),
-              (Icons.notifications_active, 'Reminders', 'reminders'),
-              (Icons.timer, 'Pomodoro', 'pomodoro'),
-              (Icons.center_focus_strong, 'Focus', 'focus'),
-              (Icons.bluetooth_searching, 'Presence', 'presence'),
-              (Icons.monitor, 'Display', 'display'),
-              (Icons.graphic_eq, 'Audio', 'voice'),
-              (Icons.bar_chart, 'Stats', 'stats'),
-              (Icons.extension, 'Integrations', 'integrations'),
-              (Icons.settings, 'Settings', 'settings'),
-            ])
-              _QuickActionTile(
-                icon: action.$1,
-                label: action.$2,
-                onTap: () =>
-                    context.push('/devices/${device.id}/${action.$3}'),
+            Expanded(
+              child: _PrimaryCard(
+                icon: Icons.timer_rounded,
+                label: 'Pomodoro',
+                description: 'Focus sessions',
+                cardBg: ac.warningContainer,
+                iconBg: ac.warning,
+                iconFg: ac.onWarning,
+                onTap: () => context.push('/devices/$id/pomodoro'),
               ),
+            ),
+            const SizedBox(width: AppConstants.spacingMd),
+            Expanded(
+              child: _PrimaryCard(
+                icon: Icons.center_focus_strong_rounded,
+                label: 'Focus',
+                description: 'Deep work mode',
+                cardBg: cs.primaryContainer,
+                iconBg: cs.primary,
+                iconFg: cs.onPrimary,
+                onTap: () => context.push('/devices/$id/focus'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppConstants.spacingMd),
+        _WideCard(
+          icon: Icons.notifications_active_rounded,
+          label: 'Reminders',
+          description: 'Health, hydration & daily routines',
+          cardBg: ac.successContainer,
+          iconBg: ac.success,
+          iconFg: ac.onSuccess,
+          onTap: () => context.push('/devices/$id/reminders'),
+        ),
+        const SizedBox(height: AppConstants.spacingXxl),
+
+        // ── Bot ────────────────────────────────────────────────────────────
+        const _SectionLabel('Bot'),
+        const SizedBox(height: AppConstants.spacingMd),
+        _SettingsGroup(
+          items: [
+            _SettingsRowData(
+              icon: Icons.graphic_eq_rounded,
+              label: 'Voice & Audio',
+              route: '/devices/$id/voice',
+            ),
+            _SettingsRowData(
+              icon: Icons.face_rounded,
+              label: 'Personality',
+              route: '/devices/$id/personality',
+            ),
+            _SettingsRowData(
+              icon: Icons.monitor_rounded,
+              label: 'Display & Face',
+              route: '/devices/$id/display',
+            ),
+            _SettingsRowData(
+              icon: Icons.bluetooth_searching_rounded,
+              label: 'Presence Detection',
+              route: '/devices/$id/presence',
+            ),
+          ],
+        ),
+        const SizedBox(height: AppConstants.spacingXxl),
+
+        // ── Device ─────────────────────────────────────────────────────────
+        const _SectionLabel('Device'),
+        const SizedBox(height: AppConstants.spacingMd),
+        _SettingsGroup(
+          items: [
+            _SettingsRowData(
+              icon: Icons.extension_rounded,
+              label: 'Integrations',
+              route: '/devices/$id/integrations',
+            ),
+            _SettingsRowData(
+              icon: Icons.settings_rounded,
+              label: 'Settings',
+              route: '/devices/$id/settings',
+            ),
+            _SettingsRowData(
+              icon: Icons.bar_chart_rounded,
+              label: 'Stats & History',
+              route: '/devices/$id/stats',
+            ),
           ],
         ),
       ],
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Status card
+// ---------------------------------------------------------------------------
+
+class _StatusCard extends StatelessWidget {
+  final Device device;
+  const _StatusCard({required this.device});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final online = device.isOnline;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppConstants.spacingLg,
+          vertical: AppConstants.spacingMd,
+        ),
+        child: Row(
+          children: [
+            StatusDot(
+              variant: online
+                  ? StatusDotVariant.online
+                  : StatusDotVariant.offline,
+            ),
+            const SizedBox(width: AppConstants.spacingSm),
+            Text(
+              online ? 'Connected' : 'Offline',
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: online ? cs.primary : cs.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (online && device.wifiSsid != null) ...[
+              const SizedBox(width: AppConstants.spacingXs),
+              Text(
+                '· ${device.wifiSsid}',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: cs.onSurfaceVariant),
+              ),
+            ],
+            const Spacer(),
+            if (device.lastSeenAt != null)
+              Text(
+                online
+                    ? _formatUptime(
+                        DateTime.now().difference(device.lastSeenAt!))
+                    : _formatTimeAgo(device.lastSeenAt!),
+                style: theme.textTheme.labelSmall
+                    ?.copyWith(color: cs.outline),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 
   static String _formatUptime(Duration d) {
-    if (d.inDays > 0) return '${d.inDays}d ${d.inHours % 24}h';
-    if (d.inHours > 0) return '${d.inHours}h ${d.inMinutes % 60}m';
-    return '${d.inMinutes}m';
+    if (d.inDays > 0) return 'Up ${d.inDays}d ${d.inHours % 24}h';
+    if (d.inHours > 0) return 'Up ${d.inHours}h ${d.inMinutes % 60}m';
+    return 'Up ${d.inMinutes}m';
   }
 
   static String _formatTimeAgo(DateTime date) {
@@ -225,52 +308,87 @@ class _DashboardTab extends StatelessWidget {
   }
 }
 
-class _QuickActionTile extends StatelessWidget {
+// ---------------------------------------------------------------------------
+// Section label
+// ---------------------------------------------------------------------------
+
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text.toUpperCase(),
+      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            letterSpacing: 1.1,
+            fontWeight: FontWeight.w700,
+          ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Primary cards (Pomodoro, Focus) — 2-col, prominent
+// ---------------------------------------------------------------------------
+
+class _PrimaryCard extends StatelessWidget {
   final IconData icon;
   final String label;
+  final String description;
+  final Color cardBg;
+  final Color iconBg;
+  final Color iconFg;
   final VoidCallback onTap;
 
-  const _QuickActionTile({
+  const _PrimaryCard({
     required this.icon,
     required this.label,
+    required this.description,
+    required this.cardBg,
+    required this.iconBg,
+    required this.iconFg,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colors = theme.colorScheme;
 
     return Material(
-      color: colors.surfaceContainerHigh,
+      color: cardBg,
       borderRadius: BorderRadius.circular(AppConstants.radiusLg),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppConstants.radiusLg),
         child: Padding(
-          padding: const EdgeInsets.all(AppConstants.spacingMd),
+          padding: const EdgeInsets.all(AppConstants.spacingLg),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: colors.primary.withValues(alpha: 0.12),
+                  color: iconBg,
                   borderRadius: BorderRadius.circular(AppConstants.radiusMd),
                 ),
-                child: Icon(icon, color: colors.primary, size: AppConstants.iconMd),
+                child: Icon(icon, color: iconFg, size: AppConstants.iconMd),
               ),
-              const SizedBox(height: AppConstants.spacingSm),
+              const SizedBox(height: AppConstants.spacingMd),
               Text(
                 label,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
                 ),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: AppConstants.spacingXxs),
+              Text(
+                description,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ),
@@ -280,4 +398,188 @@ class _QuickActionTile extends StatelessWidget {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Wide card (Reminders) — full-width, horizontal layout
+// ---------------------------------------------------------------------------
 
+class _WideCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String description;
+  final Color cardBg;
+  final Color iconBg;
+  final Color iconFg;
+  final VoidCallback onTap;
+
+  const _WideCard({
+    required this.icon,
+    required this.label,
+    required this.description,
+    required this.cardBg,
+    required this.iconBg,
+    required this.iconFg,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Material(
+      color: cardBg,
+      borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppConstants.spacingLg,
+            vertical: AppConstants.spacingMd,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: iconBg,
+                  borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+                ),
+                child: Icon(icon, color: iconFg, size: AppConstants.iconMd),
+              ),
+              const SizedBox(width: AppConstants.spacingMd),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: AppConstants.spacingXxs),
+                    Text(
+                      description,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppConstants.spacingMd),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: cs.onSurfaceVariant,
+                size: AppConstants.iconLg,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Settings group — grouped list rows in a card
+// ---------------------------------------------------------------------------
+
+class _SettingsRowData {
+  final IconData icon;
+  final String label;
+  final String route;
+
+  const _SettingsRowData({
+    required this.icon,
+    required this.label,
+    required this.route,
+  });
+}
+
+class _SettingsGroup extends StatelessWidget {
+  final List<_SettingsRowData> items;
+  const _SettingsGroup({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      child: Column(
+        children: [
+          for (int i = 0; i < items.length; i++) ...[
+            _SettingsRowTile(data: items[i]),
+            if (i < items.length - 1)
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: cs.outlineVariant.withValues(alpha: 0.5),
+                indent: AppConstants.spacingLg +
+                    AppConstants.spacingMd +
+                    36, // align with text
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsRowTile extends StatelessWidget {
+  final _SettingsRowData data;
+  const _SettingsRowTile({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Material(
+      color: cs.surfaceContainerHigh,
+      child: InkWell(
+        onTap: () => context.push(data.route),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppConstants.spacingLg,
+            vertical: AppConstants.spacingMd,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: cs.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(AppConstants.radiusSm),
+                ),
+                child: Icon(
+                  data.icon,
+                  color: cs.primary,
+                  size: AppConstants.iconMd,
+                ),
+              ),
+              const SizedBox(width: AppConstants.spacingMd),
+              Expanded(
+                child: Text(
+                  data.label,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: cs.outlineVariant,
+                size: AppConstants.iconLg,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

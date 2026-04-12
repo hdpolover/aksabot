@@ -64,6 +64,23 @@ static volatile bool playbackBuffering = true;  // jitter buffer: accumulate bef
 static int JITTER_BUFFER_FRAMES = 15;           // wait for 300ms of audio before starting
 static volatile uint32_t lastFrameReceivedMs = 0;  // starvation detection
 
+// ── Speaker stop flag (cross-task safe) ───────────────
+// NEVER call audio_io::stopSpeaker() / flushSpeaker() directly from the WS task
+// (Core 1) while the audio task (Core 0) may be blocking in i2s_channel_write().
+// ESP-IDF prohibits i2s_channel_disable() while i2s_channel_write() is active —
+// it corrupts the I2S peripheral state and produces the audible glitch/overlap.
+// Instead, set this flag; the audio task calls stopSpeaker() from Core 0 safely.
+static volatile bool stopSpeakerPending = false;
+
+// ── Multi-response sequencing ─────────────────────────
+// When the backend sends two responses back-to-back (e.g. reconnect greeting +
+// morning briefing), the firmware receives two response:start / response:end pairs.
+// The first response:end must NOT set playbackDone=true while the second response
+// is still streaming — that would cut the second response short.
+// pendingResponseEnds counts unmatched response:start events. response:end only
+// sets playbackDone=true when the count reaches zero (all responses done).
+static volatile int8_t pendingResponseEnds = 0;
+
 // ── Echo mode (hold-to-record, release-to-playback) ───
 // Records raw stereo I2S frames to PSRAM (same as audio-pipeline test firmware).
 // Plays back raw stereo directly — no mono conversion, no quality loss.
@@ -152,11 +169,12 @@ static void onWsJson(const char* event, const char* data) {
     }
     else if (strcmp(event, "audio:cancel") == 0) {
         // Backend superseded this pipeline with a new one — flush everything immediately.
-        playbackActive    = false;
-        playbackDone      = false;
-        playbackBuffering = true;
+        playbackActive       = false;
+        playbackDone         = false;
+        playbackBuffering    = true;
+        pendingResponseEnds  = 0;
         xQueueReset(playbackQueue);
-        audio_io::stopSpeaker();
+        stopSpeakerPending   = true;  // audio task will call stopSpeaker() safely
         face::feedAudioAmplitude(0);
         display::setTranscriptText("", "");
         if (appState.botState == BotState::SPEAKING ||
@@ -170,13 +188,21 @@ static void onWsJson(const char* event, const char* data) {
     else if (strcmp(event, "response:start") == 0) {
         power_manager::recordInteraction();  // Wake display for response
 
-        // If already playing, flush the old playback first
+        // If already playing, flush the old playback.
+        // pendingResponseEnds is NOT reset here — the old response:end will still
+        // arrive and must be counted down before playbackDone is set.
         if (playbackActive) {
             playbackActive = false;
             xQueueReset(playbackQueue);
             face::feedAudioAmplitude(0);
+            // Signal audio task to call stopSpeaker() from Core 0.
+            // Calling i2s_channel_disable() from Core 1 while Core 0 is blocking
+            // in i2s_channel_write() violates the ESP-IDF API and glitches audio.
+            stopSpeakerPending = true;
             Serial.println("[Main] Flushing previous playback for new response");
         }
+
+        pendingResponseEnds++;  // This response:start will produce exactly one response:end
 
         appState.botState = BotState::SPEAKING;
         syncFaceToState();
@@ -185,8 +211,7 @@ static void onWsJson(const char* event, const char* data) {
         playbackBuffering = true;  // accumulate frames before playing
         playbackActive = true;
         lastFrameReceivedMs = millis();  // Init starvation timer
-        audio_io::flushSpeaker();  // Clear stale DMA data
-        Serial.println("[Main] Response start — buffering audio");
+        Serial.printf("[Main] Response start — buffering audio (pending ends: %d)\n", (int)pendingResponseEnds);
     }
     else if (strcmp(event, "response:text") == 0) {
         // LLM response text: parse {"text":"...","isFinal":bool} or use raw
@@ -209,10 +234,19 @@ static void onWsJson(const char* event, const char* data) {
             }
         }
         cacheAccumLen = 0;
-        // Signal the audio task to drain remaining frames, then go idle.
-        // Don't set IDLE here — the audio task does it after the queue is empty.
-        playbackDone = true;
-        Serial.println("[Main] Response end — draining remaining audio");
+
+        pendingResponseEnds--;
+        if (pendingResponseEnds <= 0) {
+            // All queued responses have ended — signal the audio task to drain
+            // remaining frames then go idle.
+            pendingResponseEnds = 0;
+            playbackDone = true;
+            Serial.println("[Main] Response end — draining remaining audio");
+        } else {
+            // More responses are still coming (multi-response sequence).
+            // Don't set playbackDone yet — current response is still the last one.
+            Serial.printf("[Main] Response end (intermediate, %d still pending)\n", (int)pendingResponseEnds);
+        }
     }
     else if (strcmp(event, "error") == 0) {
         Serial.printf("[Main] Error: %s\n", data);
@@ -596,10 +630,11 @@ static void onTouchEvent(touch::Event event) {
                 // Interrupt — stop whatever is happening and show confusion.
                 // Playback-specific teardown only applies when actually speaking.
                 if (appState.botState == BotState::SPEAKING) {
-                    playbackActive = false;
-                    playbackDone   = false;
+                    playbackActive      = false;
+                    playbackDone        = false;
+                    pendingResponseEnds = 0;
                     xQueueReset(playbackQueue);
-                    audio_io::stopSpeaker();
+                    stopSpeakerPending  = true;  // audio task calls stopSpeaker() safely
                     face::feedAudioAmplitude(0);
                     display::setTranscriptText("", "");
                 }
@@ -757,6 +792,15 @@ static void audioCaptureLoop(void* param) {
             continue;
         }
 
+        // ── Safe speaker stop ─────────────────────────────────────────────
+        // stopSpeakerPending is set by the WS task (Core 1) when it needs to flush
+        // the speaker. We call stopSpeaker() here (Core 0) to avoid calling
+        // i2s_channel_disable() concurrently with a blocking i2s_channel_write().
+        if (stopSpeakerPending) {
+            stopSpeakerPending = false;
+            audio_io::stopSpeaker();
+        }
+
         // ── Backend audio playback — drain queue with blocking I2S writes ──
         if (playbackActive && playbackQueue) {
             // Jitter buffer: wait for enough frames before starting playback.
@@ -774,9 +818,10 @@ static void audioCaptureLoop(void* param) {
                     //  causing immediate starvation on every conversation after the first.)
                     if ((millis() - lastFrameReceivedMs) > 8000) {
                         Serial.println("[Main] Playback starvation — no frames received in 8s, aborting");
-                        playbackActive = false;
-                        playbackDone = false;
-                        playbackBuffering = true;
+                        playbackActive      = false;
+                        playbackDone        = false;
+                        playbackBuffering   = true;
+                        pendingResponseEnds = 0;
                         face::feedAudioAmplitude(0);
                         appState.botState = BotState::IDLE;
                         syncFaceToState();
@@ -800,9 +845,10 @@ static void audioCaptureLoop(void* param) {
                 face::feedAudioAmplitude((float)sum / (frame.count * 32768.0f));
             } else if (playbackDone) {
                 // Queue empty and no more frames coming — finish playback
-                playbackActive = false;
-                playbackDone = false;
-                playbackBuffering = true;
+                playbackActive      = false;
+                playbackDone        = false;
+                playbackBuffering   = true;
+                pendingResponseEnds = 0;
                 face::feedAudioAmplitude(0);
                 appState.botState = BotState::IDLE;
                 syncFaceToState();
@@ -813,9 +859,10 @@ static void audioCaptureLoop(void* param) {
             } else if (!playbackDone && (millis() - lastFrameReceivedMs) > 5000) {
                 // Queue empty for 5s but response:end never came — connection stalled
                 Serial.println("[Main] Playback starvation mid-speech — aborting");
-                playbackActive = false;
-                playbackDone = false;
-                playbackBuffering = true;
+                playbackActive      = false;
+                playbackDone        = false;
+                playbackBuffering   = true;
+                pendingResponseEnds = 0;
                 face::feedAudioAmplitude(0);
                 appState.botState = BotState::IDLE;
                 syncFaceToState();
@@ -1412,9 +1459,10 @@ void loop() {
             stuckCheckMs = now;
         } else if ((now - stuckCheckMs) > 30000) {
             Serial.println("[Main] Stuck state timeout (speaking) — force idle");
-            playbackActive = false;
-            playbackDone = false;
-            playbackBuffering = true;
+            playbackActive      = false;
+            playbackDone        = false;
+            playbackBuffering   = true;
+            pendingResponseEnds = 0;
             xQueueReset(playbackQueue);
             face::feedAudioAmplitude(0);
             appState.botState = BotState::IDLE;
@@ -1432,9 +1480,10 @@ void loop() {
     if (prevWsForPlayback && !appState.wsConnected) {
         if (appState.botState == BotState::SPEAKING || appState.botState == BotState::THINKING) {
             Serial.println("[Main] WS disconnected mid-response — aborting playback");
-            playbackActive = false;
-            playbackDone = false;
-            playbackBuffering = true;
+            playbackActive      = false;
+            playbackDone        = false;
+            playbackBuffering   = true;
+            pendingResponseEnds = 0;
             xQueueReset(playbackQueue);
             face::feedAudioAmplitude(0);
             display::setTranscriptText("", "");

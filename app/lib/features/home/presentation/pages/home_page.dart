@@ -41,6 +41,7 @@ class _HomeView extends StatefulWidget {
 
 class _HomeViewState extends State<_HomeView> {
   List<LocalDevice>? _localDevices;
+  List<Device>? _cachedDevices;
 
   @override
   void initState() {
@@ -67,9 +68,20 @@ class _HomeViewState extends State<_HomeView> {
   Widget build(BuildContext context) {
     return BlocBuilder<DevicesBloc, DevicesState>(
       builder: (context, state) {
-        // While waiting for both the bloc and local devices, show shimmer
-        if (state is DevicesLoading && _localDevices == null) {
-          return const _DeviceGridShimmer();
+        // Cache the last known devices so pull-to-refresh doesn't flash empty state
+        if (state is DevicesLoaded) {
+          _cachedDevices = state.devices;
+        }
+
+        if (state is DevicesLoading) {
+          // Refreshing with existing data — keep showing the grid (RefreshIndicator shows spinner)
+          if (_cachedDevices != null && _cachedDevices!.isNotEmpty) {
+            return _DeviceList(devices: _cachedDevices!, onNavigate: _pushAndReload);
+          }
+          // Initial load — show shimmer until local devices are also ready
+          if (_localDevices == null) {
+            return const _DeviceGridShimmer();
+          }
         }
 
         // Backend has devices — always show grid

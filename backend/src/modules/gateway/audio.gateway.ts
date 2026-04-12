@@ -96,6 +96,7 @@ export class AudioGateway
     // One connection per device — close existing
     const existing = this.deviceToSocket.get(device.id);
     if (existing) {
+      this.logger.log(`Device ${device.id} reconnected — replacing existing connection`);
       this.sendJson(existing, 'error', {
         code: 'REPLACED',
         message: 'Another connection opened for this device',
@@ -145,6 +146,24 @@ export class AudioGateway
     const deviceId = this.socketToDevice.get(client);
     if (!deviceId) return;
 
+    // Always clean up the per-socket mapping for this specific socket.
+    this.socketToDevice.delete(client);
+
+    // Only tear down the session and device-level state if THIS socket is
+    // still the active (registered) socket for the device.
+    //
+    // Race condition: handleConnection for a reconnecting device calls
+    // existing.close() THEN immediately registers the new socket and creates
+    // a new session. handleDisconnect fires asynchronously for the old socket
+    // AFTER the new session exists. Without this guard it would delete the
+    // new session and remove the new socket mapping, leaving the device
+    // connected but sessionless — every subsequent audio:start returns early.
+    const activeSocket = this.deviceToSocket.get(deviceId);
+    if (activeSocket !== client) {
+      this.logger.debug(`Device ${deviceId} old socket disconnected (already reconnected — skipping session teardown)`);
+      return;
+    }
+
     const session = this.sessions.get(deviceId);
     if (session?.conversationId) {
       await this.endConversation(deviceId);
@@ -153,7 +172,6 @@ export class AudioGateway
     this.scheduler.stopDeviceSchedule(deviceId);
     this.proactive.clearDevice(deviceId);
     this.sessions.remove(deviceId);
-    this.socketToDevice.delete(client);
     this.deviceToSocket.delete(deviceId);
     this.lastPong.delete(deviceId);
     this.lastDbRefresh.delete(deviceId);
