@@ -195,11 +195,6 @@ class _DashboardBody extends StatelessWidget {
               route: '/devices/$id/personality',
             ),
             _SettingsRowData(
-              icon: Icons.monitor_rounded,
-              label: 'Display & Face',
-              route: '/devices/$id/display',
-            ),
-            _SettingsRowData(
               icon: Icons.bluetooth_searching_rounded,
               label: 'Presence Detection',
               route: '/devices/$id/presence',

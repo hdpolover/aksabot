@@ -721,18 +721,7 @@ export class AudioGateway
 
     this.sendToDevice(deviceId, 'state:update', { state: 'listening' });
 
-    // Create conversation AFTER the STT stream is ready.
-    // Async DB call — audio chunks are already being forwarded to STT.
-    if (!session.conversationId) {
-      const conversation =
-        await this.persistence.createConversation(deviceId);
-      session.conversationId = conversation.id;
-      this.logger.log(`[${deviceId}] Conversation created: ${conversation.id}`);
-      this.sendToDevice(deviceId, 'session:start', {
-        sessionId: conversation.id,
-      });
-    }
-
+    // Conversation is created lazily on the first real message — see ensureConversation().
     // Pause idle chat while user is talking
     this.proactive.stopIdleChat(deviceId);
   }
@@ -850,14 +839,9 @@ export class AudioGateway
       return;
     }
 
-    // Save user message
-    if (session.conversationId) {
-      await this.persistence.saveMessage(
-        session.conversationId,
-        'user',
-        result.transcript,
-      );
-    }
+    // First real message — lazily create the conversation now that we know speech occurred.
+    const conversationId = await this.ensureConversation(deviceId);
+    await this.persistence.saveMessage(conversationId, 'user', result.transcript);
 
     session.state = 'thinking';
     this.sendToDevice(deviceId, 'state:update', { state: 'thinking' });
@@ -1104,11 +1088,10 @@ export class AudioGateway
       });
     }
 
-    // Save command and response to conversation
-    if (session.conversationId) {
-      await this.persistence.saveMessage(session.conversationId, 'user', transcript);
-      await this.persistence.saveMessage(session.conversationId, 'assistant', responseText);
-    }
+    // Save command and response — lazily create conversation on first voice command.
+    const conversationId = await this.ensureConversation(deviceId);
+    await this.persistence.saveMessage(conversationId, 'user', transcript);
+    await this.persistence.saveMessage(conversationId, 'assistant', responseText);
 
     session.state = 'idle';
     this.sendToDevice(deviceId, 'state:update', { state: 'idle' });
@@ -1239,6 +1222,29 @@ export class AudioGateway
   }
 
   // ── Conversation lifecycle ────────────────────────────────────
+
+  /**
+   * Lazily creates a conversation the first time a real message is about to be
+   * saved for this session. Subsequent calls within the same session are no-ops.
+   * Returns the conversation ID.
+   *
+   * This is intentionally deferred from onAudioStart so that aborted sessions
+   * (STT failure, empty transcript, connection drop before speech) leave no
+   * orphaned conversation rows in the database.
+   */
+  private async ensureConversation(deviceId: string): Promise<string> {
+    const session = this.sessions.get(deviceId);
+    if (!session) throw new Error(`No session for device ${deviceId}`);
+
+    if (!session.conversationId) {
+      const conversation = await this.persistence.createConversation(deviceId);
+      session.conversationId = conversation.id;
+      this.logger.log(`[${deviceId}] Conversation created: ${conversation.id}`);
+      this.sendToDevice(deviceId, 'session:start', { sessionId: conversation.id });
+    }
+
+    return session.conversationId;
+  }
 
   private async endConversation(deviceId: string) {
     const session = this.sessions.get(deviceId);
