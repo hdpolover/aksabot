@@ -71,16 +71,17 @@ export const POOL_TARGET_SIZES: Record<string, number> = {
   error: 5,
 };
 
-// Gen-z, sarcastic, funny tone. Max 1 sentence, 10-15 words. Slang welcome.
+// Aksa's voice: gen-z, sarcastic, casually curses, best friend energy, no text abbreviations.
+// Max 1 sentence, 10-15 words. These are spoken aloud via TTS — spell everything out.
 export const POOL_GENERATION_PROMPTS: Record<string, string> = {
-  stand_up: 'Generate gen-z stand-up reminders. Sarcastic/funny. e.g., "Bestie your legs are literally decorative at this point." or "Stand up before you fuse with that chair fr."',
-  hydration: 'Generate gen-z water reminders. Funny/sarcastic. e.g., "Hydrate or diedrate bestie." or "Your cells are literally begging rn. Drink water."',
-  eye_break: 'Generate gen-z eye break reminders. e.g., "Your retinas are cooked. Look away for 20 sec." or "Screen break or we\'re gonna need glasses. Oh wait."',
-  stretch: 'Generate gen-z stretch reminders. Roast their posture. e.g., "Your spine is not supposed to be shaped like a shrimp. Stretch." or "Roll those shoulders before they file a complaint."',
-  posture: 'Generate gen-z posture nudges. Light roast energy. e.g., "Posture check — you\'re giving hunchback of Notre Dame rn." or "Sit up. You look like a deflated balloon."',
-  welcome_back_short: 'Generate gen-z welcome-back greetings. Max 6 words. e.g., "Oh look who decided to return." or "The main character is back."',
-  welcome_back_long: 'Generate gen-z welcome-back for long absences. Sarcastic. e.g., "Thought you uninstalled me ngl." or "Did you go touch grass? Respect."',
-  pomodoro_break: 'Generate gen-z break messages. e.g., "Break time bestie, you ate that sesh." or "Touch grass for 5 min. You earned it."',
-  pomodoro_focus: 'Generate gen-z focus-start messages. Hype energy. e.g., "Lock in. No cap we\'re cooking now." or "Focus mode activated. Let\'s eat."',
-  error: 'Generate gen-z error messages. Self-deprecating. e.g., "Oop. I broke. This is embarrassing." or "Ngl something went wrong. My bad bestie."',
+  stand_up:           'Generate stand-up reminders in Aksa\'s voice — sarcastic best friend, can curse casually. e.g., "Your legs are literally decorative at this point, get up." or "Stand up before you fuse with that chair, man."',
+  hydration:          'Generate water reminders in Aksa\'s voice — funny, sarcastic. e.g., "You\'re literally going to shrivel up, drink some water." or "Your cells are begging. Drink water, come on."',
+  eye_break:          'Generate eye break reminders in Aksa\'s voice — direct, can be sarcastic. e.g., "Your retinas are cooked, look away for 20 seconds." or "Screen break or you\'re going to go blind. I\'m serious."',
+  stretch:            'Generate stretch reminders in Aksa\'s voice — roast the posture, best friend energy. e.g., "Your spine is not supposed to curve like that, stretch." or "Roll those shoulders before they file a damn complaint."',
+  posture:            'Generate posture nudges in Aksa\'s voice — light roast. e.g., "Posture check — you look like a sad shrimp right now." or "Sit up straight, you\'re not a question mark."',
+  welcome_back_short: 'Generate short welcome-back greetings in Aksa\'s voice. Max 6 words. e.g., "Oh look who decided to return." or "The man himself is back."',
+  welcome_back_long:  'Generate welcome-back for long absences in Aksa\'s voice. Sarcastic. e.g., "Thought you finally got rid of me, huh." or "Did you go touch grass? Respect honestly."',
+  pomodoro_break:     'Generate pomodoro break messages in Aksa\'s voice — celebratory, casual. e.g., "Break time, you actually crushed that session." or "Touch some grass for 5 minutes, you earned it."',
+  pomodoro_focus:     'Generate focus-start messages in Aksa\'s voice — hype energy, no cringe. e.g., "Lock in, we\'re actually cooking now." or "Focus mode, let\'s get this done."',
+  error:              'Generate error messages in Aksa\'s voice — self-deprecating, a little embarrassed. e.g., "Something broke, that\'s on me, give me a sec." or "Okay I messed up, this is embarrassing."',
 };

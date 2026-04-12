@@ -1400,7 +1400,8 @@ void loop() {
         if (stuckCheckMs == 0) {
             stuckCheckMs = now;
         } else if ((now - stuckCheckMs) > 15000) {
-            Serial.println("[Main] Stuck state timeout (thinking/listening) — reverting to IDLE");
+            Serial.printf("[Main] Stuck state timeout (thinking/listening) — reverting to IDLE (wsConnected=%d, heap=%u)\n",
+                          (int)appState.wsConnected, ESP.getFreeHeap());
             appState.botState = BotState::IDLE;
             syncFaceToState();
             display::setTranscriptText("", "");

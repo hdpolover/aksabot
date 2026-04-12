@@ -248,15 +248,32 @@ void ws_client::sendEvent(const char* event, const char* jsonData) {
         client.send(buf, len);
         xSemaphoreGive(wsMutex);
         Serial.printf("[WS] Sent: %s\n", buf);
+    } else {
+        Serial.printf("[WS] sendEvent timeout — mutex held >100ms (event: %s)\n", event);
     }
 }
 
 void ws_client::sendBinary(const uint8_t* data, size_t len) {
     if (!appState.wsConnected) return;
 
-    // No mutex needed: during LISTENING (when this is called), poll()
-    // returns early so there's no concurrent access to the client.
+    // Use a short mutex timeout (3ms) to prevent a data race with sendEvent()
+    // during the LISTENING→THINKING transition.
+    //
+    // The comment that said "no mutex needed" was wrong: while poll() does skip
+    // during LISTENING, sendEvent("audio:end") runs on Core 1 WITH the mutex at
+    // the same instant the audio task (Core 0) calls sendBinary() for the last
+    // frame. Both cores access `client` simultaneously, corrupting the WebSocket
+    // TCP stream and causing the backend to silently drop the audio session.
+    //
+    // 3ms timeout: during normal LISTENING no one else holds the mutex, so this
+    // is always free (no contention, no frame drops). On the brief LISTENING→THINKING
+    // transition, if sendEvent holds the mutex we drop this last frame — that's fine.
+    if (!xSemaphoreTake(wsMutex, pdMS_TO_TICKS(3))) {
+        // Mutex held by sendEvent — last frame during transition, safe to drop.
+        return;
+    }
     client.sendBinary((const char*)data, len);
+    xSemaphoreGive(wsMutex);
 
     static uint32_t frameCount = 0;
     static uint32_t lastLogMs = 0;

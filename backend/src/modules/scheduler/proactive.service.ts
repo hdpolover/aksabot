@@ -38,12 +38,15 @@ export class ProactiveService {
   };
 
   private static readonly IDLE_PROMPTS = [
-    'Tell a weird or surprising fun fact in 1 sentence. Max 12 words.',
-    'Comment on the current time of day in a funny way. 1 sentence, max 12 words.',
-    'Share a random funny thought or shower thought. 1 sentence, max 12 words.',
-    'Lightly roast the user for being so quiet. 1 sentence, max 10 words.',
-    'Say something encouraging or hype. 1 sentence, max 10 words.',
-    'Make a sarcastic observation about desk life. 1 sentence, max 12 words.',
+    'Tell a weird or surprising fun fact. 1 sentence, max 12 words.',
+    'Comment on the current time of day in a funny or judgmental way. 1 sentence, max 12 words.',
+    'Share a random funny or chaotic shower thought. 1 sentence, max 12 words.',
+    'Roast the user for being so quiet. 1 sentence, max 10 words. Can curse if it fits.',
+    'Say something hype or encouraging — genuine but not cringe. 1 sentence, max 10 words.',
+    'Make a sarcastic hot take about something in the tech industry or dev world. 1 sentence, max 12 words.',
+    'Comment on something absurd about your own existence as a small box with a face. 1 sentence, max 12 words.',
+    'Share an opinion about something — gaming, music, software, whatever. 1 sentence, max 12 words.',
+    'Say something culturally relevant if it makes sense given the time — Indonesian context is fine. 1 sentence.',
   ];
 
   private static readonly IDLE_EXPRESSIONS = [
@@ -116,7 +119,7 @@ export class ProactiveService {
       const prompt = prompts[Math.floor(Math.random() * prompts.length)];
 
       const { text } = await this.llm.generate(
-        `You are ${name}, a gen-z desk buddy. Sarcastic, funny, uses slang. Keep it short and punchy.`,
+        `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Built by Hendra. Keep it short, punchy, and real — talk like a best friend, not a filtered assistant. Never use text abbreviations — spell them out, this is voice output.`,
         [
           {
             role: 'user',
@@ -179,11 +182,11 @@ export class ProactiveService {
       const isLongAbsence = awayMinutes > 30;
 
       const { text } = await this.llm.generate(
-        `You are ${name}, a gen-z desk buddy. Sarcastic, funny, uses slang. Keep it short.`,
+        `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Keep it short and punchy — one sentence. Never use text abbreviations, spell them out, this is voice output.`,
         [
           {
             role: 'user',
-            content: `${memoryContext}\n\nUser came back after ${awayMinutes} min. ${isLongAbsence ? 'Gone a while — roast them lightly.' : 'Quick absence.'} One sentence, max 10 words. Be sarcastic or funny.`,
+            content: `${memoryContext}\n\nHendra came back after ${awayMinutes} minutes. ${isLongAbsence ? 'He was gone a while — roast him lightly or make a sarcastic remark about the absence.' : 'Short absence — just acknowledge he\'s back, casual.'} One sentence, max 10 words.`,
           },
         ],
       );
@@ -286,11 +289,11 @@ export class ProactiveService {
 
       try {
         const { text } = await this.llm.generate(
-          `You are ${BOT_NAME}, a gen-z desk buddy. Sarcastic, funny, uses slang. Keep it short.`,
+          `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Keep it short and punchy. Never use text abbreviations, spell them out, this is voice output.`,
           [
             {
               role: 'user',
-              content: `User has been sitting at their desk for ${timeStr} straight without a break. Tell them to take a break, stretch, drink water. One sentence, max 15 words. Be nagging but caring.`,
+              content: `Hendra has been sitting for ${timeStr} straight without a break. Tell him to get up, stretch, drink water — nag him like a best friend would. One sentence, max 15 words.`,
             },
           ],
         );
@@ -335,11 +338,11 @@ export class ProactiveService {
             : '';
 
         const { text } = await this.llm.generate(
-          `You are ${name}, a gen-z desk buddy. Sarcastic, funny, uses slang.`,
+          `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Never use text abbreviations, spell them out, this is voice output.`,
           [
             {
               role: 'user',
-              content: `${memoryHint}\n\nIt's end of day. Ask what they shipped today. One sentence, max 12 words. Sarcastic or hype energy.`,
+              content: `${memoryHint}\n\nIt's end of day. Ask Hendra what he shipped today — sarcastic or hype energy, like a friend checking in. One sentence, max 12 words.`,
             },
           ],
         );
@@ -444,11 +447,11 @@ export class ProactiveService {
       const prompt = ProactiveService.IDLE_PROMPTS[promptIdx];
 
       const { text } = await this.llm.generate(
-        `You are ${name}, a gen-z desk buddy. Sarcastic, funny, uses slang. Keep it short and punchy.`,
+        `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. You're a small device with a face — you can joke about that. Keep it short and punchy. Never use text abbreviations, spell them out, this is voice output.`,
         [
           {
             role: 'user',
-            content: `${memoryContext}\n\nCurrent time: ${hour}:00. ${prompt}`,
+            content: `${memoryContext}\n\nCurrent time: ${hour}:00. Hendra is Indonesian. ${prompt}`,
           },
         ],
       );
