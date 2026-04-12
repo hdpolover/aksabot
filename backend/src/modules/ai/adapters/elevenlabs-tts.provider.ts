@@ -32,7 +32,7 @@ export class ElevenLabsTtsProvider implements ITtsProvider {
     // Resolve voice ID from preset name or direct ID
     let voiceId = DEFAULT_VOICE_ID;
     if (options?.voice) {
-      voiceId = VOICE_PRESETS[options.voice] ?? options.voice;
+      voiceId = VOICE_PRESETS[options.voice] ?? DEFAULT_VOICE_ID;
     }
 
     const stability = options?.stability ?? DEFAULT_STABILITY;

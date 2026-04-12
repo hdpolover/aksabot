@@ -58,10 +58,13 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
     );
   }
 
+  static const _validPresets = {'ziggy', 'little_dude', 'sean', 'nelson', 'nathan'};
+
   void _applySettings(Device device) {
     final s = device.settingsJson;
+    final preset = s['voice_preset'] as String? ?? 'ziggy';
     setState(() {
-      _voicePreset = s['voice_preset'] as String? ?? 'ziggy';
+      _voicePreset = _validPresets.contains(preset) ? preset : 'ziggy';
       _speed = (s['voice_speed'] as num?)?.toDouble() ?? 0.7;
       _stability = (s['voice_stability'] as num?)?.toDouble() ?? 0.6;
       _wakeSound = s['audio_wake_sound'] as bool? ?? true;
