@@ -983,7 +983,12 @@ void setup() {
     debug_log::init();
     nvs_store::init();
 
-    pcmBuffer = (int16_t*)ps_malloc(OPUS_FRAME_SAMPLES * 2 * sizeof(int16_t));
+    // pcmBuffer must be in internal SRAM (not PSRAM). libopus's Xtensa xcorr DSP
+    // code reads from this buffer with tight inner loops; PSRAM cache-line latency
+    // causes occasional alloca alignment faults inside pitch_search. Internal SRAM
+    // is cache-coherent with the CPU and eliminates this class of issue entirely.
+    // 1280 bytes is well within the ~72KB of free internal heap at boot.
+    pcmBuffer = (int16_t*)heap_caps_malloc(OPUS_FRAME_SAMPLES * 2 * sizeof(int16_t), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
     opusBuffer = (uint8_t*)ps_malloc(OPUS_MAX_FRAME_BYTES);
     playbackBuffer = (int16_t*)ps_malloc(OPUS_FRAME_SAMPLES * sizeof(int16_t));
     playbackQueue = xQueueCreate(PLAYBACK_QUEUE_SIZE, sizeof(PlaybackFrame));
