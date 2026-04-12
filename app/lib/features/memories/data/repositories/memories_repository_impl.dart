@@ -54,4 +54,16 @@ class MemoriesRepositoryImpl implements MemoriesRepository {
       return Left(ServerFailure(e.message, statusCode: e.statusCode));
     }
   }
+
+  @override
+  Future<Either<Failure, Map<String, dynamic>>> scanMemories(
+    String deviceId,
+  ) async {
+    try {
+      final result = await _datasource.scanMemories(deviceId);
+      return Right(result);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
 }

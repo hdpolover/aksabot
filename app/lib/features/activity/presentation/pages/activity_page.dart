@@ -244,11 +244,60 @@ class _ConversationsListState extends State<_ConversationsList> {
         itemBuilder: (context, index) {
           final conversation = widget.conversations[index];
           final isExpanded = _expandedId == conversation.id;
-          return _ConversationTile(
-            conversation: conversation,
-            isExpanded: isExpanded,
-            messages: widget.messagesCache[conversation.id],
-            onTap: () => _toggleExpanded(conversation.id),
+          return Dismissible(
+            key: ValueKey(conversation.id),
+            direction: DismissDirection.endToStart,
+            background: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.error,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.only(right: 20),
+              child: Icon(
+                Icons.delete_outline,
+                color: Theme.of(context).colorScheme.onError,
+              ),
+            ),
+            confirmDismiss: (_) async {
+              if (_expandedId == conversation.id) {
+                setState(() => _expandedId = null);
+              }
+              return await showDialog<bool>(
+                context: context,
+                builder: (dialogContext) => AlertDialog(
+                  title: const Text('Delete conversation?'),
+                  content: const Text(
+                      'This will permanently remove the conversation and all its messages.'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor:
+                            Theme.of(context).colorScheme.error,
+                      ),
+                      onPressed: () => Navigator.of(dialogContext).pop(true),
+                      child: const Text('Delete'),
+                    ),
+                  ],
+                ),
+              );
+            },
+            onDismissed: (_) {
+              context
+                  .read<ConversationsBloc>()
+                  .add(DeleteConversation(conversation.id));
+            },
+            child: _ConversationTile(
+              conversation: conversation,
+              isExpanded: isExpanded,
+              messages: widget.messagesCache[conversation.id],
+              onTap: () => _toggleExpanded(conversation.id),
+            ),
           );
         },
       ),
@@ -403,48 +452,115 @@ class _MemoriesView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-
     return BlocProvider(
       create: (_) => sl<MemoriesBloc>()..add(LoadMemories(deviceId)),
-      child: BlocBuilder<MemoriesBloc, MemoriesState>(
-        builder: (context, state) {
-          if (state is MemoriesLoading) {
-            return const AppLoadingIndicator();
-          }
-          if (state is MemoriesError) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(state.message, style: TextStyle(color: colors.error)),
-                  const SizedBox(height: 16),
-                  FilledButton.tonal(
-                    onPressed: () => context.read<MemoriesBloc>().add(LoadMemories(deviceId)),
-                    child: const Text('Retry'),
-                  ),
-                ],
+      child: _MemoriesViewBody(deviceId: deviceId),
+    );
+  }
+}
+
+class _MemoriesViewBody extends StatelessWidget {
+  final String deviceId;
+  const _MemoriesViewBody({required this.deviceId});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return BlocConsumer<MemoriesBloc, MemoriesState>(
+      listenWhen: (prev, curr) {
+        if (curr is! MemoriesLoaded || prev is! MemoriesLoaded) return false;
+        return prev.scanning && !curr.scanning;
+      },
+      listener: (context, state) {
+        if (state is MemoriesLoaded) {
+          final extracted = state.lastScanExtracted;
+          final msg = extracted == null
+              ? 'Scan failed'
+              : extracted == 0
+                  ? 'No new memories found'
+                  : 'Extracted $extracted new ${extracted == 1 ? 'memory' : 'memories'}';
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(msg)));
+        }
+      },
+      builder: (context, state) {
+        if (state is MemoriesLoading) {
+          return const AppLoadingIndicator();
+        }
+        if (state is MemoriesError) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(state.message, style: TextStyle(color: colors.error)),
+                const SizedBox(height: 16),
+                FilledButton.tonal(
+                  onPressed: () =>
+                      context.read<MemoriesBloc>().add(LoadMemories(deviceId)),
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          );
+        }
+        if (state is MemoriesLoaded) {
+          final scanning = state.scanning;
+          return Column(
+            children: [
+              // Scan action bar
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (scanning)
+                      const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(width: 8),
+                          Text('Scanning...'),
+                        ],
+                      )
+                    else
+                      TextButton.icon(
+                        onPressed: () => context
+                            .read<MemoriesBloc>()
+                            .add(ScanMemories(deviceId)),
+                        icon: const Icon(Icons.manage_search_rounded, size: 18),
+                        label: const Text('Scan for memories'),
+                      ),
+                  ],
+                ),
               ),
-            );
-          }
-          if (state is MemoriesLoaded) {
-            if (state.memories.isEmpty) {
-              return const EmptyState(
-                icon: Icons.psychology_outlined,
-                title: 'No memories',
-                subtitle: 'Aksa will remember things about you as you chat.',
-              );
-            }
-            return _MemoriesContent(
-              memories: state.memories,
-              selectedCategory: state.selectedCategory,
-              deviceId: deviceId,
-            );
-          }
-          return const SizedBox.shrink();
-        },
-      ),
+              if (state.memories.isEmpty)
+                const Expanded(
+                  child: EmptyState(
+                    icon: Icons.psychology_outlined,
+                    title: 'No memories',
+                    subtitle:
+                        'Aksa will remember things about you as you chat.',
+                  ),
+                )
+              else
+                Expanded(
+                  child: _MemoriesContent(
+                    memories: state.memories,
+                    selectedCategory: state.selectedCategory,
+                    deviceId: deviceId,
+                  ),
+                ),
+            ],
+          );
+        }
+        return const SizedBox.shrink();
+      },
     );
   }
 }

@@ -16,4 +16,5 @@ abstract class MemoriesRepository {
   });
 
   Future<Either<Failure, void>> deleteMemory(String id);
+  Future<Either<Failure, Map<String, dynamic>>> scanMemories(String deviceId);
 }

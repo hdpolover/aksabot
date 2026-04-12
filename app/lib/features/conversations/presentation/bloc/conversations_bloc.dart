@@ -32,6 +32,14 @@ class LoadMessages extends ConversationsEvent {
   List<Object?> get props => [conversationId];
 }
 
+class DeleteConversation extends ConversationsEvent {
+  final String conversationId;
+  const DeleteConversation(this.conversationId);
+
+  @override
+  List<Object?> get props => [conversationId];
+}
+
 // ---------------------------------------------------------------------------
 // States
 // ---------------------------------------------------------------------------
@@ -89,6 +97,7 @@ class ConversationsBloc extends Bloc<ConversationsEvent, ConversationsState> {
   ConversationsBloc(this._repository) : super(const ConversationsInitial()) {
     on<LoadConversations>(_onLoadConversations);
     on<LoadMessages>(_onLoadMessages);
+    on<DeleteConversation>(_onDeleteConversation);
   }
 
   Future<void> _onLoadConversations(
@@ -117,6 +126,27 @@ class ConversationsBloc extends Bloc<ConversationsEvent, ConversationsState> {
     result.fold(
       (_) => null,
       (messages) => emit(current.copyWithMessages(event.conversationId, messages)),
+    );
+  }
+
+  Future<void> _onDeleteConversation(
+    DeleteConversation event,
+    Emitter<ConversationsState> emit,
+  ) async {
+    final current = state;
+    if (current is! ConversationsLoaded) return;
+
+    final result = await _repository.deleteConversation(event.conversationId);
+    result.fold(
+      (_) => null,
+      (_) {
+        final updated = current.conversations
+            .where((c) => c.id != event.conversationId)
+            .toList();
+        final updatedCache = Map<String, List<Message>>.from(current.messagesCache)
+          ..remove(event.conversationId);
+        emit(ConversationsLoaded(updated, messagesCache: updatedCache));
+      },
     );
   }
 }

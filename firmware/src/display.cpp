@@ -61,6 +61,11 @@ static const int CY = LCD_HEIGHT / 2 - 20;
 static const int EYE_SPACE = 48;
 static const int MOUTH_Y   = CY + 70;
 
+// ── Face style toggle ─────────────────────────────────
+// Set to true to use v2 rounded-rectangle eye style for IDLE.
+// Set to false to restore the original circle-eye style.
+static bool g_idleStyleV2 = true;
+
 // ── Rich color system (from face-animations firmware) ─────
 
 static inline uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
@@ -214,6 +219,44 @@ static void drawGlow(LGFX_Sprite& s, int x, int y, int maxR, uint16_t color, uin
 
 // ── Eye rendering ─────────────────────────────────────
 
+// V2 eye — rounded rectangle style shared across expressions.
+//
+// scaleY      — blink scale (1=open, 0=closed), same contract as drawEyeOpen
+// driftX/Y    — gaze drift: shifts the whole rect (no pupil)
+// squintBot   — 0=flat bottom (idle), 1=bottom lid fully risen (big grin).
+//               The top stays fixed; only the bottom half shrinks.
+// eyeW/eyeH   — per-expression eye dimensions (defaults: 54×30)
+static void drawEyeV2(LGFX_Sprite& s, int cx, int cy,
+                      float scaleY, float driftX, float driftY,
+                      float squintBot = 0.0f,
+                      int eyeW = 68, int eyeH = 38) {
+    static const int CR     = 8;
+    static const int MAX_DX = 10;
+    static const int MAX_DY = 5;
+    static const uint16_t EYE_COL = rgb(218, 220, 230);
+
+    int ox = constrain((int)driftX, -MAX_DX, MAX_DX);
+    int oy = constrain((int)driftY, -MAX_DY, MAX_DY);
+    int ex = cx + ox;
+    int ey = cy + oy;
+
+    // Top half-height: driven by blink
+    int hhTop = (int)((eyeH / 2) * scaleY);
+    // Bottom half-height: additionally closes upward with squintBot
+    int hhBot = (int)(hhTop * (1.0f - squintBot));
+    int totalH = hhTop + hhBot;
+
+    if (totalH < 2) {
+        s.fillRoundRect(ex - eyeW / 2, ey - 1, eyeW, 2, 1, EYE_COL);
+        return;
+    }
+
+    int actualCR = CR;
+    if (actualCR > hhBot)  actualCR = (hhBot  > 1) ? hhBot  - 1 : 1;
+    if (actualCR > hhTop)  actualCR = (hhTop  > 1) ? hhTop  - 1 : 1;
+    s.fillRoundRect(ex - eyeW / 2, ey - hhTop, eyeW, totalH, actualCR, EYE_COL);
+}
+
 static void drawEyeOpen(LGFX_Sprite& s, int cx, int cy, const EyeShape& eye,
                          float scaleY, float pupilDX, float pupilDY) {
     int r = eye.r;
@@ -269,13 +312,15 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
     switch (expr) {
         case face::Expression::IDLE: {
             if (talking) {
-                // Neutral talking mouth — oval opens with amplitude
-                int ow = 44 + (int)(a * 24);
-                int oh = 14 + (int)(a * 42);
-                s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
-                if (oh > 16) {
-                    s.fillEllipse(CX, my + 1, ow / 2 - 4, oh / 2 - 4,
-                                  blendRGB565(pal.accent, pal.bg, 20));
+                // Rect slot — grows in height with amplitude
+                int mw = 60;
+                int mh = 6 + (int)(a * 40);
+                int cr = (mh < 8) ? mh / 2 : 8;
+                s.fillRoundRect(CX - mw / 2, my - mh / 2, mw, mh, cr, pal.mouth);
+                if (mh > 12) {
+                    s.fillRoundRect(CX - mw / 2 + 4, my - mh / 2 + 4,
+                                    mw - 8, mh - 8, cr,
+                                    blendRGB565(pal.accent, pal.bg, 20));
                 }
             } else {
                 float breathOff = sinf(breathPhase * 2 * 3.14159f) * 1.5f;
@@ -304,27 +349,32 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             break;
         }
         case face::Expression::SPEAKING: {
-            // Default speaking — big, dramatic
-            int ow = 44 + (int)(a * 24);
-            int oh = 16 + (int)(a * 42);
-            s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
-            if (oh > 16) {
-                s.fillEllipse(CX, my + 1, ow / 2 - 4, oh / 2 - 4,
-                              blendRGB565(pal.accent, pal.bg, 20));
+            // Wide rect slot — more dramatic range than idle
+            int mw = 68;
+            int mh = 8 + (int)(a * 46);
+            int cr = (mh < 8) ? mh / 2 : 8;
+            s.fillRoundRect(CX - mw / 2, my - mh / 2, mw, mh, cr, pal.mouth);
+            if (mh > 14) {
+                s.fillRoundRect(CX - mw / 2 + 4, my - mh / 2 + 4,
+                                mw - 8, mh - 8, cr,
+                                blendRGB565(pal.accent, pal.bg, 20));
             }
             break;
         }
         case face::Expression::HAPPY: {
             if (talking) {
-                // Joyful wide oval
-                int ow = 46 + (int)(a * 22);
-                int oh = 14 + (int)(a * 40);
-                s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
-                if (oh > 16) {
-                    s.fillEllipse(CX, my + 1, ow / 2 - 4, oh / 2 - 4,
-                                  blendRGB565(pal.accent, pal.bg, 20));
+                // Wide rect slot, shifted down 4px to sit where the smile curve was
+                int mw = 70;
+                int mh = 8 + (int)(a * 42);
+                int cr = (mh < 8) ? mh / 2 : 8;
+                s.fillRoundRect(CX - mw / 2, my - mh / 2 + 4, mw, mh, cr, pal.mouth);
+                if (mh > 14) {
+                    s.fillRoundRect(CX - mw / 2 + 4, my - mh / 2 + 8,
+                                    mw - 8, mh - 8, cr,
+                                    blendRGB565(pal.accent, pal.bg, 20));
                 }
             } else {
+                // Closed: keep the bezier smile — it's a line, fits fine
                 thickBezier(s, CX - 26, my, CX, my + 16, CX + 26, my, 3, pal.mouth);
                 thickBezier(s, CX - 16, my + 2, CX, my + 10, CX + 16, my + 2, 2,
                             blendRGB565(TFT_WHITE, pal.mouth, 160), 16);
@@ -563,6 +613,33 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
         drawEyeOpen(s, rightEyeX, eyeY, rightEye, 1.0f, fs.driftX, fs.driftY);
         drawEyeX(s, leftEyeX,  eyeY, 20, pal.accent);
         drawEyeX(s, rightEyeX, eyeY, 20, pal.accent);
+    } else if (g_idleStyleV2 && (fs.expression == face::Expression::IDLE  ||
+                                  fs.expression == face::Expression::HAPPY ||
+                                  fs.expression == face::Expression::SPEAKING)) {
+        // ── V2 style: expression-aware rounded-rectangle eyes ──────
+        if (fs.expression == face::Expression::IDLE) {
+            // Idle: flat rect, whole eye drifts with gaze
+            drawEyeV2(s, leftEyeX,  eyeY, leftScale,  fs.driftX, fs.driftY);
+            drawEyeV2(s, rightEyeX, eyeY, rightScale, fs.driftX, fs.driftY);
+        } else if (fs.expression == face::Expression::HAPPY) {
+            // Happy: bottom lid rises with talking amplitude — squints as grin opens.
+            // Resting squint is 0.15 (smiley eyes even when quiet).
+            float squint = 0.15f + fs.mouthAmp * 0.65f;
+            if (squint > 0.75f) squint = 0.75f;
+            drawEyeV2(s, leftEyeX,  eyeY, leftScale,  0, 0, squint, 72, 38);
+            drawEyeV2(s, rightEyeX, eyeY, rightScale, 0, 0, squint, 72, 38);
+        } else if (fs.expression == face::Expression::SPEAKING) {
+            // Speaking: eyes focused forward (damped drift), widen on loud amplitude,
+            // subtle squint on peaks — like engaged animated talking.
+            // Eye scale widens when loud (existing audio-reactive leftEyeScale already
+            // applied via leftScale), so we just pass through.
+            float squint = fs.mouthAmp * 0.30f;  // gentle squint only at loud amplitude
+            // Dampen drift to 25% — mostly locked forward but not totally frozen
+            float dx = fs.driftX * 0.25f;
+            float dy = fs.driftY * 0.25f;
+            drawEyeV2(s, leftEyeX,  eyeY, leftScale,  dx, dy, squint);
+            drawEyeV2(s, rightEyeX, eyeY, rightScale, dx, dy, squint);
+        }
     } else {
         // Left eye
         if (leftScale < 0.05f) {

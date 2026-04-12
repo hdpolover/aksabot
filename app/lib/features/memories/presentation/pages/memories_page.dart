@@ -8,7 +8,7 @@ import '../../../../core/widgets/app_loading_indicator.dart';
 
 /// Page displaying a device's extracted memories, grouped by category.
 ///
-/// Supports filtering via chips, swipe-to-delete, and tap-to-edit.
+/// Supports filtering via chips, swipe-to-delete, tap-to-edit, and manual scan.
 class MemoriesPage extends StatelessWidget {
   final String deviceId;
 
@@ -18,42 +18,101 @@ class MemoriesPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (_) => sl<MemoriesBloc>()..add(LoadMemories(deviceId)),
-      child: Scaffold(
-        appBar: AppBar(title: const Text('Memories')),
-        body: BlocBuilder<MemoriesBloc, MemoriesState>(
-          builder: (context, state) {
-            if (state is MemoriesLoading) {
-              return const AppLoadingIndicator();
-            }
-            if (state is MemoriesError) {
-              return Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(state.message, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                    const SizedBox(height: 16),
-                    FilledButton.tonal(
-                      onPressed: () => context.read<MemoriesBloc>().add(LoadMemories(deviceId)),
-                      child: const Text('Retry'),
-                    ),
-                  ],
+      child: _MemoriesView(deviceId: deviceId),
+    );
+  }
+}
+
+class _MemoriesView extends StatelessWidget {
+  final String deviceId;
+  const _MemoriesView({required this.deviceId});
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocConsumer<MemoriesBloc, MemoriesState>(
+      listenWhen: (prev, curr) {
+        if (curr is! MemoriesLoaded) return false;
+        if (prev is! MemoriesLoaded) return false;
+        // Fire snackbar when scanning transitions from true to false
+        return prev.scanning && !curr.scanning;
+      },
+      listener: (context, state) {
+        if (state is MemoriesLoaded) {
+          final extracted = state.lastScanExtracted;
+          final msg = extracted == null
+              ? 'Scan failed'
+              : extracted == 0
+                  ? 'No new memories found'
+                  : 'Extracted $extracted new ${extracted == 1 ? 'memory' : 'memories'}';
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(msg)));
+        }
+      },
+      builder: (context, state) {
+        final scanning =
+            state is MemoriesLoaded ? state.scanning : false;
+
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Memories'),
+            actions: [
+              if (scanning)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              else
+                IconButton(
+                  icon: const Icon(Icons.manage_search_rounded),
+                  tooltip: 'Scan conversations for new memories',
+                  onPressed: () =>
+                      context.read<MemoriesBloc>().add(ScanMemories(deviceId)),
                 ),
-              );
-            }
-            if (state is MemoriesLoaded) {
-              if (state.memories.isEmpty) {
-                return const Center(child: Text('No memories yet.'));
+            ],
+          ),
+          body: Builder(
+            builder: (context) {
+              if (state is MemoriesLoading) {
+                return const AppLoadingIndicator();
               }
-              return _MemoriesContent(
-                memories: state.memories,
-                selectedCategory: state.selectedCategory,
-                deviceId: deviceId,
-              );
-            }
-            return const SizedBox.shrink();
-          },
-        ),
-      ),
+              if (state is MemoriesError) {
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(state.message,
+                          style: TextStyle(
+                              color: Theme.of(context).colorScheme.error)),
+                      const SizedBox(height: 16),
+                      FilledButton.tonal(
+                        onPressed: () => context
+                            .read<MemoriesBloc>()
+                            .add(LoadMemories(deviceId)),
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              if (state is MemoriesLoaded) {
+                if (state.memories.isEmpty) {
+                  return const Center(child: Text('No memories yet.'));
+                }
+                return _MemoriesContent(
+                  memories: state.memories,
+                  selectedCategory: state.selectedCategory,
+                  deviceId: deviceId,
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
+        );
+      },
     );
   }
 }

@@ -109,6 +109,22 @@ export class ConversationsService {
     };
   }
 
+  async delete(conversationId: string, userId: string): Promise<void> {
+    const conversation = await this.conversationsRepo.findOne({
+      where: { id: conversationId },
+      relations: ['device'],
+    });
+
+    if (!conversation) throw new NotFoundException('Conversation not found');
+    if (conversation.device.userId !== userId) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    // Delete messages first, then conversation
+    await this.messagesRepo.delete({ conversationId });
+    await this.conversationsRepo.delete(conversationId);
+  }
+
   private async assertDeviceOwnership(
     deviceId: string,
     userId: string,

@@ -23,4 +23,8 @@ class ConversationsRemoteDatasource {
         .map((json) => MessageModel.fromJson(json as Map<String, dynamic>))
         .toList();
   }
+
+  Future<void> deleteConversation(String conversationId) async {
+    await _client.delete('/conversations/$conversationId');
+  }
 }

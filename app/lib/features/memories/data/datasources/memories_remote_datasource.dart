@@ -38,4 +38,9 @@ class MemoriesRemoteDatasource {
   Future<void> deleteMemory(String id) async {
     await _client.delete('/memories/$id');
   }
+
+  Future<Map<String, dynamic>> scanMemories(String deviceId) async {
+    final data = await _client.post('/devices/$deviceId/memories/scan');
+    return data as Map<String, dynamic>;
+  }
 }

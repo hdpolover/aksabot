@@ -65,14 +65,65 @@ class ConversationsPage extends StatelessWidget {
                       horizontal: 16, vertical: 8),
                   itemCount: real.length,
                   itemBuilder: (context, index) {
-                    return _ConversationCard(
-                      conversation: real[index],
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => BlocProvider.value(
-                            value: context.read<ConversationsBloc>(),
-                            child: ConversationDetailPage(
-                                conversation: real[index]),
+                    final conversation = real[index];
+                    return Dismissible(
+                      key: ValueKey(conversation.id),
+                      direction: DismissDirection.endToStart,
+                      background: Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.error,
+                          borderRadius:
+                              BorderRadius.circular(AppConstants.radiusMd),
+                        ),
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: 20),
+                        child: Icon(
+                          Icons.delete_outline,
+                          color: Theme.of(context).colorScheme.onError,
+                        ),
+                      ),
+                      confirmDismiss: (_) async {
+                        return await showDialog<bool>(
+                          context: context,
+                          builder: (dialogContext) => AlertDialog(
+                            title: const Text('Delete conversation?'),
+                            content: const Text(
+                                'This will permanently remove the conversation and all its messages.'),
+                            actions: [
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.of(dialogContext).pop(false),
+                                child: const Text('Cancel'),
+                              ),
+                              FilledButton(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: Theme.of(context)
+                                      .colorScheme
+                                      .error,
+                                ),
+                                onPressed: () =>
+                                    Navigator.of(dialogContext).pop(true),
+                                child: const Text('Delete'),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                      onDismissed: (_) {
+                        context
+                            .read<ConversationsBloc>()
+                            .add(DeleteConversation(conversation.id));
+                      },
+                      child: _ConversationCard(
+                        conversation: conversation,
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => BlocProvider.value(
+                              value: context.read<ConversationsBloc>(),
+                              child: ConversationDetailPage(
+                                  conversation: conversation),
+                            ),
                           ),
                         ),
                       ),

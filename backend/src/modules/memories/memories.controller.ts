@@ -37,6 +37,18 @@ export class MemoriesController {
   }
 
   /**
+   * Scan all recent conversations for this device and extract any new memories.
+   * Safe to call multiple times — extractor deduplicates against existing memories.
+   */
+  @Post('devices/:deviceId/memories/scan')
+  async scanAll(
+    @Param('deviceId', ParseUUIDPipe) deviceId: string,
+  ) {
+    this.logger.log(`Memory scan triggered for device ${deviceId}`);
+    return this.memoriesService.scanAllConversations(deviceId);
+  }
+
+  /**
    * Diagnostic: extract memories from the most recent conversation that has messages.
    * Hit this to test extraction without needing to know a conversation ID.
    */

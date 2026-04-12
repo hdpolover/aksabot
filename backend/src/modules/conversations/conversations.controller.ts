@@ -1,6 +1,9 @@
 import {
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Query,
@@ -33,6 +36,15 @@ export class ConversationsController {
       limit ? parseInt(limit) : 20,
       q?.trim() || undefined,
     );
+  }
+
+  @Delete('conversations/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  delete(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.conversationsService.delete(id, user.userId);
   }
 
   @Get('conversations/:id/messages')

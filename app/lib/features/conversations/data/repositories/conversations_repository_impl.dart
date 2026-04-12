@@ -35,4 +35,16 @@ class ConversationsRepositoryImpl implements ConversationsRepository {
       return Left(ServerFailure(e.message, statusCode: e.statusCode));
     }
   }
+
+  @override
+  Future<Either<Failure, void>> deleteConversation(
+    String conversationId,
+  ) async {
+    try {
+      await _datasource.deleteConversation(conversationId);
+      return const Right(null);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
 }

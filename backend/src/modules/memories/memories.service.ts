@@ -123,6 +123,45 @@ export class MemoriesService {
     return saved;
   }
 
+  // ── Bulk scan ─────────────────────────────────────────
+
+  /**
+   * Scan the last N conversations for this device and run memory extraction
+   * on each one that has 2+ messages. Skips conversations already fully
+   * processed (idempotent — extractor deduplicates against existing memories).
+   */
+  async scanAllConversations(
+    deviceId: string,
+    limit = 20,
+  ): Promise<{ scanned: number; extracted: number }> {
+    const conversations = await this.conversationsRepo.find({
+      where: { deviceId },
+      order: { startedAt: 'DESC' },
+      take: limit,
+    });
+
+    let scanned = 0;
+    let extracted = 0;
+
+    for (const c of conversations) {
+      const count = await this.messagesRepo.count({
+        where: { conversationId: c.id },
+      });
+      if (count < 2) continue;
+
+      scanned++;
+      try {
+        const memories = await this.extractFromConversation(c.id, deviceId);
+        extracted += memories.length;
+      } catch (err: any) {
+        this.logger.warn(`Scan: extraction failed for ${c.id}: ${err.message}`);
+      }
+    }
+
+    this.logger.log(`Scan complete: ${scanned} conversations, ${extracted} new memories`);
+    return { scanned, extracted };
+  }
+
   // ── Diagnostic: extract from latest ───────────────────
 
   async extractFromLatestConversation(deviceId: string) {

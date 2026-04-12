@@ -42,6 +42,14 @@ class UpdateMemory extends MemoriesEvent {
   List<Object?> get props => [memoryId, fact, category];
 }
 
+class ScanMemories extends MemoriesEvent {
+  final String deviceId;
+  const ScanMemories(this.deviceId);
+
+  @override
+  List<Object?> get props => [deviceId];
+}
+
 // ---------------------------------------------------------------------------
 // States
 // ---------------------------------------------------------------------------
@@ -64,11 +72,32 @@ class MemoriesLoading extends MemoriesState {
 class MemoriesLoaded extends MemoriesState {
   final List<Memory> memories;
   final String? selectedCategory;
+  final bool scanning;
+  final int? lastScanExtracted;
 
-  const MemoriesLoaded(this.memories, {this.selectedCategory});
+  const MemoriesLoaded(
+    this.memories, {
+    this.selectedCategory,
+    this.scanning = false,
+    this.lastScanExtracted,
+  });
+
+  MemoriesLoaded copyWith({
+    List<Memory>? memories,
+    String? selectedCategory,
+    bool? scanning,
+    int? lastScanExtracted,
+  }) {
+    return MemoriesLoaded(
+      memories ?? this.memories,
+      selectedCategory: selectedCategory ?? this.selectedCategory,
+      scanning: scanning ?? this.scanning,
+      lastScanExtracted: lastScanExtracted ?? this.lastScanExtracted,
+    );
+  }
 
   @override
-  List<Object?> get props => [memories, selectedCategory];
+  List<Object?> get props => [memories, selectedCategory, scanning, lastScanExtracted];
 }
 
 class MemoriesError extends MemoriesState {
@@ -91,6 +120,7 @@ class MemoriesBloc extends Bloc<MemoriesEvent, MemoriesState> {
     on<LoadMemories>(_onLoadMemories);
     on<DeleteMemory>(_onDeleteMemory);
     on<UpdateMemory>(_onUpdateMemory);
+    on<ScanMemories>(_onScanMemories);
   }
 
   Future<void> _onLoadMemories(
@@ -142,6 +172,40 @@ class MemoriesBloc extends Bloc<MemoriesEvent, MemoriesState> {
     result.fold(
       (_) => null,
       (_) => add(LoadMemories(_currentDeviceId!, category: current.selectedCategory)),
+    );
+  }
+
+  Future<void> _onScanMemories(
+    ScanMemories event,
+    Emitter<MemoriesState> emit,
+  ) async {
+    final current = state;
+    if (current is! MemoriesLoaded) return;
+
+    emit(current.copyWith(scanning: true, lastScanExtracted: null));
+
+    final scanResult = await _repository.scanMemories(event.deviceId);
+
+    int? extracted;
+    scanResult.fold(
+      (_) => null,
+      (data) => extracted = data['extracted'] as int? ?? 0,
+    );
+
+    // Reload list inline so newly extracted memories appear without racing
+    final memoriesResult = await _repository.getMemories(
+      event.deviceId,
+      category: current.selectedCategory,
+    );
+
+    memoriesResult.fold(
+      (failure) => emit(MemoriesError(failure.message)),
+      (memories) => emit(MemoriesLoaded(
+        memories,
+        selectedCategory: current.selectedCategory,
+        scanning: false,
+        lastScanExtracted: extracted,
+      )),
     );
   }
 }
