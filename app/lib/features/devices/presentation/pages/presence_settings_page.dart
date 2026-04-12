@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
+import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart'; // PeripheralState
 
 import '../../../../core/ble/ble_presence_service.dart';
 import '../../../../core/di/injection.dart';
@@ -40,18 +40,20 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
   }
 
   void _listenBleState() {
-    _stateSub = FlutterBlePeripheral()
-        .onPeripheralStateChanged
-        ?.listen((state) {
-      if (!mounted) return;
-      // Only update UI — don't call start/stop advertising here to avoid
-      // "Reply already submitted" crash in the plugin when BT toggles.
-      setState(() {
-        if (state == PeripheralState.poweredOff) {
-          _enabled = false;
-        }
+    try {
+      _stateSub = _presence.peripheralStateStream?.listen((state) {
+        if (!mounted) return;
+        // Only update UI — don't call start/stop advertising here to avoid
+        // "Reply already submitted" crash in the plugin when BT toggles.
+        setState(() {
+          if (state == PeripheralState.poweredOff) {
+            _enabled = false;
+          }
+        });
       });
-    });
+    } catch (_) {
+      // BLE peripheral stream unavailable on this device — ignore.
+    }
   }
 
   @override
@@ -61,11 +63,22 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
   }
 
   Future<void> _loadSettings() async {
-    final supported = await _presence.isSupported;
-    final enabled = await _presence.loadEnabled();
-    final rssi = await _presence.loadRssiThreshold();
-    final grace = await _presence.loadGracePeriod();
-    final silent = await _presence.loadSilentWakeMinutes();
+    bool supported = false;
+    bool enabled = false;
+    double rssi = -75.0;
+    int grace = 45;
+    int silent = 5;
+
+    try {
+      supported = await _presence.isSupported;
+    } catch (_) {}
+
+    try {
+      enabled = await _presence.loadEnabled();
+      rssi = await _presence.loadRssiThreshold();
+      grace = await _presence.loadGracePeriod();
+      silent = await _presence.loadSilentWakeMinutes();
+    } catch (_) {}
 
     if (!mounted) return;
     setState(() {

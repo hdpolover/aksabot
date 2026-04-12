@@ -150,6 +150,23 @@ static void onWsJson(const char* event, const char* data) {
         Serial.printf("[Main] STT: %s\n", txt);
         display::setTranscriptText("You", txt);
     }
+    else if (strcmp(event, "audio:cancel") == 0) {
+        // Backend superseded this pipeline with a new one — flush everything immediately.
+        playbackActive    = false;
+        playbackDone      = false;
+        playbackBuffering = true;
+        xQueueReset(playbackQueue);
+        audio_io::stopSpeaker();
+        face::feedAudioAmplitude(0);
+        display::setTranscriptText("", "");
+        if (appState.botState == BotState::SPEAKING ||
+            appState.botState == BotState::THINKING) {
+            appState.botState = BotState::IDLE;
+            syncFaceToState();
+            wake_word::startListening();
+        }
+        Serial.println("[Main] audio:cancel — flushed pending response");
+    }
     else if (strcmp(event, "response:start") == 0) {
         power_manager::recordInteraction();  // Wake display for response
 
@@ -619,7 +636,7 @@ static void onTouchEvent(touch::Event event) {
                 lastTapIdx = pick;
 
                 face::setExpression(TAP_POOL[pick], 150);
-                scheduleFaceRevert(1500);
+                scheduleFaceRevert(2800);
                 Serial.printf("[Main] Idle tap — expression %d\n", (int)TAP_POOL[pick]);
             }
             break;

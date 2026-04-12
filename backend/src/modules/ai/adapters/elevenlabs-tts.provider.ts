@@ -25,7 +25,7 @@ export class ElevenLabsTtsProvider implements ITtsProvider {
     this.apiKey = apiKey;
   }
 
-  async synthesize(text: string, options?: TtsOptions): Promise<Buffer> {
+  async synthesize(text: string, options?: TtsOptions, signal?: AbortSignal): Promise<Buffer> {
     // Resolve voice ID from preset name or direct ID
     let voiceId = DEFAULT_VOICE_ID;
     if (options?.voice) {
@@ -39,6 +39,7 @@ export class ElevenLabsTtsProvider implements ITtsProvider {
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=pcm_16000`,
       {
         method: 'POST',
+        signal,
         headers: {
           'xi-api-key': this.apiKey,
           'Content-Type': 'application/json',

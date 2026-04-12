@@ -155,11 +155,12 @@ export class AiService {
     sentence: string,
     language?: string,
     voiceOptions?: TtsOptions,
+    signal?: AbortSignal,
   ): Promise<{ opusAudio: Buffer; pcmAudio: Buffer; cacheKey: string }> {
     const ttsOpts: TtsOptions = { ...voiceOptions, language };
     const cacheKey = this.ttsCacheKey(sentence, ttsOpts);
 
-    // Check cache
+    // Check cache (cache hits are instant, signal not needed)
     if (this.ttsCache) {
       const cached = await this.ttsCache.get(cacheKey);
       if (cached) {
@@ -168,8 +169,8 @@ export class AiService {
       }
     }
 
-    // Synthesize and encode
-    const pcmAudio = await this.tts.synthesize(sentence, ttsOpts);
+    // Synthesize and encode — pass signal so fetch can be aborted mid-response
+    const pcmAudio = await this.tts.synthesize(sentence, ttsOpts, signal);
     const opusAudio = this.codec.encode(pcmAudio);
 
     // Store in cache (non-blocking)
@@ -196,6 +197,7 @@ export class AiService {
     voiceOptions?: TtsOptions,
     context?: ContextInfo,
     moodHistory?: MoodHistoryEntry[],
+    signal?: AbortSignal,
   ): AsyncGenerator<PipelineEvent> {
     const systemPrompt = this.prompt.buildSystemPrompt(memories, context, moodHistory);
     const messages = this.prompt.buildMessages(history, transcript);
@@ -206,16 +208,22 @@ export class AiService {
     const cacheKeys: CacheEntry[] = [];
 
     for await (const token of llmStream) {
+      // Stop consuming LLM tokens if the pipeline was cancelled — saves Gemini spend
+      if (signal?.aborted) return;
+
       fullResponseText += token;
 
       const rawSentence = sentenceBuffer.feed(token);
       if (rawSentence) {
+        if (signal?.aborted) return;
         const { text: cleanText, emotion } = extractEmotion(rawSentence);
         const emotionVoice = applyEmotionToVoice(voiceOptions, emotion);
+        // synthesizeWithCache passes signal to fetch — aborts the HTTP request if cancelled
         const { opusAudio, cacheKey } = await this.synthesizeWithCache(
           cleanText,
           undefined,
           emotionVoice,
+          signal,
         );
         cacheKeys.push({ hash: cacheKey, sentence: cleanText });
 
@@ -223,6 +231,8 @@ export class AiService {
         yield { type: 'audio', data: opusAudio, cacheKey, emotion };
       }
     }
+
+    if (signal?.aborted) return;
 
     const remaining = sentenceBuffer.flush();
     if (remaining) {
@@ -232,6 +242,7 @@ export class AiService {
         cleanText,
         undefined,
         emotionVoice,
+        signal,
       );
       cacheKeys.push({ hash: cacheKey, sentence: cleanText });
 

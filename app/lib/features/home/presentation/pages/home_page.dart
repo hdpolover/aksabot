@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shimmer/shimmer.dart';
 
+import '../../../../core/ble/ble_presence_service.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/local/local_device.dart';
@@ -200,17 +204,45 @@ class _LocalDeviceList extends StatelessWidget {
 // Backend device list (backend online)
 // ---------------------------------------------------------------------------
 
-class _DeviceList extends StatelessWidget {
+class _DeviceList extends StatefulWidget {
   final List<Device> devices;
   final void Function(BuildContext, String) onNavigate;
   const _DeviceList({required this.devices, required this.onNavigate});
+
+  @override
+  State<_DeviceList> createState() => _DeviceListState();
+}
+
+class _DeviceListState extends State<_DeviceList> {
+  late final BlePresenceService _presence;
+  StreamSubscription<PeripheralState>? _stateSub;
+  bool _isAdvertising = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _presence = sl<BlePresenceService>();
+    _isAdvertising = _presence.isAdvertising;
+    try {
+      _stateSub = _presence.peripheralStateStream?.listen((state) {
+        if (!mounted) return;
+        setState(() => _isAdvertising = _presence.isAdvertising);
+      });
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _stateSub?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Devices')),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => onNavigate(context, '/devices/add'),
+        onPressed: () => widget.onNavigate(context, '/devices/add'),
         child: const Icon(Icons.add),
       ),
       body: RefreshIndicator(
@@ -225,14 +257,15 @@ class _DeviceList extends StatelessWidget {
             crossAxisSpacing: AppConstants.spacingMd,
             childAspectRatio: 1.3,
           ),
-          itemCount: devices.length,
+          itemCount: widget.devices.length,
           itemBuilder: (context, index) {
-            final device = devices[index];
+            final device = widget.devices[index];
             return DeviceTile(
               name: device.name,
               subtitle: device.isOnline ? 'Online' : 'Offline',
               isOnline: device.isOnline,
-              onTap: () => onNavigate(context, '/devices/${device.id}'),
+              bleAdvertising: _isAdvertising,
+              onTap: () => widget.onNavigate(context, '/devices/${device.id}'),
             );
           },
         ),

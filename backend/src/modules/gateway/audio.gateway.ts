@@ -601,6 +601,15 @@ export class AudioGateway
     const session = this.sessions.get(deviceId);
     if (!session) return;
 
+    // Cancel any in-progress pipeline before starting a new recording.
+    // Bumping the generation makes the old pipeline's gen check fail on its next
+    // iteration, so it stops without sending response:end to the device.
+    if (session.state === 'thinking' || session.state === 'speaking') {
+      this.bumpPipelineGen(deviceId);
+      this.sendToDevice(deviceId, 'audio:cancel', {});
+      this.logger.log(`[${deviceId}] audio:start supersedes ${session.state} pipeline`);
+    }
+
     // Set audio format for this recording session (opus default, pcm16 for web simulator)
     session.audioFormat = format === 'pcm16' ? 'pcm16' : 'opus';
 
@@ -668,6 +677,21 @@ export class AudioGateway
   }
 
   private chunkCount = new Map<string, number>();
+
+  // Generation counter — bumped each time a new pipeline starts.
+  // Any in-flight pipeline that sees its gen is stale will abort, preventing
+  // queued responses from flooding the device when the user speaks rapidly.
+  private pipelineGen = new Map<string, number>();
+
+  private bumpPipelineGen(deviceId: string): number {
+    const gen = (this.pipelineGen.get(deviceId) ?? 0) + 1;
+    this.pipelineGen.set(deviceId, gen);
+    return gen;
+  }
+
+  private isPipelineCurrent(deviceId: string, gen: number): boolean {
+    return this.pipelineGen.get(deviceId) === gen;
+  }
 
   private onAudioChunk(deviceId: string, data: Buffer) {
     const session = this.sessions.get(deviceId);
@@ -804,28 +828,43 @@ export class AudioGateway
       note: m.note ?? undefined,
     }));
 
+    // Claim a generation token. If a newer audio:start arrives before this
+    // pipeline finishes, bumpPipelineGen() will invalidate myGen and the
+    // pipeline will abort without sending response:end to the device.
+    const myGen = this.bumpPipelineGen(deviceId);
+
     // Run streaming pipeline
     try {
-      await this.runPipeline(deviceId, result.transcript, memories, history, voiceOptions, context, moodEntries);
+      await this.runPipeline(deviceId, result.transcript, memories, history, voiceOptions, context, moodEntries, myGen);
     } catch (err: any) {
-      this.logger.error(`Pipeline error for ${deviceId}: ${err.message}`, err.stack);
-      this.sendToDevice(deviceId, 'error', {
-        code: 'PIPELINE_ERROR',
-        message: 'Failed to generate response',
-      });
+      // AbortError means the pipeline was intentionally cancelled — not a real error
+      if (err.name === 'AbortError') {
+        this.logger.debug(`[${deviceId}] Pipeline gen ${myGen} aborted cleanly`);
+      } else {
+        this.logger.error(`Pipeline error for ${deviceId}: ${err.message}`, err.stack);
+        if (this.isPipelineCurrent(deviceId, myGen)) {
+          this.sendToDevice(deviceId, 'error', {
+            code: 'PIPELINE_ERROR',
+            message: 'Failed to generate response',
+          });
+        }
+      }
     }
 
-    // Return to idle
-    session.state = 'idle';
-    this.sessions.clearInterrupted(deviceId);
-    this.sendToDevice(deviceId, 'state:update', { state: 'idle' });
+    // Return to idle only if this pipeline is still the current one.
+    // A newer pipeline will handle its own cleanup.
+    if (this.isPipelineCurrent(deviceId, myGen)) {
+      session.state = 'idle';
+      this.sessions.clearInterrupted(deviceId);
+      this.sendToDevice(deviceId, 'state:update', { state: 'idle' });
 
-    // Resume idle personality chat
-    this.proactive.startIdleChat(deviceId).catch(() => {});
+      // Resume idle personality chat
+      this.proactive.startIdleChat(deviceId).catch(() => {});
 
-    this.sessions.resetIdleTimer(deviceId, () => {
-      this.endConversation(deviceId);
-    });
+      this.sessions.resetIdleTimer(deviceId, () => {
+        this.endConversation(deviceId);
+      });
+    }
   }
 
   // ── Voice command handler ─────────────────────────────────────
@@ -1006,6 +1045,7 @@ export class AudioGateway
     voiceOptions?: { voice?: string; speed?: number; stability?: number },
     context?: { timezone?: string; weatherEnabled?: boolean; latitude?: number; longitude?: number },
     moodHistory?: { date: string; mood: string; note?: string }[],
+    gen?: number,
   ) {
     const session = this.sessions.get(deviceId);
     if (!session) return;
@@ -1015,6 +1055,10 @@ export class AudioGateway
       await this.aiService.refreshWeather(context.latitude, context.longitude);
     }
 
+    // AbortController lets us cancel the in-flight ElevenLabs fetch and stop
+    // Gemini token generation when this pipeline is superseded by a new one.
+    const abortController = new AbortController();
+
     const pipeline = this.aiService.processTranscript(
       transcript,
       memories,
@@ -1022,6 +1066,7 @@ export class AudioGateway
       voiceOptions,
       context,
       moodHistory,
+      abortController.signal,
     );
 
     let started = false;
@@ -1043,7 +1088,17 @@ export class AudioGateway
     };
 
     for await (const event of pipeline) {
-      if (this.sessions.isInterrupted(deviceId)) break;
+      // Stop if interrupted by user tap OR superseded by a newer pipeline.
+      // Abort the signal first so the generator's current await gets cancelled.
+      if (this.sessions.isInterrupted(deviceId)) {
+        abortController.abort();
+        break;
+      }
+      if (gen !== undefined && !this.isPipelineCurrent(deviceId, gen)) {
+        this.logger.log(`[${deviceId}] Pipeline gen ${gen} superseded — aborting`);
+        abortController.abort();
+        break;
+      }
 
       if (event.type === 'text') {
         this.sendToDevice(deviceId, 'response:text', {
@@ -1073,18 +1128,21 @@ export class AudioGateway
       }
     }
 
-    this.sendToDevice(deviceId, 'response:end', {
-      fullText: fullResponseText,
-      cacheKeys,
-    });
+    // Only finalize if not superseded by a newer pipeline
+    if (gen === undefined || this.isPipelineCurrent(deviceId, gen)) {
+      this.sendToDevice(deviceId, 'response:end', {
+        fullText: fullResponseText,
+        cacheKeys,
+      });
 
-    // Save assistant response
-    if (session.conversationId && fullResponseText) {
-      await this.persistence.saveMessage(
-        session.conversationId,
-        'assistant',
-        fullResponseText,
-      );
+      // Save assistant response
+      if (session.conversationId && fullResponseText) {
+        await this.persistence.saveMessage(
+          session.conversationId,
+          'assistant',
+          fullResponseText,
+        );
+      }
     }
   }
 

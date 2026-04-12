@@ -6,5 +6,5 @@ export interface TtsOptions {
 }
 
 export interface ITtsProvider {
-  synthesize(text: string, options?: TtsOptions): Promise<Buffer>;
+  synthesize(text: string, options?: TtsOptions, signal?: AbortSignal): Promise<Buffer>;
 }

@@ -100,6 +100,10 @@ class BlePresenceService {
   /// Checks if BLE peripheral mode is supported on this device.
   Future<bool> get isSupported => _peripheral.isSupported;
 
+  /// Stream of peripheral state changes. Null if the platform doesn't support it.
+  Stream<PeripheralState>? get peripheralStateStream =>
+      _peripheral.onPeripheralStateChanged;
+
   /// Checks current advertising state from the platform.
   Future<bool> checkAdvertisingState() async {
     _isAdvertising = await _peripheral.isAdvertising;

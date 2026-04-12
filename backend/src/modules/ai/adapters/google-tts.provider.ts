@@ -10,7 +10,9 @@ export class GoogleTtsProvider implements ITtsProvider {
     this.client = new TextToSpeechClient();
   }
 
-  async synthesize(text: string, options?: TtsOptions): Promise<Buffer> {
+  // signal is accepted to satisfy the ITtsProvider interface but Google Cloud
+  // client library does not expose request-level abort — ignored here.
+  async synthesize(text: string, options?: TtsOptions, _signal?: AbortSignal): Promise<Buffer> {
     const [response] = await this.client.synthesizeSpeech({
       input: { text },
       voice: {
