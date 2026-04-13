@@ -30,6 +30,7 @@
 #include "status_led.h"
 #include "wake_word.h"
 #include "gesture.h"
+#include "ui_audio.h"
 
 // Global application state
 AppState appState;
@@ -62,6 +63,7 @@ static volatile bool playbackActive = false;  // true while audio task should dr
 static volatile bool playbackDone = false;    // set by response:end to signal no more frames
 static volatile uint32_t handsFreeRecordStartMs = 0;  // when hands-free recording started (for no-speech timeout)
 static volatile bool playbackBuffering = true;  // jitter buffer: accumulate before playing
+static volatile bool pendingSttFailAudio = false;  // set by audio task (Core 0), played by main loop (Core 1)
 static int JITTER_BUFFER_FRAMES = 15;           // wait for 300ms of audio before starting
 static volatile uint32_t lastFrameReceivedMs = 0;  // starvation detection
 
@@ -252,6 +254,7 @@ static void onWsJson(const char* event, const char* data) {
     }
     else if (strcmp(event, "error") == 0) {
         Serial.printf("[Main] Error: %s\n", data);
+        resilience_audio::playClip(resilience_audio::Clip::ERROR);
         face::setExpression(face::Expression::SHRUG, 200);
         scheduleFaceRevert(3000);
         appState.botState = BotState::IDLE;
@@ -259,11 +262,18 @@ static void onWsJson(const char* event, const char* data) {
         // Don't call syncFaceToState() — let SHRUG play for 3s first
     }
     else if (strcmp(event, "state:update") == 0) {
-        // Backend state sync (e.g., after STT error resets to idle)
+        // Backend state sync (e.g., after STT error resets to idle).
+        // IMPORTANT: never override LISTENING — the user may have pressed PTT
+        // while the error clip was playing (blocking the WS task for ~2s).
+        // When the clip finishes and the WS task drains buffered messages, a
+        // stale state:update:idle would cancel the in-progress recording,
+        // causing only 1 audio chunk to reach the backend and no audio:end.
         JsonDocument doc;
         if (deserializeJson(doc, data) == DeserializationError::Ok) {
             const char* state = doc["state"] | "";
-            if (strcmp(state, "idle") == 0 && appState.botState != BotState::IDLE) {
+            if (strcmp(state, "idle") == 0
+                && appState.botState != BotState::IDLE
+                && appState.botState != BotState::LISTENING) {
                 Serial.println("[Main] Backend reset to idle");
                 appState.botState = BotState::IDLE;
                 syncFaceToState();
@@ -274,6 +284,7 @@ static void onWsJson(const char* event, const char* data) {
     // ── Proactive events → wake display + show content ────
     else if (strcmp(event, "proactive:reminder") == 0) {
         power_manager::recordInteraction();  // Wake display for reminder
+        ui_audio::play(ui_audio::Clip::NOTIFICATION);
         JsonDocument doc;
         if (deserializeJson(doc, data) == DeserializationError::Ok) {
             display::ReminderData rd = {};
@@ -517,6 +528,7 @@ static void onWsJson(const char* event, const char* data) {
         updateStatusBar();  // Switch dot from blinking to solid
         power_manager::recordInteraction();
         Serial.println("[Presence] User arrived (app-driven)");
+        ui_audio::play(ui_audio::Clip::PRESENCE_ARRIVED);
         face::setExpression(face::Expression::HAPPY, 200);
         scheduleFaceRevert(3000);
     }
@@ -525,6 +537,7 @@ static void onWsJson(const char* event, const char* data) {
         nvs_store::setPresencePresent(false);  // Persist departure
         updateStatusBar();  // Switch dot back to blinking
         Serial.println("[Presence] User departed (app-driven)");
+        ui_audio::play(ui_audio::Clip::PRESENCE_DEPARTED);
         // Run departure animation in a one-shot task
         xTaskCreate([](void*) {
             face::setExpression(face::Expression::SAD, 300);
@@ -610,6 +623,8 @@ static void onTouchEvent(touch::Event event) {
                                  appState.botState == BotState::THINKING);
 
             if (appState.botState == BotState::IDLE || wasHandsFree || wasActive) {
+                // Play before mic opens so the chime isn't captured
+                ui_audio::play(ui_audio::Clip::HOLD_START);
 
                 // Tear down whatever was in progress before starting PTT
                 if (wasActive) {
@@ -667,6 +682,8 @@ static void onTouchEvent(touch::Event event) {
                 echoRecording = false;
                 audio_io::stopMic();
                 if (appState.wsConnected) {
+                    ui_audio::play(ui_audio::Clip::RECORDING_STOP);
+                    resilience_audio::playClip(resilience_audio::Clip::THINKING);
                     appState.botState = BotState::THINKING;
                     syncFaceToState();
                     ws_client::sendEvent("audio:end");
@@ -710,6 +727,7 @@ static void onTouchEvent(touch::Event event) {
                 ws_client::sendEvent("proactive:dismiss");
             }
             else if (appState.botState == BotState::IDLE) {
+                ui_audio::play(ui_audio::Clip::TAP);
                 // Idle tap — cycle through a sequence of fun/reactive expressions
                 static const face::Expression TAP_POOL[] = {
                     face::Expression::SURPRISED,
@@ -753,6 +771,7 @@ static void onTouchEvent(touch::Event event) {
 
         case touch::Event::WAKE: {
             // recordInteraction() already called at top of onTouchEvent
+            resilience_audio::playClip(resilience_audio::Clip::WAKE);
             appState.botState = BotState::IDLE;
             syncFaceToState();
             // Varied wake expressions — not always happy
@@ -1021,6 +1040,7 @@ static void audioCaptureLoop(void* param) {
                 appState.botState = BotState::IDLE;
                 syncFaceToState();
                 ws_client::sendEvent("audio:end");
+                pendingSttFailAudio = true;  // played by main loop (Core 1) to avoid I2S contention
                 continue;
             }
         }
@@ -1338,6 +1358,7 @@ void setup() {
             appState.botState = BotState::IDLE;
             syncFaceToState();
             updateStatusBar();
+            resilience_audio::playClip(resilience_audio::Clip::BOOT);
 
             if (MDNS.begin("aksabot")) {
                 MDNS.addService("aksabot", "tcp", 80);
@@ -1579,7 +1600,14 @@ void loop() {
     gesture::tick(now);
 
     // Tick power management and status LED
-    power_manager::tick(now);
+    {
+        auto prevPower = power_manager::getState();
+        power_manager::tick(now);
+        if (prevPower != power_manager::PowerState::SLEEPING &&
+            power_manager::getState() == power_manager::PowerState::SLEEPING) {
+            resilience_audio::playClip(resilience_audio::Clip::SLEEP);
+        }
+    }
     status_led::tick(now);
 
     // Explicit WiFi reconnect with backoff — fallback for when setAutoReconnect
@@ -1595,6 +1623,7 @@ void loop() {
             ws_client::connect();
             Serial.println("[Main] WiFi recovered — connecting WS");
         }
+        ui_audio::play(ui_audio::Clip::WIFI_CONNECTED);  // WiFi reconnect (not first boot — BOOT covers that)
     } else if (!wifiNow && appState.wifiConnected) {
         appState.wifiConnected = false;
     }
@@ -1623,14 +1652,16 @@ void loop() {
     static bool prevWs = false;
     if (appState.wifiConnected != prevWifi || appState.wsConnected != prevWs) {
 
-        // ── Face reactions to connectivity changes (only when idle) ──
+        // ── Face + audio reactions to connectivity changes (only when idle) ──
         if (appState.botState == BotState::IDLE || appState.botState == BotState::OFFLINE) {
             if (!appState.wifiConnected && prevWifi) {
-                // WiFi lost → sad
+                // WiFi lost → offline clip + sad face
+                resilience_audio::playClip(resilience_audio::Clip::OFFLINE);
                 face::setExpression(face::Expression::SAD, 300);
                 scheduleFaceRevert(3000);
             } else if (appState.wifiConnected && !appState.wsConnected && prevWs) {
-                // WS dropped but WiFi still up → confused
+                // WS dropped but WiFi still up → disconnected clip + confused face
+                ui_audio::play(ui_audio::Clip::SERVER_DISCONNECTED);
                 face::setExpression(face::Expression::CONFUSED, 200);
                 scheduleFaceRevert(3000);
             } else if (appState.wifiConnected && !appState.wsConnected && !prevWifi) {
@@ -1640,8 +1671,9 @@ void loop() {
             }
         }
 
-        // WS just connected — happy face + send device info
+        // WS just connected — server connected clip + happy face + send device info
         if (appState.wsConnected && !prevWs) {
+            ui_audio::play(ui_audio::Clip::SERVER_CONNECTED);
             // Start BLE advertising here (after WS is confirmed connected) so the
             // phone can scan for "Aksabot". Deferred from setup() to avoid NimBLE
             // init disrupting the WS TCP handshake.
@@ -1704,6 +1736,12 @@ void loop() {
         idleSinceMs = 0;
     }
 #endif
+
+    // Consume STT fail clip request from audio task (Core 0)
+    if (pendingSttFailAudio) {
+        pendingSttFailAudio = false;
+        resilience_audio::playClip(resilience_audio::Clip::STT_FAIL);
+    }
 
     vTaskDelay(pdMS_TO_TICKS(10));
 }

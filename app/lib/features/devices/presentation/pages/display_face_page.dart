@@ -6,7 +6,9 @@ import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../domain/entities/device_entity.dart';
 import '../../domain/repositories/devices_repository.dart';
 
-/// Display & Face settings — face style (ORBIT / NOVA) and idle display mode.
+/// Display & Behavior — face style, idle display mode, idle chat/animations,
+/// and motion settings. Merged from the former DisplayFacePage,
+/// IdlePersonalityPage, and MotionSettingsPage.
 class DisplayFacePage extends StatefulWidget {
   final String deviceId;
   const DisplayFacePage({super.key, required this.deviceId});
@@ -20,11 +22,24 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
 
   bool _loading = true;
   bool _saving = false;
+  bool _dirty = false;
   String? _error;
-  Device? _device;
 
+  // ── Display settings ──────────────────────────────────────────────────────
   String _faceStyle = 'nova';
   String _idleDisplayMode = 'face';
+
+  // ── Idle behavior settings ────────────────────────────────────────────────
+  bool _idleChatEnabled = true;
+  String _idleChatFrequency = 'normal';
+  String _idleAnimationSpeed = 'normal';
+
+  // Server copies for dirty detection
+  String _serverFaceStyle = 'nova';
+  String _serverIdleDisplayMode = 'face';
+  bool _serverChatEnabled = true;
+  String _serverChatFrequency = 'normal';
+  String _serverAnimationSpeed = 'normal';
 
   @override
   void initState() {
@@ -44,31 +59,75 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
         _error = failure.message;
         _loading = false;
       }),
-      (device) {
-        final s = device.settingsJson;
-        final fs = s['face_style'] as String?;
-        final idm = s['idle_display_mode'] as String?;
-        setState(() {
-          _device = device;
-          _faceStyle = (fs == 'orbit' || fs == 'nova') ? fs! : 'nova';
-          _idleDisplayMode =
-              (idm == 'face' || idm == 'clock' || idm == 'status')
-                  ? idm!
-                  : 'face';
-          _loading = false;
-        });
-      },
+      _applyFromServer,
     );
+  }
+
+  void _applyFromServer(Device device) {
+    final s = device.settingsJson;
+
+    final fs = s['face_style'] as String?;
+    final idm = s['idle_display_mode'] as String?;
+    final chatEnabled = s['idle_chat_enabled'] as bool? ?? true;
+    final chatFreq = s['idle_chat_frequency'] as String? ?? 'normal';
+    final animSpeed = s['idle_animation_speed'] as String? ?? 'normal';
+
+    final faceStyle = (fs == 'orbit' || fs == 'nova') ? fs! : 'nova';
+    final idleMode =
+        (idm == 'face' || idm == 'clock' || idm == 'status') ? idm! : 'face';
+
+    setState(() {
+      _faceStyle = faceStyle;
+      _idleDisplayMode = idleMode;
+      _idleChatEnabled = chatEnabled;
+      _idleChatFrequency = chatFreq;
+      _idleAnimationSpeed = animSpeed;
+
+      _serverFaceStyle = faceStyle;
+      _serverIdleDisplayMode = idleMode;
+      _serverChatEnabled = chatEnabled;
+      _serverChatFrequency = chatFreq;
+      _serverAnimationSpeed = animSpeed;
+
+      _dirty = false;
+      _loading = false;
+    });
+  }
+
+  void _markDirty() {
+    final isDirty = _faceStyle != _serverFaceStyle ||
+        _idleDisplayMode != _serverIdleDisplayMode ||
+        _idleChatEnabled != _serverChatEnabled ||
+        _idleChatFrequency != _serverChatFrequency ||
+        _idleAnimationSpeed != _serverAnimationSpeed;
+    if (isDirty != _dirty) setState(() => _dirty = isDirty);
   }
 
   Future<void> _save() async {
     if (_saving) return;
     setState(() => _saving = true);
 
-    final result = await _devicesRepo.updateSettings(widget.deviceId, {
-      'face_style': _faceStyle,
-      'idle_display_mode': _idleDisplayMode,
-    });
+    final patch = <String, dynamic>{};
+    if (_faceStyle != _serverFaceStyle) patch['face_style'] = _faceStyle;
+    if (_idleDisplayMode != _serverIdleDisplayMode) {
+      patch['idle_display_mode'] = _idleDisplayMode;
+    }
+    if (_idleChatEnabled != _serverChatEnabled) {
+      patch['idle_chat_enabled'] = _idleChatEnabled;
+    }
+    if (_idleChatFrequency != _serverChatFrequency) {
+      patch['idle_chat_frequency'] = _idleChatFrequency;
+    }
+    if (_idleAnimationSpeed != _serverAnimationSpeed) {
+      patch['idle_animation_speed'] = _idleAnimationSpeed;
+    }
+
+    if (patch.isEmpty) {
+      setState(() => _saving = false);
+      return;
+    }
+
+    final result = await _devicesRepo.updateSettings(widget.deviceId, patch);
     if (!mounted) return;
 
     result.fold(
@@ -81,7 +140,7 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
         );
       },
       (device) {
-        setState(() => _device = device);
+        _applyFromServer(device);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Settings saved')),
         );
@@ -98,14 +157,14 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
 
     if (_loading) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Display & Face')),
+        appBar: AppBar(title: const Text('Display & Behavior')),
         body: const AppLoadingIndicator(),
       );
     }
 
     if (_error != null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Display & Face')),
+        appBar: AppBar(title: const Text('Display & Behavior')),
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -125,96 +184,227 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Display & Face'),
-        actions: [
-          if (_saving)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+      appBar: AppBar(title: const Text('Display & Behavior')),
+      body: Column(
         children: [
-          // ── Face preview ──────────────────────────────────────────────
-          _FacePreview(faceStyle: _faceStyle),
-          const SizedBox(height: AppConstants.spacingXxl),
-
-          // ── Face Style ────────────────────────────────────────────────
-          Text('Face Style', style: theme.textTheme.titleMedium),
-          const SizedBox(height: AppConstants.spacingSm),
-          Text(
-            'Changes how Aksa\'s eyes look on the display.',
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: colors.onSurfaceVariant),
-          ),
-          const SizedBox(height: AppConstants.spacingMd),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(AppConstants.spacingLg),
-              child: Column(
-                children: [
-                  _StyleOption(
-                    value: 'nova',
-                    groupValue: _faceStyle,
-                    title: 'Nova',
-                    subtitle: 'Flat rounded-rectangle eyes — modern, geometric',
-                    onTap: () => setState(() => _faceStyle = 'nova'),
-                    preview: _EyePreview.rounded(),
-                  ),
-                  const Divider(height: AppConstants.spacingXxl),
-                  _StyleOption(
-                    value: 'orbit',
-                    groupValue: _faceStyle,
-                    title: 'Orbit',
-                    subtitle: 'Classic circle eyes with pupil — friendly, cartoon',
-                    onTap: () => setState(() => _faceStyle = 'orbit'),
-                    preview: _EyePreview.circle(),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: AppConstants.spacingXxl),
-
-          // ── Idle Display Mode ─────────────────────────────────────────
-          Text('Idle Display Mode', style: theme.textTheme.titleMedium),
-          const SizedBox(height: AppConstants.spacingSm),
-          Text(
-            'What Aksa shows on screen when inactive.',
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: colors.onSurfaceVariant),
-          ),
-          const SizedBox(height: AppConstants.spacingMd),
-          Card(
-            clipBehavior: Clip.antiAlias,
-            child: Column(
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               children: [
-                for (final option in _idleModeOptions)
-                  _IdleModeRow(
-                    value: option.$1,
-                    groupValue: _idleDisplayMode,
-                    label: option.$2,
-                    subtitle: option.$3,
-                    icon: option.$4,
-                    onTap: () => setState(() => _idleDisplayMode = option.$1),
+                // ── Face preview ──────────────────────────────────────
+                _FacePreview(faceStyle: _faceStyle),
+                const SizedBox(height: AppConstants.spacingXxl),
+
+                // ── Face Style ────────────────────────────────────────
+                Text('Face Style', style: theme.textTheme.titleMedium),
+                const SizedBox(height: AppConstants.spacingXxs),
+                Text(
+                  'Changes how Aksa\'s eyes look on the display.',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: colors.onSurfaceVariant),
+                ),
+                const SizedBox(height: AppConstants.spacingMd),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppConstants.spacingLg),
+                    child: Column(
+                      children: [
+                        _StyleOption(
+                          value: 'nova',
+                          groupValue: _faceStyle,
+                          title: 'Nova',
+                          subtitle:
+                              'Flat rounded-rectangle eyes — modern, geometric',
+                          onTap: () {
+                            setState(() => _faceStyle = 'nova');
+                            _markDirty();
+                          },
+                          preview: _EyePreview.rounded(),
+                        ),
+                        const Divider(height: AppConstants.spacingXxl),
+                        _StyleOption(
+                          value: 'orbit',
+                          groupValue: _faceStyle,
+                          title: 'Orbit',
+                          subtitle:
+                              'Classic circle eyes with pupil — friendly, cartoon',
+                          onTap: () {
+                            setState(() => _faceStyle = 'orbit');
+                            _markDirty();
+                          },
+                          preview: _EyePreview.circle(),
+                        ),
+                      ],
+                    ),
                   ),
+                ),
+                const SizedBox(height: AppConstants.spacingXxl),
+
+                // ── Idle Display Mode ─────────────────────────────────
+                Text('Idle Display Mode', style: theme.textTheme.titleMedium),
+                const SizedBox(height: AppConstants.spacingXxs),
+                Text(
+                  'What Aksa shows on screen when inactive.',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: colors.onSurfaceVariant),
+                ),
+                const SizedBox(height: AppConstants.spacingMd),
+                Card(
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      for (final option in _idleModeOptions)
+                        _IdleModeRow(
+                          value: option.$1,
+                          groupValue: _idleDisplayMode,
+                          label: option.$2,
+                          subtitle: option.$3,
+                          icon: option.$4,
+                          onTap: () {
+                            setState(() => _idleDisplayMode = option.$1);
+                            _markDirty();
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppConstants.spacingXxl),
+
+                // ── Idle Behavior ─────────────────────────────────────
+                Text('Idle Behavior', style: theme.textTheme.titleMedium),
+                const SizedBox(height: AppConstants.spacingXxs),
+                Text(
+                  'How Aksa behaves when no one is talking to it.',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: colors.onSurfaceVariant),
+                ),
+                const SizedBox(height: AppConstants.spacingMd),
+                Card(
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      SwitchListTile(
+                        title: const Text('Chat when idle'),
+                        subtitle: const Text(
+                          'Random fun facts, thoughts, and roasts',
+                        ),
+                        value: _idleChatEnabled,
+                        onChanged: (v) {
+                          setState(() => _idleChatEnabled = v);
+                          _markDirty();
+                        },
+                      ),
+                      if (_idleChatEnabled) ...[
+                        const Divider(height: 1),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'Chat frequency',
+                                  style: theme.textTheme.bodyLarge,
+                                ),
+                              ),
+                              DropdownButton<String>(
+                                value: _idleChatFrequency,
+                                underline: const SizedBox.shrink(),
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 'rare',
+                                    child: Text('Rare (15-25 min)'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'normal',
+                                    child: Text('Normal (8-15 min)'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'frequent',
+                                    child: Text('Often (3-8 min)'),
+                                  ),
+                                ],
+                                onChanged: (v) {
+                                  if (v == null) return;
+                                  setState(() => _idleChatFrequency = v);
+                                  _markDirty();
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      const Divider(height: 1),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Animation speed',
+                                style: theme.textTheme.bodyLarge,
+                              ),
+                            ),
+                            DropdownButton<String>(
+                              value: _idleAnimationSpeed,
+                              underline: const SizedBox.shrink(),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'slow',
+                                  child: Text('Slow (15-30s)'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'normal',
+                                  child: Text('Normal (8-20s)'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'fast',
+                                  child: Text('Fast (3-10s)'),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v == null) return;
+                                setState(() => _idleAnimationSpeed = v);
+                                _markDirty();
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppConstants.spacingXxxl),
               ],
             ),
           ),
-          const SizedBox(height: AppConstants.spacingXxl),
 
-          FilledButton(
-            onPressed: _saving ? null : _save,
-            child: const Text('Save Settings'),
-          ),
-          const SizedBox(height: AppConstants.spacingXxxl),
+          // ── Sticky save bar ───────────────────────────────────────
+          if (_dirty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _saving ? null : _save,
+                  child: _saving
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('Save'),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -226,10 +416,15 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
 const _idleModeOptions = [
   ('face', 'Face', 'Animated face — the default', Icons.face_rounded),
   ('clock', 'Clock', 'Large time and date display', Icons.access_time_rounded),
-  ('status', 'Status', 'Connection info and system stats', Icons.bar_chart_rounded),
+  (
+    'status',
+    'Status',
+    'Connection info and system stats',
+    Icons.bar_chart_rounded
+  ),
 ];
 
-// ── Face preview widget ───────────────────────────────────────────────────────
+// ── Face preview ──────────────────────────────────────────────────────────────
 
 class _FacePreview extends StatelessWidget {
   final String faceStyle;
@@ -243,7 +438,7 @@ class _FacePreview extends StatelessWidget {
     return Card(
       color: Colors.black,
       child: SizedBox(
-        height: 140,
+        height: 120,
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -262,9 +457,9 @@ class _FacePreview extends StatelessWidget {
                   ],
                 ],
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 14),
               Container(
-                width: 40,
+                width: 36,
                 height: 3,
                 decoration: BoxDecoration(
                   color: colors.primary.withValues(alpha: 0.6),
@@ -305,10 +500,7 @@ class _CircleEye extends StatelessWidget {
     return Container(
       width: 26,
       height: 26,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-      ),
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
       child: Center(
         child: Container(
           width: 8,
@@ -354,11 +546,7 @@ class _StyleOption extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
           children: [
-            Radio<String>(
-              value: value,
-              groupValue: groupValue,
-              onChanged: (_) => onTap(),
-            ),
+            _RadioDot(selected: selected),
             const SizedBox(width: AppConstants.spacingSm),
             preview,
             const SizedBox(width: AppConstants.spacingMd),
@@ -411,7 +599,8 @@ class _EyePreview extends StatelessWidget {
         children: [
           if (rounded) ...[
             Container(
-              width: 14, height: 9,
+              width: 14,
+              height: 9,
               decoration: BoxDecoration(
                 color: color,
                 borderRadius: BorderRadius.circular(2),
@@ -419,7 +608,8 @@ class _EyePreview extends StatelessWidget {
             ),
             const SizedBox(width: 6),
             Container(
-              width: 14, height: 9,
+              width: 14,
+              height: 9,
               decoration: BoxDecoration(
                 color: color,
                 borderRadius: BorderRadius.circular(2),
@@ -427,12 +617,14 @@ class _EyePreview extends StatelessWidget {
             ),
           ] else ...[
             Container(
-              width: 11, height: 11,
+              width: 11,
+              height: 11,
               decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             ),
             const SizedBox(width: 6),
             Container(
-              width: 11, height: 11,
+              width: 11,
+              height: 11,
               decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             ),
           ],
@@ -464,19 +656,52 @@ class _IdleModeRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final selected = value == groupValue;
 
-    return RadioListTile<String>(
-      value: value,
-      groupValue: groupValue,
-      onChanged: (_) => onTap(),
-      secondary: Icon(icon, color: theme.colorScheme.primary),
+    return ListTile(
+      onTap: onTap,
+      leading: Icon(icon, color: theme.colorScheme.primary),
       title: Text(label),
       subtitle: Text(
         subtitle,
         style: theme.textTheme.bodySmall
             ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
       ),
-      controlAffinity: ListTileControlAffinity.trailing,
+      trailing: _RadioDot(selected: selected),
+    );
+  }
+}
+
+// ── Radio dot indicator (replaces deprecated Radio groupValue API) ─────────────
+
+class _RadioDot extends StatelessWidget {
+  final bool selected;
+  const _RadioDot({required this.selected});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    final outline = Theme.of(context).colorScheme.outline;
+
+    return Container(
+      width: 20,
+      height: 20,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: selected ? color : outline, width: 2),
+      ),
+      child: selected
+          ? Center(
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: color,
+                ),
+              ),
+            )
+          : null,
     );
   }
 }

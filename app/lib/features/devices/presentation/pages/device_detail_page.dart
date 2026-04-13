@@ -81,7 +81,7 @@ class _DeviceDetailView extends StatelessWidget {
                         ],
                       ),
                     )
-                  : _DashboardBody(device: device),
+                  : DeviceDashboardBody(device: device),
         );
       },
     );
@@ -123,9 +123,9 @@ class _DeviceDetailView extends StatelessWidget {
 // Dashboard body
 // ---------------------------------------------------------------------------
 
-class _DashboardBody extends StatelessWidget {
+class DeviceDashboardBody extends StatelessWidget {
   final Device device;
-  const _DashboardBody({required this.device});
+  const DeviceDashboardBody({super.key, required this.device});
 
   @override
   Widget build(BuildContext context) {
@@ -205,13 +205,8 @@ class _DashboardBody extends StatelessWidget {
               route: '/devices/$id/voice',
             ),
             _SettingsRowData(
-              icon: Icons.face_rounded,
-              label: 'Personality',
-              route: '/devices/$id/personality',
-            ),
-            _SettingsRowData(
               icon: Icons.monitor_rounded,
-              label: 'Display & Face',
+              label: 'Display & Behavior',
               route: '/devices/$id/display',
             ),
             _SettingsRowData(
@@ -240,7 +235,7 @@ class _DashboardBody extends StatelessWidget {
             ),
             _SettingsRowData(
               icon: Icons.bar_chart_rounded,
-              label: 'Stats & History',
+              label: 'Stats & Diagnostics',
               route: '/devices/$id/stats',
             ),
           ],

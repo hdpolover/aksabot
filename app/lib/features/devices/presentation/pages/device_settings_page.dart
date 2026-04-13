@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
-import '../../../../core/widgets/status_dot.dart';
-import '../../domain/entities/device_entity.dart';
 import '../../domain/repositories/devices_repository.dart';
 import 'ble_provisioning_page.dart';
 
@@ -24,7 +22,6 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
   bool _loading = true;
   bool _saving = false;
   String? _error;
-  Device? _device;
 
   double _volume = 70;
   double _brightness = 70;
@@ -58,7 +55,6 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
         final tr = s['display_transcript'] as bool?;
         final minutes = timeoutSec != null ? (timeoutSec ~/ 60) : 30;
         setState(() {
-          _device = device;
           _volume = vol ?? 70;
           _brightness = br ?? 70;
           _showTranscript = tr ?? false;
@@ -95,9 +91,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
           ),
         );
       },
-      (device) {
-        // Update device ref for future diff checks, but keep local slider values
-        setState(() => _device = device);
+      (_) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Settings saved')),
         );
@@ -139,9 +133,6 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
         ),
       );
     }
-
-    final device = _device!;
-    final online = device.isOnline;
 
     return Scaffold(
       appBar: AppBar(
@@ -266,99 +257,8 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
               ),
             ),
           ),
-          const SizedBox(height: AppConstants.spacingXxl),
-
-          // Device info
-          Text('Device Info', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Card(
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                ListTile(
-                  title: const Text('Status'),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      StatusDot(
-                        variant: online
-                            ? StatusDotVariant.online
-                            : StatusDotVariant.offline,
-                      ),
-                      const SizedBox(width: AppConstants.spacingSm),
-                      Text(
-                        online ? 'Online' : 'Offline',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colors.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  title: const Text('Wi-Fi signal'),
-                  trailing: device.wifiRssi != null
-                      ? Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _wifiIcon(device.wifiRssi!),
-                              size: 18,
-                              color: _wifiColor(device.wifiRssi!, colors),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              _wifiLabel(device.wifiRssi!),
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color:
-                                    _wifiColor(device.wifiRssi!, colors),
-                              ),
-                            ),
-                          ],
-                        )
-                      : Text(
-                          online ? 'Connected' : 'N/A',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colors.onSurfaceVariant,
-                          ),
-                        ),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  title: const Text('Firmware'),
-                  trailing: Text(
-                    device.firmwareVersion ?? 'N/A',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colors.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
-  }
-
-  static String _wifiLabel(int rssi) {
-    if (rssi > -50) return 'Excellent';
-    if (rssi > -60) return 'Good';
-    if (rssi > -70) return 'Fair';
-    if (rssi > -80) return 'Weak';
-    return 'Poor';
-  }
-
-  static IconData _wifiIcon(int rssi) {
-    if (rssi > -60) return Icons.wifi;
-    if (rssi > -70) return Icons.wifi_2_bar;
-    return Icons.wifi_1_bar;
-  }
-
-  static Color _wifiColor(int rssi, ColorScheme colors) {
-    if (rssi > -60) return colors.primary;
-    if (rssi > -70) return colors.tertiary;
-    return colors.error;
   }
 }

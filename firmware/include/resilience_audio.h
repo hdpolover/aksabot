@@ -38,4 +38,10 @@ bool getClip(Clip clip, const uint8_t** data, size_t* len);
 /// Get the file name for a clip (without path).
 const char* clipFileName(Clip clip);
 
+/// Decode and play a clip directly to the speaker.
+/// Parses the Ogg Opus container loaded at init time and plays each packet.
+/// Blocks for the clip duration. Safe to call from Core 1.
+/// Skips silently if the clip is not loaded or BotState is SPEAKING/LISTENING.
+void playClip(Clip clip);
+
 }  // namespace resilience_audio

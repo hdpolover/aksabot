@@ -15,12 +15,8 @@ import '../../features/devices/presentation/pages/presence_settings_page.dart';
 import '../../features/devices/presentation/pages/display_face_page.dart';
 import '../../features/devices/presentation/pages/voice_audio_page.dart';
 import '../../features/devices/presentation/pages/firmware_update_page.dart';
-import '../../features/devices/presentation/pages/diagnostics_page.dart';
 import '../../features/devices/presentation/pages/integrations_page.dart';
-import '../../features/devices/presentation/pages/motion_settings_page.dart';
 import '../../features/devices/presentation/pages/device_settings_page.dart';
-import '../../features/devices/presentation/pages/idle_personality_page.dart';
-import '../../features/devices/presentation/pages/mobility_settings_page.dart';
 import '../../features/conversations/presentation/pages/conversations_page.dart';
 import '../../features/memories/presentation/pages/memories_page.dart';
 import '../../features/scheduler/presentation/pages/reminders_page.dart';
@@ -127,12 +123,6 @@ GoRouter createRouter(AuthBloc authBloc) {
 List<RouteBase> _deviceSubRoutes() {
   return [
     GoRoute(
-      path: 'personality',
-      builder: (context, state) => IdlePersonalityPage(
-        deviceId: state.pathParameters['deviceId']!,
-      ),
-    ),
-    GoRoute(
       path: 'reminders',
       builder: (context, state) => RemindersPage(
         deviceId: state.pathParameters['deviceId']!,
@@ -187,26 +177,8 @@ List<RouteBase> _deviceSubRoutes() {
       ),
     ),
     GoRoute(
-      path: 'diagnostics',
-      builder: (context, state) => DiagnosticsPage(
-        deviceId: state.pathParameters['deviceId']!,
-      ),
-    ),
-    GoRoute(
       path: 'integrations',
       builder: (context, state) => IntegrationsPage(
-        deviceId: state.pathParameters['deviceId']!,
-      ),
-    ),
-    GoRoute(
-      path: 'motion',
-      builder: (context, state) => MotionSettingsPage(
-        deviceId: state.pathParameters['deviceId']!,
-      ),
-    ),
-    GoRoute(
-      path: 'mobility',
-      builder: (context, state) => MobilitySettingsPage(
         deviceId: state.pathParameters['deviceId']!,
       ),
     ),

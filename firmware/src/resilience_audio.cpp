@@ -1,5 +1,9 @@
 #include "resilience_audio.h"
 #include "sd_storage.h"
+#include "opus_codec.h"
+#include "audio_io.h"
+#include "state.h"
+#include "config.h"
 #include <SD_MMC.h>
 #define SD SD_MMC
 #include <Arduino.h>
@@ -101,4 +105,70 @@ const char* resilience_audio::clipFileName(Clip clip) {
     uint8_t idx = clipIndex(clip);
     if (idx >= CLIP_COUNT) return "unknown";
     return CLIP_FILES[idx];
+}
+
+void resilience_audio::playClip(Clip clip) {
+    if (appState.botState == BotState::SPEAKING)  return;
+    if (appState.botState == BotState::LISTENING) return;
+
+    const uint8_t* data;
+    size_t len;
+    if (!getClip(clip, &data, &len)) {
+        Serial.printf("[Resilience] Clip not loaded: %s\n", clipFileName(clip));
+        return;
+    }
+
+    // Parse Ogg Opus container and play each audio packet.
+    // The files on SD are standard Ogg Opus (ffmpeg output) — we need to
+    // skip the two header pages and extract raw Opus packets from the rest.
+    static int16_t pcm[OPUS_FRAME_SAMPLES];
+    static uint8_t pktBuf[512];
+
+    size_t pos     = 0;
+    int    pageNum = 0;
+    size_t pktLen  = 0;
+
+    while (pos + 27 <= len) {
+        if (memcmp(data + pos, "OggS", 4) != 0) break;
+
+        uint8_t numSegs      = data[pos + 26];
+        size_t  segTableBase = pos + 27;
+        if (segTableBase + numSegs > len) break;
+
+        size_t pageDataSize = 0;
+        for (uint8_t i = 0; i < numSegs; i++) pageDataSize += data[segTableBase + i];
+
+        size_t pageDataBase = segTableBase + numSegs;
+        if (pageDataBase + pageDataSize > len) break;
+
+        if (pageNum >= 2) {
+            const uint8_t* segTable = data + segTableBase;
+            const uint8_t* pageData = data + pageDataBase;
+            size_t          dataPos = 0;
+
+            for (uint8_t i = 0; i < numSegs; i++) {
+                if (appState.botState == BotState::SPEAKING) return;
+
+                uint8_t segSize = segTable[i];
+                if (pktLen + segSize <= sizeof(pktBuf)) {
+                    memcpy(pktBuf + pktLen, pageData + dataPos, segSize);
+                    pktLen += segSize;
+                } else {
+                    pktLen = 0;  // overflow — drop packet
+                }
+                dataPos += segSize;
+
+                if (segSize < 255) {
+                    if (pktLen > 0) {
+                        int samples = opus_codec::decode(pktBuf, pktLen, pcm, OPUS_FRAME_SAMPLES);
+                        if (samples > 0) audio_io::writeSpeaker(pcm, samples);
+                    }
+                    pktLen = 0;
+                }
+            }
+        }
+
+        pos = pageDataBase + pageDataSize;
+        pageNum++;
+    }
 }

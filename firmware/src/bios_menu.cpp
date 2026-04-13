@@ -3,6 +3,7 @@
 #include "lgfx_config.h"
 #include "touch.h"
 #include "audio_io.h"
+#include "ui_audio.h"
 #include "nvs_store.h"
 #include "state.h"
 #include "sd_storage.h"
@@ -113,7 +114,10 @@ static int waitTapY() {
             while (tft.getTouch(&tp, 1) > 0) delay(15);
             delay(50);
 
-            if (tapY >= 0) return tapY;
+            if (tapY >= 0) {
+                ui_audio::play(ui_audio::Clip::TAP);
+                return tapY;
+            }
         }
 
         delay(20);

@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 
-import '../../domain/entities/device_entity.dart';
-import '../../domain/repositories/devices_repository.dart';
-import '../../../scheduler/domain/repositories/scheduler_repository.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/network/api_client.dart';
+import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
-import '../../../../core/widgets/status_dot.dart';
+import '../../../scheduler/domain/repositories/scheduler_repository.dart';
+import '../../domain/repositories/devices_repository.dart';
 
-/// Device statistics screen — wired to GET /devices/:id/stats.
+/// Stats & Diagnostics — usage stats, connection test, audio pipeline,
+/// device logs, and factory reset. Merged from the former DeviceStatsPage
+/// and DiagnosticsPage which duplicated the same stats data.
 class DeviceStatsPage extends StatefulWidget {
   final String deviceId;
   const DeviceStatsPage({super.key, required this.deviceId});
@@ -19,24 +21,27 @@ class DeviceStatsPage extends StatefulWidget {
 class _DeviceStatsPageState extends State<DeviceStatsPage> {
   late final DevicesRepository _devicesRepo;
   late final SchedulerRepository _schedulerRepo;
+  late final ApiClient _apiClient;
 
+  // Usage stats
   bool _isLoading = true;
   String? _error;
-
-  Device? _device;
-
   int _conversationsToday = 0;
   int _totalConversations = 0;
   int _totalMemories = 0;
   int _poolSize = 0;
-
   bool _isRefilling = false;
+
+  // Connection test
+  bool _testing = false;
+  Map<String, _TestResult>? _testResults;
 
   @override
   void initState() {
     super.initState();
     _devicesRepo = sl<DevicesRepository>();
     _schedulerRepo = sl<SchedulerRepository>();
+    _apiClient = sl<ApiClient>();
     _loadAll();
   }
 
@@ -46,40 +51,22 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
       _error = null;
     });
 
-    // Load device info and stats in parallel
-    final results = await Future.wait([
-      _devicesRepo.getDevice(widget.deviceId),
-      _devicesRepo.getStats(widget.deviceId),
-    ]);
+    final result = await _devicesRepo.getStats(widget.deviceId);
+    if (!mounted) return;
 
-    final deviceResult = results[0];
-    final statsResult = results[1];
-
-    // Device info — needed for System section
-    deviceResult.fold(
-      (_) => null, // best-effort, non-fatal
-      (device) => _device = device as Device,
-    );
-
-    // Stats — if this fails, show error
-    statsResult.fold(
-      (failure) {
-        setState(() {
-          _error = failure.message;
-          _isLoading = false;
-        });
-        return;
-      },
-      (stats) {
-        setState(() {
-          final s = stats as Map<String, dynamic>;
-          _conversationsToday = s['conversationsToday'] as int? ?? 0;
-          _totalConversations = s['totalConversations'] as int? ?? 0;
-          _totalMemories = s['totalMemories'] as int? ?? 0;
-          _poolSize = s['poolSize'] as int? ?? 0;
-          _isLoading = false;
-        });
-      },
+    result.fold(
+      (failure) => setState(() {
+        _error = failure.message;
+        _isLoading = false;
+      }),
+      (stats) => setState(() {
+        final s = stats;
+        _conversationsToday = s['conversationsToday'] as int? ?? 0;
+        _totalConversations = s['totalConversations'] as int? ?? 0;
+        _totalMemories = s['totalMemories'] as int? ?? 0;
+        _poolSize = s['poolSize'] as int? ?? 0;
+        _isLoading = false;
+      }),
     );
   }
 
@@ -104,13 +91,64 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
     if (mounted) setState(() => _isRefilling = false);
   }
 
+  Future<void> _runTest() async {
+    setState(() {
+      _testing = true;
+      _testResults = null;
+    });
+
+    final sw = Stopwatch()..start();
+    final apiResult = await _checkBackendApi(sw);
+    final deviceResult = await _checkDeviceOnline();
+
+    if (!mounted) return;
+    setState(() {
+      _testing = false;
+      _testResults = {
+        'Backend API': apiResult,
+        'WebSocket (lastSeen)': deviceResult,
+      };
+    });
+  }
+
+  Future<_TestResult> _checkBackendApi(Stopwatch sw) async {
+    try {
+      sw.reset();
+      await _apiClient.get('/auth/me');
+      return _TestResult(true, '${sw.elapsedMilliseconds}ms');
+    } catch (_) {
+      return const _TestResult(false, 'unreachable');
+    }
+  }
+
+  Future<_TestResult> _checkDeviceOnline() async {
+    final result = await _devicesRepo.getDevice(widget.deviceId);
+    return result.fold(
+      (_) => const _TestResult(false, 'fetch failed'),
+      (device) {
+        if (device.lastSeenAt == null) return const _TestResult(false, 'never seen');
+        final diff = DateTime.now().difference(device.lastSeenAt!);
+        final ago = _formatAgo(diff);
+        return device.isOnline
+            ? _TestResult(true, 'online ($ago)')
+            : _TestResult(false, 'offline ($ago ago)');
+      },
+    );
+  }
+
+  String _formatAgo(Duration d) {
+    if (d.inSeconds < 60) return '${d.inSeconds}s';
+    if (d.inMinutes < 60) return '${d.inMinutes}m';
+    return '${d.inHours}h';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Stats & History')),
+      appBar: AppBar(title: const Text('Stats & Diagnostics')),
       body: _isLoading
           ? const AppLoadingIndicator()
           : _error != null
@@ -132,8 +170,8 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                     children: [
-                      // ── Conversations ──────────────────────────────────
-                      Text('Conversations', style: theme.textTheme.titleMedium),
+                      // ── Usage ──────────────────────────────────────────
+                      Text('Usage', style: theme.textTheme.titleMedium),
                       const SizedBox(height: 8),
                       Row(
                         children: [
@@ -156,11 +194,7 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 24),
-
-                      // ── Memory & Pool ──────────────────────────────────
-                      Text('Memory & Pool', style: theme.textTheme.titleMedium),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 12),
                       Row(
                         children: [
                           Expanded(
@@ -196,40 +230,144 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
                           trailing: FilledButton.tonal(
                             onPressed: _isRefilling ? null : _refillPool,
                             style: FilledButton.styleFrom(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 12),
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
                             ),
-                            child:
-                                Text(_isRefilling ? 'Refilling...' : 'Refill'),
+                            child: Text(_isRefilling ? 'Refilling...' : 'Refill'),
                           ),
                         ),
                       ),
                       const SizedBox(height: 24),
 
-                      // ── Device ─────────────────────────────────────────
-                      Text('Device', style: theme.textTheme.titleMedium),
+                      // ── Connection Test ────────────────────────────────
+                      Text('Connection Test', style: theme.textTheme.titleMedium),
                       const SizedBox(height: 8),
                       Card(
-                        clipBehavior: Clip.antiAlias,
-                        child: Column(
-                          children: [
-                            _buildStatusTile(theme, colors),
-                            const Divider(height: 1),
-                            _InfoTile(
-                              label: 'Uptime',
-                              value: _formatUptime(),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (_testResults != null)
+                                ..._testResults!.entries.map(
+                                  (e) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          e.value.passed
+                                              ? Icons.check_circle
+                                              : Icons.cancel,
+                                          color: e.value.passed
+                                              ? Theme.of(context)
+                                                  .extension<AppColors>()!
+                                                  .success
+                                              : colors.error,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(child: Text(e.key)),
+                                        Text(
+                                          e.value.detail,
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                            color: colors.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              FilledButton.tonal(
+                                onPressed: _testing ? null : _runTest,
+                                child: Text(_testing ? 'Testing...' : 'Run Test'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // ── Audio Pipeline ─────────────────────────────────
+                      Text('Audio Pipeline', style: theme.textTheme.titleMedium),
+                      const SizedBox(height: 8),
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              FilledButton.tonal(
+                                onPressed: () {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Audio pipeline test not yet implemented',
+                                      ),
+                                    ),
+                                  );
+                                },
+                                child: const Text(
+                                  'Test Mic \u2192 STT \u2192 LLM \u2192 TTS \u2192 Speaker',
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Last test: not run',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: colors.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // ── Device Logs ────────────────────────────────────
+                      Text('Device Logs', style: theme.textTheme.titleMedium),
+                      const SizedBox(height: 8),
+                      Card(
+                        child: Container(
+                          height: 160,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: colors.surfaceContainerLow,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: SingleChildScrollView(
+                            child: Text(
+                              'Logs are streamed from the ESP32 over WebSocket.\n'
+                              'Live log viewer requires Phase 5 firmware.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                fontFamily: 'monospace',
+                                color: colors.onSurfaceVariant,
+                              ),
                             ),
-                            const Divider(height: 1),
-                            _InfoTile(
-                              label: 'Wi-Fi signal',
-                              value: _formatRssi(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      FilledButton.tonal(
+                        onPressed: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Log export not yet implemented'),
                             ),
-                            const Divider(height: 1),
-                            _InfoTile(
-                              label: 'Firmware',
-                              value: _device?.firmwareVersion ?? '--',
-                            ),
-                          ],
+                          );
+                        },
+                        child: const Text('Export Logs'),
+                      ),
+                      const SizedBox(height: 32),
+
+                      // ── Danger Zone ────────────────────────────────────
+                      OutlinedButton.icon(
+                        onPressed: () => _confirmFactoryReset(context),
+                        icon: const Icon(Icons.restart_alt),
+                        label: const Text('Factory Reset Device'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: colors.error,
+                          side: BorderSide(color: colors.error),
+                          minimumSize: const Size(double.infinity, 48),
                         ),
                       ),
                     ],
@@ -238,51 +376,37 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
     );
   }
 
-  Widget _buildStatusTile(ThemeData theme, ColorScheme colors) {
-    final online = _device?.isOnline ?? false;
-    return ListTile(
-      title: const Text('Status'),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          StatusDot(
-            variant: online ? StatusDotVariant.online : StatusDotVariant.offline,
+  void _confirmFactoryReset(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Factory Reset'),
+        content: const Text(
+          'This will erase all device configuration, revoke its token, '
+          'and remove it from your account. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
           ),
-          const SizedBox(width: 6),
-          Text(
-            online ? 'Online' : 'Offline',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: online ? colors.primary : colors.onSurfaceVariant,
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
             ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Factory reset not yet implemented'),
+                ),
+              );
+            },
+            child: const Text('Reset'),
           ),
         ],
       ),
     );
-  }
-
-  String _formatUptime() {
-    final device = _device;
-    if (device == null || device.lastSeenAt == null) return '--';
-    if (!device.isOnline) return 'Offline';
-    final d = DateTime.now().difference(device.lastSeenAt!);
-    if (d.inDays > 0) return '${d.inDays}d ${d.inHours % 24}h';
-    if (d.inHours > 0) return '${d.inHours}h ${d.inMinutes % 60}m';
-    return '${d.inMinutes}m';
-  }
-
-  String _formatRssi() {
-    final rssi = _device?.wifiRssi;
-    if (rssi == null) return '--';
-    final label = rssi >= -50
-        ? 'Excellent'
-        : rssi >= -60
-            ? 'Good'
-            : rssi >= -70
-                ? 'Fair'
-                : rssi >= -80
-                    ? 'Weak'
-                    : 'Poor';
-    return '$label ($rssi dBm)';
   }
 }
 
@@ -332,22 +456,8 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-class _InfoTile extends StatelessWidget {
-  final String label;
-  final String value;
-  const _InfoTile({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return ListTile(
-      title: Text(label),
-      trailing: Text(
-        value,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
+class _TestResult {
+  final bool passed;
+  final String detail;
+  const _TestResult(this.passed, this.detail);
 }

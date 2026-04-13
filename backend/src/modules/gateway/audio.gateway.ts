@@ -222,7 +222,7 @@ export class AudioGateway
 
         const device = await this.persistence.getDevice(deviceId);
         const s = device?.settingsJson ?? {};
-        const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability };
+        const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability, language: (s.language as 'en' | 'id' | undefined) ?? 'en' };
         const { opusAudio, pcmAudio } = await this.aiService.synthesizeWithCache(sentence, undefined, voiceOpts);
 
         // Save debug files
@@ -338,6 +338,7 @@ export class AudioGateway
           voice: s.voice_preset,
           speed: s.voice_speed,
           stability: s.voice_stability,
+          language: (s.language as 'en' | 'id' | undefined) ?? 'en',
         };
         const { opusAudio } = await this.aiService.synthesizeWithCache(
           sentence,
@@ -415,7 +416,7 @@ export class AudioGateway
 
         const wbDevice = await this.persistence.getDevice(deviceId);
         const wbSettings = wbDevice?.settingsJson ?? {};
-        const wbVoice = { voice: wbSettings.voice_preset, speed: wbSettings.voice_speed, stability: wbSettings.voice_stability };
+        const wbVoice = { voice: wbSettings.voice_preset, speed: wbSettings.voice_speed, stability: wbSettings.voice_stability, language: (wbSettings.language as 'en' | 'id' | undefined) ?? 'en' };
         const { opusAudio } = await this.aiService.synthesizeWithCache(
           sentence,
           undefined,
@@ -502,7 +503,7 @@ export class AudioGateway
       const prompt = wakePrompts[Math.floor(Math.random() * wakePrompts.length)];
 
       const memories = await this.memoriesService.getRelevant(deviceId);
-      const systemPrompt = this.aiService['prompt'].buildSystemPrompt(memories);
+      const systemPrompt = this.aiService['prompt'].buildSystemPrompt(memories, { language: session.language });
 
       let wakeText = '';
       const stream = this.aiService['llm'].generateStream(systemPrompt, [
@@ -519,7 +520,7 @@ export class AudioGateway
       // Send as TTS audio
       const device = await this.persistence.getDevice(deviceId);
       const s = device?.settingsJson ?? {};
-      const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability };
+      const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability, language: (s.language as 'en' | 'id' | undefined) ?? 'en' };
 
       const sentences = this.splitSentences(wakeText);
 
@@ -578,7 +579,7 @@ export class AudioGateway
       const prompt = reconnectPrompts[Math.floor(Math.random() * reconnectPrompts.length)];
 
       const memories = await this.memoriesService.getRelevant(deviceId);
-      const systemPrompt = this.aiService['prompt'].buildSystemPrompt(memories);
+      const systemPrompt = this.aiService['prompt'].buildSystemPrompt(memories, { language: session.language });
 
       let text = '';
       const stream = this.aiService['llm'].generateStream(systemPrompt, [
@@ -593,7 +594,7 @@ export class AudioGateway
 
       const device = await this.persistence.getDevice(deviceId);
       const settings = device?.settingsJson ?? {};
-      const voiceOpts = { voice: settings.voice_preset, speed: settings.voice_speed, stability: settings.voice_stability };
+      const voiceOpts = { voice: settings.voice_preset, speed: settings.voice_speed, stability: settings.voice_stability, language: (settings.language as 'en' | 'id' | undefined) ?? 'en' };
 
       const sentences = this.splitSentences(text);
 
@@ -790,8 +791,10 @@ export class AudioGateway
           code: 'STT_ERROR',
           message: 'Speech recognition failed',
         });
+        // No state:update:idle — see EMPTY_TRANSCRIPT comment. Device error
+        // handler plays a clip (blocking WS task); the update would arrive late
+        // and override a user-initiated LISTENING state on quick retry.
         session.state = 'idle';
-        this.sendToDevice(deviceId, 'state:update', { state: 'idle' });
       }
     });
 
@@ -859,8 +862,16 @@ export class AudioGateway
       session.sttStream.write(pcm);
 
       if (count === 1) {
+        // Compute peak amplitude to detect silence vs actual speech.
+        // Each sample is 16-bit signed little-endian. Peak near 0 = silence;
+        // peak > 500 indicates actual audio content.
+        let peak = 0;
+        for (let i = 0; i + 1 < pcm.length; i += 2) {
+          const sample = Math.abs(pcm.readInt16LE(i));
+          if (sample > peak) peak = sample;
+        }
         this.logger.debug(
-          `First audio chunk for ${deviceId} (${session.audioFormat}): ${data.length}B → ${pcm.length}B pcm`,
+          `First audio chunk for ${deviceId} (${session.audioFormat}): ${data.length}B → ${pcm.length}B pcm, peak=${peak}`,
         );
       }
     } catch (err: any) {
@@ -914,8 +925,14 @@ export class AudioGateway
         code: 'EMPTY_TRANSCRIPT',
         message: 'Could not understand speech',
       });
+      // NOTE: do NOT send state:update:idle here. The device's error handler
+      // already sets botState=IDLE and plays the error clip synchronously (~2s,
+      // blocking the WS task). If we send state:update:idle, it arrives while
+      // the clip is playing, sits buffered, and is processed only after the
+      // clip finishes. By then the user may have pressed PTT again (LISTENING),
+      // and state:update:idle would silently reset them back to IDLE — killing
+      // the new recording without sending audio:end. Watchdog fires 8s later.
       session.state = 'idle';
-      this.sendToDevice(deviceId, 'state:update', { state: 'idle' });
       return;
     }
 
