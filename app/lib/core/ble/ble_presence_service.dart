@@ -96,14 +96,16 @@ class BlePresenceService {
     try {
       final rssiThreshold = await loadRssiThreshold();
 
+      // Scan without a name filter — Android's withNames OS-level filter silently
+      // drops packets if the name isn't in the primary advertisement (e.g. NimBLE
+      // puts it in scan response). We match by name ourselves after receiving all results.
       await FlutterBluePlus.startScan(
         timeout: const Duration(seconds: _scanDurationSec),
-        withNames: [_targetName],
       );
 
       await for (final results in FlutterBluePlus.scanResults) {
         for (final r in results) {
-          if (_isTargetDevice(r.device)) {
+          if (_isTargetDevice(r)) {
             if (bestRssi == null || r.rssi > bestRssi) {
               bestRssi = r.rssi;
             }
@@ -119,9 +121,10 @@ class BlePresenceService {
     _scheduleNextScan();
   }
 
-  bool _isTargetDevice(BluetoothDevice device) {
-    return device.platformName == _targetName ||
-        device.advName == _targetName;
+  bool _isTargetDevice(ScanResult r) {
+    return r.advertisementData.advName == _targetName ||
+        r.device.platformName == _targetName ||
+        r.device.advName == _targetName;
   }
 
   Future<void> _processScanResult(int? rssi, int threshold) async {

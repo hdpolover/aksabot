@@ -42,11 +42,13 @@ describe('ProactiveService', () => {
 
     sendToDevice = jest.fn();
 
+    const mockMoodJournal = { getRecentMoods: jest.fn().mockResolvedValue([]) };
     service = new ProactiveService(
       devicesRepo as any,
       mockLlm as any,
       mockMemories as any,
       mockSessions as any,
+      mockMoodJournal as any,
     );
     service.setSendToDevice(sendToDevice);
   });

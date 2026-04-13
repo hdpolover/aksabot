@@ -72,6 +72,12 @@ export class ProactiveService {
     this.sendToDevice = fn;
   }
 
+  private getLangInstruction(language?: 'en' | 'id'): string {
+    return language === 'id'
+      ? ' Respond in Bahasa Indonesia. Use informal/casual style (lo/gue), include English tech terms naturally. Keep the same gen-z, sarcastic, funny personality. Never use written shorthand like gk, bgt, wkwk — spell everything out, this is voice output.'
+      : ' Respond in English. Never use text abbreviations — spell everything out, this is voice output.';
+  }
+
   private getLocalHour(timezone: string = process.env.TZ || 'Asia/Jakarta'): number {
     const parts = new Intl.DateTimeFormat('en-US', {
       timeZone: timezone,
@@ -131,8 +137,9 @@ export class ProactiveService {
       const prompts = isFirstToday ? firstOfDayPrompts : reconnectPrompts;
       const prompt = prompts[Math.floor(Math.random() * prompts.length)];
 
+      const language = this.sessions.get(deviceId)?.language;
       const { text } = await this.llm.generate(
-        `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Built by Hendra. Keep it short, punchy, and real — talk like a best friend, not a filtered assistant. Never use text abbreviations — spell them out, this is voice output.`,
+        `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Built by Hendra. Keep it short, punchy, and real — talk like a best friend, not a filtered assistant.${this.getLangInstruction(language)}`,
         [
           {
             role: 'user',
@@ -194,8 +201,9 @@ export class ProactiveService {
       const hour = this.getLocalHour();
       const isLongAbsence = awayMinutes > 30;
 
+      const language = (device?.settingsJson?.language as 'en' | 'id' | undefined);
       const { text } = await this.llm.generate(
-        `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Keep it short and punchy — one sentence. Never use text abbreviations, spell them out, this is voice output.`,
+        `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Keep it short and punchy — one sentence.${this.getLangInstruction(language)}`,
         [
           {
             role: 'user',
@@ -239,8 +247,11 @@ export class ProactiveService {
       const idleMinutes = (now - lastTime) / 60_000;
       if (idleMinutes >= 180) {
         // 3+ hours idle
+        const nudgeText = session.language === 'id'
+          ? 'Bro lo ngilang ke mana? Sepi banget di sini.'
+          : "Bro you ghosting me? It's been mad quiet over here.";
         this.sendToDevice(deviceId, 'proactive:nudge', {
-          text: "Bro you ghosting me? It's been mad quiet over here.",
+          text: nudgeText,
           display: {
             expression: 'gentle',
             screenMode: 'reminder',
@@ -301,8 +312,9 @@ export class ProactiveService {
       const timeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
 
       try {
+        const language = session.language;
         const { text } = await this.llm.generate(
-          `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Keep it short and punchy. Never use text abbreviations, spell them out, this is voice output.`,
+          `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Keep it short and punchy.${this.getLangInstruction(language)}`,
           [
             {
               role: 'user',
@@ -350,8 +362,9 @@ export class ProactiveService {
             ? `The user has been working on: ${memories.map((m) => m.fact).join(', ')}`
             : '';
 
+        const language = (device?.settingsJson?.language as 'en' | 'id' | undefined);
         const { text } = await this.llm.generate(
-          `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Never use text abbreviations, spell them out, this is voice output.`,
+          `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses.${this.getLangInstruction(language)}`,
           [
             {
               role: 'user',
@@ -459,8 +472,9 @@ export class ProactiveService {
       const promptIdx = Math.floor(Math.random() * ProactiveService.IDLE_PROMPTS.length);
       const prompt = ProactiveService.IDLE_PROMPTS[promptIdx];
 
+      const language = session.language;
       const { text } = await this.llm.generate(
-        `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. You're a small device with a face — you can joke about that. Keep it short and punchy. Never use text abbreviations, spell them out, this is voice output.`,
+        `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. You're a small device with a face — you can joke about that. Keep it short and punchy.${this.getLangInstruction(language)}`,
         [
           {
             role: 'user',

@@ -51,12 +51,14 @@ describe('SchedulerService', () => {
 
     sendToDevice = jest.fn();
 
+    const mockAi = { buildSystemPrompt: jest.fn() };
     service = new SchedulerService(
       devicesRepo as any,
       mockReminderService as any,
       mockPomodoroService as any,
       mockResponsePool as any,
       mockSessions as any,
+      mockAi as any,
     );
     service.setSendToDevice(sendToDevice);
   });
