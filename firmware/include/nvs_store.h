@@ -80,6 +80,13 @@ bool isFirstBoot();
 /// Mark setup as complete. Call after first successful WiFi connection.
 bool markSetupComplete();
 
+// ── Force provisioning ────────────────────────────────
+
+/// Returns true if a remote re-provision was requested (via device:provision WS event).
+/// One-shot: cleared by setForceProvision(false) immediately after being read at boot.
+bool getForceProvision();
+bool setForceProvision(bool enabled);
+
 // ── Factory reset ─────────────────────────────────────
 
 /// Erase all stored values. Device will need re-provisioning.

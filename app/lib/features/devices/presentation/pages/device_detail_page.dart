@@ -8,6 +8,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../../../core/widgets/status_dot.dart';
 import '../../domain/entities/device_entity.dart';
+import '../../domain/repositories/devices_repository.dart';
 import '../bloc/devices_bloc.dart';
 
 class DeviceDetailPage extends StatelessWidget {
@@ -230,6 +231,8 @@ class _DashboardBody extends StatelessWidget {
             ),
           ],
         ),
+        const SizedBox(height: AppConstants.spacingMd),
+        _ReconnectRow(deviceId: id, deviceIsOnline: device.isOnline),
       ],
     );
   }
@@ -580,6 +583,438 @@ class _SettingsRowTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Reconnect row — standalone card below Device settings group
+// ---------------------------------------------------------------------------
+
+class _ReconnectRow extends StatelessWidget {
+  final String deviceId;
+  final bool deviceIsOnline;
+  const _ReconnectRow({
+    required this.deviceId,
+    required this.deviceIsOnline,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      child: Material(
+        color: cs.surfaceContainerHigh,
+        child: InkWell(
+          onTap: () => _showReconnectSheet(context),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppConstants.spacingLg,
+              vertical: AppConstants.spacingMd,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: cs.secondary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(AppConstants.radiusSm),
+                  ),
+                  child: Icon(
+                    Icons.sync_rounded,
+                    color: cs.secondary,
+                    size: AppConstants.iconMd,
+                  ),
+                ),
+                const SizedBox(width: AppConstants.spacingMd),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Reconnect Device',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        'Re-run setup if Wi-Fi or token changed',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: cs.outlineVariant,
+                  size: AppConstants.iconLg,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showReconnectSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppConstants.radiusXl),
+        ),
+      ),
+      builder: (_) => _ReconnectSheet(
+        deviceId: deviceId,
+        deviceIsOnline: deviceIsOnline,
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Reconnect bottom sheet
+// ---------------------------------------------------------------------------
+
+class _ReconnectSheet extends StatefulWidget {
+  final String deviceId;
+  final bool deviceIsOnline;
+  const _ReconnectSheet({
+    required this.deviceId,
+    required this.deviceIsOnline,
+  });
+
+  @override
+  State<_ReconnectSheet> createState() => _ReconnectSheetState();
+}
+
+class _ReconnectSheetState extends State<_ReconnectSheet> {
+  _SheetStep _step = _SheetStep.choose;
+  String? _error;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppConstants.spacingXxl,
+          AppConstants.spacingLg,
+          AppConstants.spacingXxl,
+          AppConstants.spacingXxl,
+        ),
+        child: AnimatedSwitcher(
+          duration: AppConstants.animFast,
+          child: switch (_step) {
+            _SheetStep.choose => _buildChooseStep(),
+            _SheetStep.signaling => _buildSignalingStep(),
+            _SheetStep.waitForReboot => _buildWaitStep(),
+            _SheetStep.offlineInstructions => _buildOfflineStep(),
+          },
+        ),
+      ),
+    );
+  }
+
+  // ── Step: choose path ──────────────────────────────────
+
+  Widget _buildChooseStep() {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Column(
+      key: const ValueKey('choose'),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Handle
+        Center(
+          child: Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: cs.outlineVariant,
+              borderRadius: BorderRadius.circular(AppConstants.radiusFull),
+            ),
+          ),
+        ),
+        const SizedBox(height: AppConstants.spacingXxl),
+
+        Text(
+          'Reconnect Device',
+          style: theme.textTheme.titleLarge,
+        ),
+        const SizedBox(height: AppConstants.spacingSm),
+        Text(
+          'Use this when the device lost its Wi-Fi credentials, its token changed, or you moved it to a new network.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: cs.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: AppConstants.spacingXxl),
+
+        if (widget.deviceIsOnline) ...[
+          // Online path
+          FilledButton.icon(
+            onPressed: _signalDevice,
+            icon: const Icon(Icons.wifi_tethering_rounded),
+            label: const Text('Signal device to enter setup mode'),
+          ),
+          const SizedBox(height: AppConstants.spacingSm),
+          Text(
+            'Device is online — it will reboot into BLE setup mode automatically. Keep your phone close.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppConstants.spacingXxl),
+          const Divider(),
+          const SizedBox(height: AppConstants.spacingXxl),
+        ],
+
+        // Offline / manual path
+        OutlinedButton.icon(
+          onPressed: () => setState(() => _step = _SheetStep.offlineInstructions),
+          icon: const Icon(Icons.power_settings_new_rounded),
+          label: const Text('Device is offline — manual setup'),
+        ),
+        const SizedBox(height: AppConstants.spacingSm),
+        Text(
+          'Hold the BOOT button while powering on to enter setup mode.',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+        ),
+
+        if (_error != null) ...[
+          const SizedBox(height: AppConstants.spacingMd),
+          Text(
+            _error!,
+            style: theme.textTheme.bodySmall?.copyWith(color: cs.error),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ── Step: signaling ────────────────────────────────────
+
+  Widget _buildSignalingStep() {
+    final theme = Theme.of(context);
+
+    return Column(
+      key: const ValueKey('signaling'),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Center(
+          child: SizedBox(
+            width: 48,
+            height: 48,
+            child: CircularProgressIndicator(
+              strokeWidth: 3,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+        ),
+        const SizedBox(height: AppConstants.spacingXxl),
+        Text(
+          'Signaling device...',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.titleMedium,
+        ),
+        const SizedBox(height: AppConstants.spacingSm),
+        Text(
+          'Sending setup command to your device.',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Step: wait for reboot ──────────────────────────────
+
+  Widget _buildWaitStep() {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final ac = theme.extension<AppColors>()!;
+
+    return Column(
+      key: const ValueKey('wait'),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Center(
+          child: Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: ac.successContainer,
+              borderRadius: BorderRadius.circular(AppConstants.radiusXl),
+            ),
+            child: Icon(Icons.check_rounded, color: ac.success, size: 32),
+          ),
+        ),
+        const SizedBox(height: AppConstants.spacingXxl),
+        Text(
+          'Command sent',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.titleLarge,
+        ),
+        const SizedBox(height: AppConstants.spacingSm),
+        Text(
+          'Your device is rebooting into setup mode. Wait ~5 seconds for it to restart, then tap Continue.',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+        ),
+        const SizedBox(height: AppConstants.spacingXxl),
+        FilledButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+            context.push('/devices/add');
+          },
+          child: const Text('Continue to setup'),
+        ),
+        const SizedBox(height: AppConstants.spacingSm),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+      ],
+    );
+  }
+
+  // ── Step: offline instructions ─────────────────────────
+
+  Widget _buildOfflineStep() {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Column(
+      key: const ValueKey('offline'),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Center(
+          child: Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: cs.outlineVariant,
+              borderRadius: BorderRadius.circular(AppConstants.radiusFull),
+            ),
+          ),
+        ),
+        const SizedBox(height: AppConstants.spacingXxl),
+        Text('Put device in setup mode', style: theme.textTheme.titleLarge),
+        const SizedBox(height: AppConstants.spacingMd),
+        for (final (i, text) in [
+          'Power off your Aksabot',
+          'Hold the BOOT button (small button on the board)',
+          'Power it back on — keep holding BOOT until the splash screen appears',
+          'Release BOOT — device will enter BLE setup mode',
+          'Come back here and tap Continue',
+        ].indexed) ...[
+          _InstructionRow(number: '${i + 1}', text: text),
+          if (i < 4) const SizedBox(height: AppConstants.spacingMd),
+        ],
+        const SizedBox(height: AppConstants.spacingXxl),
+        FilledButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+            context.push('/devices/add');
+          },
+          child: const Text('Continue to setup'),
+        ),
+        const SizedBox(height: AppConstants.spacingSm),
+        TextButton(
+          onPressed: () => setState(() => _step = _SheetStep.choose),
+          child: const Text('Back'),
+        ),
+      ],
+    );
+  }
+
+  // ── Actions ────────────────────────────────────────────
+
+  Future<void> _signalDevice() async {
+    setState(() {
+      _error = null;
+      _step = _SheetStep.signaling;
+    });
+
+    final repo = sl<DevicesRepository>();
+    final result = await repo.requestProvision(widget.deviceId);
+
+    if (!mounted) return;
+
+    result.fold(
+      (failure) {
+        setState(() {
+          _step = _SheetStep.choose;
+          _error = 'Failed to signal device: ${failure.message}';
+        });
+      },
+      (_) {
+        setState(() => _step = _SheetStep.waitForReboot);
+      },
+    );
+  }
+}
+
+enum _SheetStep { choose, signaling, waitForReboot, offlineInstructions }
+
+// ---------------------------------------------------------------------------
+// Instruction row (shared with offline step)
+// ---------------------------------------------------------------------------
+
+class _InstructionRow extends StatelessWidget {
+  final String number;
+  final String text;
+  const _InstructionRow({required this.number, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: cs.primaryContainer,
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              number,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: cs.onPrimaryContainer,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: AppConstants.spacingMd),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(text, style: theme.textTheme.bodyMedium),
+          ),
+        ),
+      ],
     );
   }
 }

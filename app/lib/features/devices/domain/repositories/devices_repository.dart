@@ -11,6 +11,7 @@ abstract class DevicesRepository {
   Future<Either<Failure, Device>> createDevice({String? name});
   Future<Either<Failure, Device>> updateSettings(String id, Map<String, dynamic> settings);
   Future<Either<Failure, Device>> claimByToken(String deviceToken);
+  Future<Either<Failure, void>> requestProvision(String id);
   Future<Either<Failure, void>> deleteDevice(String id);
   Future<Either<Failure, Map<String, dynamic>>> getStats(String id);
   Future<Either<Failure, Uint8List>> previewVoice(

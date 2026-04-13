@@ -54,6 +54,10 @@ class DevicesRemoteDatasource {
     return DeviceModel.fromJson(data as Map<String, dynamic>);
   }
 
+  Future<void> requestProvision(String id) async {
+    await _client.post('/devices/$id/provision', data: {});
+  }
+
   Future<void> deleteDevice(String id) async {
     await _client.delete('/devices/$id');
   }

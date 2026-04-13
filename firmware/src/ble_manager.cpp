@@ -241,6 +241,26 @@ class PresenceScanCallbacks : public NimBLEScanCallbacks {
     void onResult(const NimBLEAdvertisedDevice* device) override {
         presenceCycleTotalSeen++;
 
+        // Debug: dump every device seen so we can verify what the phone advertises.
+        // Logs address, RSSI, service UUID presence, and raw manufacturer data bytes.
+        {
+            bool hasSvc = device->isAdvertisingService(NimBLEUUID(UUID_PRESENCE_SVC));
+            if (device->haveManufacturerData()) {
+                const std::string& m = device->getManufacturerData();
+                // Print up to 6 bytes of manufacturer data as hex
+                int printLen = m.size() < 6 ? m.size() : 6;
+                char hex[20] = {};
+                for (int i = 0; i < printLen; i++) {
+                    snprintf(hex + i * 3, 4, "%02X ", (uint8_t)m[i]);
+                }
+                Serial.printf("[BLE] Device rssi=%d svcMatch=%d mfrLen=%d mfr=[%s]\n",
+                              device->getRSSI(), hasSvc, (int)m.size(), hex);
+            } else {
+                Serial.printf("[BLE] Device rssi=%d svcMatch=%d noMfr\n",
+                              device->getRSSI(), hasSvc);
+            }
+        }
+
         bool isPresenceDevice = false;
 
         // Primary check: service UUID (works on iOS and some Android builds)

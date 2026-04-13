@@ -514,6 +514,20 @@ static void onWsJson(const char* event, const char* data) {
             }
         }
     }
+    // ── Remote re-provisioning request ───────────────────
+    else if (strcmp(event, "device:provision") == 0) {
+        Serial.println("[Main] device:provision received — rebooting to setup mode");
+        // Persist the flag so the next boot skips the credentials check and
+        // runs the full BLE provisioning flow instead.
+        nvs_store::setForceProvision(true);
+        // Wake display and show a clear message before the reboot.
+        power_manager::recordInteraction();
+        face::setExpression(face::Expression::SLEEPING, 300);
+        display::setMode(display::Mode::STATUS);
+        // Brief pause so the display update renders before restart.
+        vTaskDelay(pdMS_TO_TICKS(1500));
+        esp_restart();
+    }
     else {
         Serial.printf("[Main] Unknown event: %s = %s\n", event, data);
     }
@@ -1215,7 +1229,13 @@ void setup() {
     // If no credentials: start BLE + AP for provisioning.
     // BLE is started here (before WiFi) so the Flutter app can discover the device.
     // If already configured: BLE is deferred to after WiFi connect (step 10b).
-    bool needsProvisioning = enterSetupFromBios || (!hasNvsCreds && !hasCompileCreds);
+    // forceProvision is set by the device:provision WS event (remote re-setup trigger).
+    bool forceProvision = nvs_store::getForceProvision();
+    if (forceProvision) {
+        nvs_store::setForceProvision(false);  // One-shot: clear immediately so a crash loop can't lock the device
+        Serial.println("[Main] Force-provision flag set — entering setup mode");
+    }
+    bool needsProvisioning = enterSetupFromBios || forceProvision || (!hasNvsCreds && !hasCompileCreds);
     bool provisionedViaBle = false;
 
     if (needsProvisioning) {

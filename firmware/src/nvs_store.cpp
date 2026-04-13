@@ -22,6 +22,7 @@ static const char* K_DISP_TRANSCRIPT = "disp_transcript";
 static const char* K_FACE_STYLE   = "face_style";
 static const char* K_IDLE_DISP    = "idle_disp";
 static const char* K_SETUP_DONE   = "setup_done";
+static const char* K_FORCE_PROV   = "force_prov";
 
 // ── Helpers ────────────────────────────────────────────
 
@@ -222,6 +223,18 @@ bool nvs_store::markSetupComplete() {
     bool ok = prefs.putBool(K_SETUP_DONE, true) > 0;
     if (ok) Serial.println("[NVS] Setup marked complete");
     return ok;
+}
+
+// ── Force provisioning ─────────────────────────────────
+
+bool nvs_store::getForceProvision() {
+    if (!initialized) return false;
+    return prefs.getBool(K_FORCE_PROV, false);
+}
+
+bool nvs_store::setForceProvision(bool enabled) {
+    if (!initialized) return false;
+    return prefs.putBool(K_FORCE_PROV, enabled) > 0;
 }
 
 // ── Factory reset ──────────────────────────────────────

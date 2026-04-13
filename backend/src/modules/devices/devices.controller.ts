@@ -112,6 +112,21 @@ export class DevicesController {
     };
   }
 
+  /** Signal an online device to reboot into BLE provisioning mode.
+   *  Sends `device:provision` via WebSocket so the ESP32 sets the force-provision
+   *  NVS flag and restarts — the app can then re-provision it over BLE.
+   *  Returns 204 whether or not the device is currently online (the WS send is
+   *  fire-and-forget; the app should guide the user through the offline path). */
+  @Post(':id/provision')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async requestProvision(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    await this.devicesService.findById(id, user.userId);
+    this.gateway.sendToDevice(id, 'device:provision', {});
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(

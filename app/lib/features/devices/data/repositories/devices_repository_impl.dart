@@ -67,6 +67,16 @@ class DevicesRepositoryImpl implements DevicesRepository {
   }
 
   @override
+  Future<Either<Failure, void>> requestProvision(String id) async {
+    try {
+      await _datasource.requestProvision(id);
+      return const Right(null);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
+
+  @override
   Future<Either<Failure, void>> deleteDevice(String id) async {
     try {
       await _datasource.deleteDevice(id);
