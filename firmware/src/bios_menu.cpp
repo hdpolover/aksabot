@@ -9,6 +9,7 @@
 #include "status_led.h"
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClient.h>
 #include <esp_system.h>
 #include <esp_chip_info.h>
 #include <math.h>
@@ -600,12 +601,41 @@ static void drawStatusDashboard() {
         statusLine("Wi-Fi", "Disconnected", RED);
     }
 
-    if (WiFi.isConnected() && nvs_store::hasDeviceToken()) {
-        statusLine("Server", "Ready", GREEN);
-    } else if (WiFi.isConnected()) {
-        statusLine("Server", "No token", YELLOW);
+    if (!WiFi.isConnected()) {
+        statusLine("Backend", "No Wi-Fi", DIM);
+    } else if (!nvs_store::hasDeviceToken()) {
+        statusLine("Backend", "No token", YELLOW);
     } else {
-        statusLine("Server", "No Wi-Fi", DIM);
+        // Probe TCP reachability of the backend host.
+        // This tests both DNS resolution AND network connectivity — unlike a
+        // simple "WiFi + token" check, which can pass while DNS is broken.
+        char backendHost[64] = {};
+        uint16_t backendPort = 443;
+        char backendUrl[128] = {};
+        if (nvs_store::getBackendUrl(backendUrl, sizeof(backendUrl))) {
+            // Parse host from "wss://host/path" or "https://host/path"
+            const char* p = strstr(backendUrl, "://");
+            if (p) {
+                p += 3;  // skip "://"
+                const char* slash = strchr(p, '/');
+                size_t len = slash ? (size_t)(slash - p) : strlen(p);
+                strncpy(backendHost, p, min(len, sizeof(backendHost) - 1));
+            }
+        }
+        if (backendHost[0] == '\0') {
+            strncpy(backendHost, "aksabot.hendracodes.com", sizeof(backendHost) - 1);
+        }
+
+        WiFiClient probe;
+        probe.setTimeout(3000);  // 3s timeout
+        bool reached = probe.connect(backendHost, backendPort);
+        probe.stop();
+
+        if (reached) {
+            statusLine("Backend", "Reachable", GREEN);
+        } else {
+            statusLine("Backend", "Unreachable", RED);
+        }
     }
 
     statusLine("SD Card", sd_storage::isMounted() ? "Mounted" : "No card",

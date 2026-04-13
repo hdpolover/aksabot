@@ -786,10 +786,21 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
         drawEyeClosed(s, leftEyeX,  eyeY + (int)bOff, 24, false);
         drawEyeClosed(s, rightEyeX, eyeY + (int)bOff, 24, false);
     } else if (fs.expression == face::Expression::OFFLINE) {
-        drawEyeOpen(s, leftEyeX, eyeY, leftEye, 1.0f, fs.driftX, fs.driftY);
-        drawEyeOpen(s, rightEyeX, eyeY, rightEye, 1.0f, fs.driftX, fs.driftY);
-        drawEyeX(s, leftEyeX,  eyeY, 20, pal.accent);
-        drawEyeX(s, rightEyeX, eyeY, 20, pal.accent);
+        const bool novaOff = (g_faceStyle && g_faceStyle->id == face_style::StyleId::NOVA);
+        if (novaOff) {
+            // Nova OFFLINE: same flat rounded-rect as idle, no squint, no drift.
+            // The X is drawn on top — dead-screen look.
+            drawEyeV2(s, leftEyeX,  eyeY, 1.0f, 0.0f, 0.0f, 0.0f, 68, 38);
+            drawEyeV2(s, rightEyeX, eyeY, 1.0f, 0.0f, 0.0f, 0.0f, 68, 38);
+            drawEyeX(s, leftEyeX,  eyeY, 30, pal.accent);
+            drawEyeX(s, rightEyeX, eyeY, 30, pal.accent);
+        } else {
+            // Orbit OFFLINE: plain white circle, NO pupil, X on top.
+            s.fillSmoothCircle(leftEyeX,  eyeY, leftEye.r,  TFT_WHITE);
+            s.fillSmoothCircle(rightEyeX, eyeY, rightEye.r, TFT_WHITE);
+            drawEyeX(s, leftEyeX,  eyeY, 20, pal.accent);
+            drawEyeX(s, rightEyeX, eyeY, 20, pal.accent);
+        }
     } else {
         const face_style::ExprEyeStyle& es = g_faceStyle->eyes[exprIdx];
 
@@ -861,11 +872,19 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     // Yawn overrides normal mouth when active
     if (fs.yawnAmp > 0.01f) {
         int my = MOUTH_Y + (int)(fs.bounceY * ps);
-        int ow = (int)(12 + fs.yawnAmp * 14);
-        int oh = (int)(4 + fs.yawnAmp * 20);
-        s.fillEllipse(CX, my, ow, oh, pal.mouth);
         uint16_t inside = blendRGB565(pal.accent, pal.bg, 30);
-        if (oh > 6) s.fillEllipse(CX, my, ow - 3, oh - 3, inside);
+        if (g_faceStyle && g_faceStyle->id == face_style::StyleId::NOVA) {
+            int mw = (int)(22 + fs.yawnAmp * 28);
+            int mh = (int)(8 + fs.yawnAmp * 38);
+            int cr = mw / 3;
+            s.fillRoundRect(CX - mw / 2, my - mh / 2, mw, mh, cr, pal.mouth);
+            if (mh > 10) s.fillRoundRect(CX - mw / 2 + 4, my - mh / 2 + 4, mw - 8, mh - 8, cr, inside);
+        } else {
+            int ow = (int)(12 + fs.yawnAmp * 14);
+            int oh = (int)(4 + fs.yawnAmp * 20);
+            s.fillEllipse(CX, my, ow, oh, pal.mouth);
+            if (oh > 6) s.fillEllipse(CX, my, ow - 3, oh - 3, inside);
+        }
     } else {
         drawMouth(s, fs.expression, pal, fs.mouthAmp, fs.bounceY * ps, fs.breathPhase);
     }
@@ -1068,15 +1087,14 @@ void renderReminder(const display::ReminderData& data) {
     s.setTextColor(COL_WARM);
     s.drawString("!", CX, 40);
 
-    // Reminder text — word-wrap at size 2
-    s.setTextSize(2);
+    // Reminder text — word-wrap at size 1, centered
+    s.setTextSize(1);
     s.setTextColor(COL_FACE);
-    s.setTextDatum(lgfx::top_left);
+    s.setTextDatum(lgfx::top_center);
 
-    const int marginX = 10;
-    const int maxW = LCD_WIDTH - marginX * 2;
-    const int lineH = 22;
-    int y = 75;
+    const int maxW = LCD_WIDTH - 20;  // 10px margin each side
+    const int lineH = 18;
+    int y = 80;
 
     // Simple word-wrap
     char buf[256];
@@ -1095,7 +1113,7 @@ void renderReminder(const display::ReminderData& data) {
         test[sizeof(test) - 1] = '\0';
 
         if (s.textWidth(test) > maxW && line[0] != '\0') {
-            s.drawString(line, marginX, y);
+            s.drawString(line, CX, y);
             y += lineH;
             strncpy(line, word, sizeof(line) - 1);
         } else {
@@ -1105,7 +1123,7 @@ void renderReminder(const display::ReminderData& data) {
         word = strtok(nullptr, " ");
     }
     if (line[0] != '\0') {
-        s.drawString(line, marginX, y);
+        s.drawString(line, CX, y);
     }
 
     // Dismiss hint
@@ -1137,35 +1155,39 @@ void renderCountdown(const display::CountdownData& data) {
 
 void renderStatus(const display::StatusBar& status) {
     tft.fillScreen(COL_BG);
-    tft.setTextDatum(lgfx::top_left);
+    tft.setTextDatum(lgfx::middle_center);
+
+    int y = 40;
+    const int lineH = 32;
+
     tft.setTextSize(2);
-
-    int y = 20;
-    const int lineH = 28;
-
     tft.setTextColor(COL_ACCENT);
-    tft.drawString("System Status", 10, y); y += lineH + 10;
+    tft.drawString("System Status", CX, y); y += lineH + 6;
+
+    tft.drawFastHLine(30, y - lineH / 2, LCD_WIDTH - 60, COL_DIM);
 
     tft.setTextColor(COL_FACE);
-    tft.drawString(status.wifiConnected ? "WiFi: Connected" : "WiFi: Offline", 10, y);
+    tft.drawString(status.wifiConnected ? "WiFi: Connected" : "WiFi: Offline", CX, y);
     y += lineH;
 
-    tft.drawString(status.wsConnected ? "Backend: Online" : "Backend: Offline", 10, y);
+    tft.drawString(status.wsConnected ? "Backend: Online" : "Backend: Offline", CX, y);
     y += lineH;
 
     const char* sigLabel = (status.wifiRssi > -50) ? "Excellent" : (status.wifiRssi > -60) ? "Good" :
                            (status.wifiRssi > -70) ? "Fair" : (status.wifiRssi > -80) ? "Weak" : "Poor";
     char rssBuf[32];
     snprintf(rssBuf, sizeof(rssBuf), "Signal: %s (%d)", sigLabel, status.wifiRssi);
-    tft.drawString(rssBuf, 10, y); y += lineH;
+    tft.drawString(rssBuf, CX, y); y += lineH;
 
     if (status.batteryPercent == 255) {
-        tft.drawString("Power: USB", 10, y);
+        tft.drawString("Power: USB", CX, y);
     } else {
         char batBuf[16];
         snprintf(batBuf, sizeof(batBuf), "Battery: %d%%", status.batteryPercent);
-        tft.drawString(batBuf, 10, y);
+        tft.drawString(batBuf, CX, y);
     }
+
+    tft.setTextDatum(lgfx::top_left);  // restore default
 }
 
 /// Draw transcript overlay into a target (sprite or tft).

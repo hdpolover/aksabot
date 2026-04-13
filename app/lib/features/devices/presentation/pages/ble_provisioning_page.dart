@@ -267,12 +267,12 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
     _ble.disconnect();
 
     if (widget.changeWifiMode) {
-      setState(() {
-        _isConnectingWifi = false;
-        _setupDone = true;
-        _setupStatus = 'Wi-Fi updated successfully.';
-      });
+      setState(() => _isConnectingWifi = false);
       _goToStep(2);
+      // Poll backend — same as full provisioning. We only show success once the
+      // device is actually online. Without this, the app shows "Wi-Fi updated"
+      // immediately even if the device never connected.
+      _waitForDeviceOnline();
       return;
     }
 
@@ -292,7 +292,9 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
 
   Future<void> _waitForDeviceOnline() async {
     try {
-      setState(() => _setupStatus = 'Device is connecting to WiFi...');
+      setState(() => _setupStatus = widget.changeWifiMode
+          ? 'Waiting for device to reconnect...'
+          : 'Device is connecting to WiFi...');
 
       // Poll backend to check if the device connected.
       // Firmware needs ~15s: BLE deinit → WiFi connect → WS connect.
@@ -333,7 +335,9 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
       // Timeout — device didn't come online within ~60 seconds
       if (mounted) {
         setState(() {
-          _setupStatus = 'Device registered but not online yet. It may still be connecting — check the home screen.';
+          _setupStatus = widget.changeWifiMode
+              ? 'Device did not reconnect. Check that the Wi-Fi credentials are correct and the device is powered on.'
+              : 'Device registered but not online yet. It may still be connecting — check the home screen.';
           _setupError = true;
         });
       }

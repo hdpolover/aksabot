@@ -1090,17 +1090,6 @@ void setup() {
 
     // ── 2b. Start WiFi early (needs internal SRAM before other subsystems grab it)
     if (isConfigured) {
-        // Debug: scan to see what networks are visible
-        WiFi.mode(WIFI_STA);
-        Serial.println("[Main] Scanning WiFi networks...");
-        int n = WiFi.scanNetworks();
-        for (int i = 0; i < n; i++) {
-            Serial.printf("[WiFi Scan] %s (%d dBm)\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
-        }
-        WiFi.scanDelete();
-        if (n == 0) Serial.println("[WiFi Scan] No networks found!");
-        Serial.printf("[Main] Target SSID: '%s'\n", WIFI_SSID);
-
         wifi_manager::init();
         Serial.println("[Main] WiFi started early (background connect)");
     }
@@ -1587,6 +1576,10 @@ void loop() {
     power_manager::tick(now);
     status_led::tick(now);
 
+    // Explicit WiFi reconnect with backoff — fallback for when setAutoReconnect
+    // silently stops retrying (router restart, driver exhaustion, etc.)
+    wifi_manager::tick();
+
     // Sync connectivity state — check actual WiFi, not just our flag
     bool wifiNow = wifi_manager::isConnected();
     if (wifiNow && !appState.wifiConnected) {
@@ -1649,11 +1642,27 @@ void loop() {
             face::setExpression(face::Expression::HAPPY, 200);
             scheduleFaceRevert(2000);
 
-            // Report device info to backend
-            char infoPayload[128];
+            // Report device diagnostics to backend on every connect.
+            // Backend logs these for device health monitoring.
+            char infoPayload[256];
             snprintf(infoPayload, sizeof(infoPayload),
-                "{\"firmwareVersion\":\"%s\",\"wifiSsid\":\"%s\",\"wifiRssi\":%d}",
-                FIRMWARE_VERSION, WiFi.SSID().c_str(), WiFi.RSSI());
+                "{"
+                "\"firmwareVersion\":\"%s\","
+                "\"wifiSsid\":\"%s\","
+                "\"wifiRssi\":%d,"
+                "\"ip\":\"%s\","
+                "\"uptimeSec\":%lu,"
+                "\"freeHeap\":%lu,"
+                "\"sdMounted\":%s"
+                "}",
+                FIRMWARE_VERSION,
+                WiFi.SSID().c_str(),
+                WiFi.RSSI(),
+                WiFi.localIP().toString().c_str(),
+                millis() / 1000,
+                (unsigned long)ESP.getFreeHeap(),
+                sd_storage::isMounted() ? "true" : "false"
+            );
             ws_client::sendEvent("device:info", infoPayload);
 
             // Tell backend this was a reconnect (not first boot)

@@ -191,12 +191,16 @@ bool nvs_store::setFaceStyle(uint8_t styleId) {
 // ── Idle display mode ──────────────────────────────────
 
 bool nvs_store::getIdleDisplayMode(char* buf, size_t bufLen) {
-    if (!initialized) {
-        strncpy(buf, "face", bufLen - 1);
+    const char* def = "face";
+    if (!initialized || !prefs.isKey(K_IDLE_DISP)) {
+        // Key not yet written — return default silently.
+        // Calling prefs.getString() when the key is absent triggers an internal
+        // Preferences warning even when a default is supplied; isKey() avoids it.
+        strncpy(buf, def, bufLen - 1);
         buf[bufLen - 1] = '\0';
         return true;
     }
-    String val = prefs.getString(K_IDLE_DISP, "face");
+    String val = prefs.getString(K_IDLE_DISP, def);
     strncpy(buf, val.c_str(), bufLen - 1);
     buf[bufLen - 1] = '\0';
     return true;

@@ -34,4 +34,9 @@ bool isAPProvisioned();
 /// every ~50–200ms) while AP is active.
 void tickAP();
 
+/// Call from main loop to drive exponential-backoff reconnection.
+/// WiFi.setAutoReconnect(true) can silently stop retrying after repeated
+/// failures (e.g., router restart). This provides an explicit fallback.
+void tick();
+
 }  // namespace wifi_manager
