@@ -18,6 +18,7 @@ static const char* K_BRIGHTNESS   = "brightness";
 static const char* K_PRES_ENABLED = "pres_en";
 static const char* K_PRES_RSSI    = "pres_rssi";
 static const char* K_PRES_GRACE   = "pres_grace";
+static const char* K_DISP_TRANSCRIPT = "disp_transcript";
 static const char* K_FACE_STYLE   = "face_style";
 static const char* K_IDLE_DISP    = "idle_disp";
 static const char* K_SETUP_DONE   = "setup_done";
@@ -161,6 +162,18 @@ uint8_t nvs_store::getPresenceGracePeriodSec() {
 bool nvs_store::setPresenceGracePeriodSec(uint8_t seconds) {
     if (!initialized) return false;
     return prefs.putUChar(K_PRES_GRACE, seconds) > 0;
+}
+
+// ── Display transcript ─────────────────────────────────
+
+bool nvs_store::getDisplayTranscript() {
+    if (!initialized) return false;
+    return prefs.getBool(K_DISP_TRANSCRIPT, false);
+}
+
+bool nvs_store::setDisplayTranscript(bool enabled) {
+    if (!initialized) return false;
+    return prefs.putBool(K_DISP_TRANSCRIPT, enabled) > 0;
 }
 
 // ── Face style ─────────────────────────────────────────

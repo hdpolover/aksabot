@@ -166,7 +166,7 @@ static void onWsJson(const char* event, const char* data) {
             txt = sttDoc["text"] | data;
         }
         Serial.printf("[Main] STT: %s\n", txt);
-        display::setTranscriptText("You", txt);
+        display::setTranscriptText(txt);
     }
     else if (strcmp(event, "audio:cancel") == 0) {
         // Backend superseded this pipeline with a new one — flush everything immediately.
@@ -177,7 +177,7 @@ static void onWsJson(const char* event, const char* data) {
         xQueueReset(playbackQueue);
         stopSpeakerPending   = true;  // audio task will call stopSpeaker() safely
         face::feedAudioAmplitude(0);
-        display::setTranscriptText("", "");
+        display::setTranscriptText("");
         if (appState.botState == BotState::SPEAKING ||
             appState.botState == BotState::THINKING) {
             appState.botState = BotState::IDLE;
@@ -222,7 +222,7 @@ static void onWsJson(const char* event, const char* data) {
             txt = respDoc["text"] | data;
         }
         Serial.printf("[Main] LLM: %s\n", txt);
-        display::setTranscriptText("Aksa", txt);
+        display::setTranscriptText(txt);
     }
     else if (strcmp(event, "response:end") == 0) {
         if (data && data[0] != '\0') {
@@ -254,7 +254,7 @@ static void onWsJson(const char* event, const char* data) {
         face::setExpression(face::Expression::SHRUG, 200);
         scheduleFaceRevert(3000);
         appState.botState = BotState::IDLE;
-        display::setTranscriptText("", "");  // Clear stuck transcript
+        display::setTranscriptText("");  // Clear stuck transcript
         // Don't call syncFaceToState() — let SHRUG play for 3s first
     }
     else if (strcmp(event, "state:update") == 0) {
@@ -266,7 +266,7 @@ static void onWsJson(const char* event, const char* data) {
                 Serial.println("[Main] Backend reset to idle");
                 appState.botState = BotState::IDLE;
                 syncFaceToState();
-                display::setTranscriptText("", "");
+                display::setTranscriptText("");
             }
         }
     }
@@ -433,7 +433,7 @@ static void onWsJson(const char* event, const char* data) {
                 presence_detector::Config presCfg;
                 presCfg.rssiThreshold = rssi;
                 presCfg.gracePeriodSec = nvs_store::getPresenceGracePeriodSec();
-                presence_detector::init(presCfg);
+                presence_detector::updateConfig(presCfg);
                 Serial.printf("[Main] Config: presence RSSI=%d\n", rssi);
             }
             // Presence grace period
@@ -443,7 +443,7 @@ static void onWsJson(const char* event, const char* data) {
                 presence_detector::Config presCfg;
                 presCfg.rssiThreshold = nvs_store::getPresenceRssiThreshold();
                 presCfg.gracePeriodSec = grace;
-                presence_detector::init(presCfg);
+                presence_detector::updateConfig(presCfg);
                 Serial.printf("[Main] Config: presence grace=%ds\n", grace);
             }
             // Audio jitter buffer (ms → frames at 20ms/frame)
@@ -488,6 +488,7 @@ static void onWsJson(const char* event, const char* data) {
             if (!doc["display_transcript"].isNull()) {
                 bool show = doc["display_transcript"] | true;
                 display::setTranscriptOverlay(show);
+                nvs_store::setDisplayTranscript(show);
                 Serial.printf("[Main] Config: display_transcript=%s\n", show ? "true" : "false");
             }
             // Presence detection enable/disable at runtime
@@ -580,7 +581,7 @@ static void onTouchEvent(touch::Event event) {
                         xQueueReset(playbackQueue);
                         audio_io::stopSpeaker();
                         face::feedAudioAmplitude(0);
-                        display::setTranscriptText("", "");
+                        display::setTranscriptText("");
                     }
                     appState.interrupted = true;
                     ws_client::sendEvent("audio:interrupt");
@@ -655,7 +656,7 @@ static void onTouchEvent(touch::Event event) {
                     xQueueReset(playbackQueue);
                     stopSpeakerPending  = true;  // audio task calls stopSpeaker() safely
                     face::feedAudioAmplitude(0);
-                    display::setTranscriptText("", "");
+                    display::setTranscriptText("");
                 }
                 appState.interrupted = true;
                 appState.botState    = BotState::IDLE;
@@ -844,7 +845,7 @@ static void audioCaptureLoop(void* param) {
                         face::feedAudioAmplitude(0);
                         appState.botState = BotState::IDLE;
                         syncFaceToState();
-                        display::setTranscriptText("", "");
+                        display::setTranscriptText("");
                     }
                     vTaskDelay(pdMS_TO_TICKS(20));
                     continue;
@@ -871,7 +872,7 @@ static void audioCaptureLoop(void* param) {
                 face::feedAudioAmplitude(0);
                 appState.botState = BotState::IDLE;
                 syncFaceToState();
-                display::setTranscriptText("", "");  // Clear transcript overlay
+                display::setTranscriptText("");  // Clear transcript overlay
                 vad::init();  // Restore default VAD config for push-to-talk
                 wake_word::startListening();  // Resume wake word detection
                 Serial.println("[Main] Playback complete");
@@ -885,7 +886,7 @@ static void audioCaptureLoop(void* param) {
                 face::feedAudioAmplitude(0);
                 appState.botState = BotState::IDLE;
                 syncFaceToState();
-                display::setTranscriptText("", "");
+                display::setTranscriptText("");
                 wake_word::startListening();  // Resume wake word detection
             }
             continue;
@@ -919,7 +920,7 @@ static void audioCaptureLoop(void* param) {
             face::feedAudioAmplitude(0);
             appState.botState = BotState::IDLE;
             syncFaceToState();
-            display::setTranscriptText("", "");
+            display::setTranscriptText("");
             Serial.println("[Echo] Playback done");
             continue;
         }
@@ -1116,6 +1117,7 @@ void setup() {
         else if (strcmp(idleMode, "status") == 0) idleDm = display::Mode::STATUS;
         display::setHomeMode(idleDm);  // sets g_homeMode so wake() and dismissals respect it
     }
+    display::setTranscriptOverlay(nvs_store::getDisplayTranscript());  // restore transcript pref
     boot_screen::init();
 
     // Show splash and poll BOOT button (GPIO 0) during the splash delay.
@@ -1480,7 +1482,7 @@ void loop() {
                           (int)appState.wsConnected, ESP.getFreeHeap());
             appState.botState = BotState::IDLE;
             syncFaceToState();
-            display::setTranscriptText("", "");
+            display::setTranscriptText("");
             stuckCheckMs = 0;
         }
     } else if (appState.botState == BotState::SPEAKING) {
@@ -1496,7 +1498,7 @@ void loop() {
             face::feedAudioAmplitude(0);
             appState.botState = BotState::IDLE;
             syncFaceToState();
-            display::setTranscriptText("", "");
+            display::setTranscriptText("");
             stuckCheckMs = 0;
         }
     } else {
@@ -1515,7 +1517,7 @@ void loop() {
             pendingResponseEnds = 0;
             xQueueReset(playbackQueue);
             face::feedAudioAmplitude(0);
-            display::setTranscriptText("", "");
+            display::setTranscriptText("");
             // Don't set IDLE here — the connectivity check below will set OFFLINE
         }
     }

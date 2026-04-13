@@ -215,6 +215,14 @@ static volatile int16_t presenceCycleRssiCount  = 0;
 // Never call scan->start() from within onScanEnd — it deadlocks the nimble_host
 // task and triggers the task watchdog.
 static volatile bool    presenceScanEndPending  = false;
+// Monotonically increasing counter bumped on every startPresenceScan() /
+// stopPresenceScan(). onScanEnd captures the generation at scan-start time;
+// tickPresenceScan discards results whose generation doesn't match the current
+// one.  This prevents stale onScanEnd callbacks (from a stopped scan) from
+// triggering spurious configureAndStartScan() calls when rapid stop/start
+// sequences arrive via config:update.
+static volatile uint32_t presenceScanGeneration = 0;
+static volatile uint32_t pendingScanGeneration  = 0;
 
 static bool presenceScanActive = false;
 static bool presenceScanPaused = false;
@@ -230,8 +238,12 @@ class PresenceScanCallbacks : public NimBLEScanCallbacks {
     // Only accumulate RSSI — never touch the state machine or call scan->start().
     void onResult(const NimBLEAdvertisedDevice* device) override {
         if (device->isAdvertisingService(NimBLEUUID(UUID_PRESENCE_SVC))) {
-            presenceCycleRssiSum   += device->getRSSI();
+            int8_t rssi = device->getRSSI();
+            presenceCycleRssiSum   += rssi;
             presenceCycleRssiCount += 1;
+            if (!presenceFoundThisCycle) {
+                Serial.printf("[BLE] Presence UUID found, RSSI=%d\n", rssi);
+            }
             presenceFoundThisCycle  = true;
         }
     }
@@ -239,8 +251,10 @@ class PresenceScanCallbacks : public NimBLEScanCallbacks {
     // Called exactly once when the scan duration elapses (or stop() is called).
     // IMPORTANT: Do NOT call scan->start() here — this runs inside the nimble_host
     // FreeRTOS task. Calling start() from within a NimBLE callback causes a
-    // deadlock that fires the task watchdog. Just set the pending flag and return.
+    // deadlock that fires the task watchdog. Capture the generation so
+    // tickPresenceScan can discard stale results from rapid stop/start sequences.
     void onScanEnd(const NimBLEScanResults& /*results*/, int /*reason*/) override {
+        pendingScanGeneration  = presenceScanGeneration;
         presenceScanEndPending = true;
     }
 };
@@ -457,14 +471,20 @@ void ble_manager::startPresenceScan() {
     pScan->setScanCallbacks(&presenceScanCb, false);
     presenceScanActive = true;
     presenceScanPaused = false;
+    // Bump generation so any in-flight onScanEnd from a prior stop() is ignored.
+    presenceScanGeneration++;
+    presenceScanEndPending = false;
     configureAndStartScan();
     Serial.println("[BLE] Presence scanning started");
 }
 
 void ble_manager::stopPresenceScan() {
-    presenceScanActive     = false;
-    presenceScanPaused     = false;
-    presenceScanEndPending = false;   // discard any pending scan-end result
+    presenceScanActive = false;
+    presenceScanPaused = false;
+    // Bump generation before stop() so the asynchronous onScanEnd that fires
+    // later carries a stale generation and will be ignored by tickPresenceScan.
+    presenceScanGeneration++;
+    presenceScanEndPending = false;
     resetCycleCounters();
     NimBLEDevice::getScan()->stop();
     Serial.println("[BLE] Presence scanning stopped");
@@ -495,21 +515,30 @@ void ble_manager::tickPresenceScan(uint32_t nowMs) {
     if (presenceScanEndPending) {
         presenceScanEndPending = false;
 
-        if (presenceFoundThisCycle && presenceCycleRssiCount > 0) {
-            // Phone seen this cycle — feed the averaged RSSI into the state machine.
-            // This also updates lastScanHitMs, which resets the missing-timeout clock.
-            int8_t avgRssi = (int8_t)(presenceCycleRssiSum / presenceCycleRssiCount);
-            presence_detector::feedRssi(avgRssi);
-        }
-        // Phone not seen this cycle — do nothing here. Departure is handled by a
-        // time-based timeout in presence_detector::tick(): if lastScanHitMs hasn't
-        // been updated for missingTimeoutSec seconds, tick() starts LEAVING.
-        // Per-cycle miss counts are unreliable because iOS background advertising
-        // can pause for 10-20 seconds even when the user is at their desk.
+        // Discard results from a scan that was stopped before the current session.
+        // This happens when stopPresenceScan() + startPresenceScan() fire in rapid
+        // succession: the old onScanEnd fires AFTER the new scan has already started.
+        if (pendingScanGeneration != presenceScanGeneration) {
+            // Stale result — just let the watchdog below restart if needed.
+        } else {
+            if (presenceFoundThisCycle && presenceCycleRssiCount > 0) {
+                // Phone seen this cycle — feed the averaged RSSI into the state machine.
+                // This also updates lastScanHitMs, which resets the missing-timeout clock.
+                int8_t avgRssi = (int8_t)(presenceCycleRssiSum / presenceCycleRssiCount);
+                Serial.printf("[BLE] Presence cycle avg RSSI=%d (%d readings)\n",
+                              avgRssi, (int)presenceCycleRssiCount);
+                presence_detector::feedRssi(avgRssi);
+            }
+            // Phone not seen this cycle — do nothing here. Departure is handled by a
+            // time-based timeout in presence_detector::tick(): if lastScanHitMs hasn't
+            // been updated for missingTimeoutSec seconds, tick() starts LEAVING.
+            // Per-cycle miss counts are unreliable because iOS background advertising
+            // can pause for 10-20 seconds even when the user is at their desk.
 
-        resetCycleCounters();
-        configureAndStartScan();
-        return;
+            resetCycleCounters();
+            configureAndStartScan();
+            return;
+        }
     }
 
     // Watchdog: scan may have died without firing onScanEnd (NimBLE internal error).

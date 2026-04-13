@@ -52,6 +52,12 @@ bool setPresenceRssiThreshold(int8_t rssi);
 uint8_t getPresenceGracePeriodSec();   // default 45
 bool setPresenceGracePeriodSec(uint8_t seconds);
 
+// ── Display transcript ────────────────────────────────
+
+/// Returns whether the transcript overlay is enabled. Default: false.
+bool getDisplayTranscript();
+bool setDisplayTranscript(bool enabled);
+
 // ── Face style ────────────────────────────────────────
 
 /// Returns the stored face style ID (0=ORBIT, 1=NOVA). Default: 1 (NOVA).

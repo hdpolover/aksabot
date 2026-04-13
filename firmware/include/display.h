@@ -99,7 +99,7 @@ void showCountdown(const CountdownData& data);
 void setTranscriptOverlay(bool enabled);
 
 /// Set transcript text (STT or LLM response).
-void setTranscriptText(const char* speaker, const char* text);
+void setTranscriptText(const char* text);
 
 /// Set display brightness (0-100). 0 = off (sleep).
 void setBrightness(uint8_t brightness);
