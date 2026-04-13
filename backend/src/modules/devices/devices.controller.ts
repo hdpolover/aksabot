@@ -134,6 +134,27 @@ export class DevicesController {
     return { playing };
   }
 
+  /** Report a presence event from the mobile app (reverse BLE scan flow).
+   *  The app scans for the ESP32's BLE advertisement and calls this endpoint
+   *  when the user arrives or leaves — triggering the same greeting/departure
+   *  logic as if the ESP32 had detected the phone itself. */
+  @Post(':id/presence')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async reportPresence(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+    @Body() body: { event: 'arrived' | 'departed'; awayDurationSeconds?: number },
+  ) {
+    await this.devicesService.findById(id, user.userId);
+    if (body.event === 'arrived') {
+      await this.gateway.onPresenceArrived(id, {
+        awayDurationSeconds: body.awayDurationSeconds ?? 0,
+      });
+    } else {
+      this.gateway.onPresenceDeparted(id);
+    }
+  }
+
   /** Signal an online device to reboot into BLE provisioning mode.
    *  Sends `device:provision` via WebSocket so the ESP32 sets the force-provision
    *  NVS flag and restarts — the app can then re-provision it over BLE.

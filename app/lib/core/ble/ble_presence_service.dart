@@ -1,130 +1,192 @@
 import 'dart:async';
-import 'dart:typed_data';
 
-import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'ble_constants.dart';
-
-/// Manages BLE presence advertising so the ESP32 can detect the phone nearby.
+/// Manages presence detection by scanning for the ESP32's BLE advertisement.
 ///
-/// The Flutter app acts as a BLE peripheral, advertising the presence service
-/// UUID (0xFFE4). The ESP32 periodically scans for this UUID and reads the
-/// RSSI to determine whether the user is at their desk.
+/// The phone scans for a device named "Aksabot" (or matching a stored MAC
+/// address) and measures RSSI. When the device is close enough, the app
+/// reports arrival to the backend. When it drops below the threshold for the
+/// full grace period, it reports departure.
+///
+/// This is the reverse of the original approach (where the phone advertised
+/// and the ESP32 scanned) — scanning is more reliably supported across
+/// Android OEMs than peripheral advertising.
 class BlePresenceService {
   static const _prefEnabled = 'presence_enabled';
   static const _prefRssiThreshold = 'presence_rssi_threshold';
   static const _prefGracePeriod = 'presence_grace_period';
   static const _prefSilentWake = 'presence_silent_wake';
+  static const _prefDeviceId = 'presence_device_id';
 
-  final FlutterBlePeripheral _peripheral = FlutterBlePeripheral();
+  static const _scanDurationSec = 5;
+  static const _targetName = 'Aksabot';
 
-  bool _isAdvertising = false;
-  bool get isAdvertising => _isAdvertising;
+  // ── State ─────────────────────────────────────────────────────
 
-  /// Starts advertising the presence service UUID.
-  ///
-  /// Uses low-power mode suitable for background operation.
-  /// The ESP32 will scan for this advertisement to detect the user's phone.
-  /// Last failure reason — readable by the UI for diagnostics.
+  bool _scanning = false;
+  bool get isScanning => _scanning;
+
+  _PresenceState _state = _PresenceState.away;
+  DateTime? _lastSeen;
+  DateTime? _leftAt;
+
+  /// Whether the ESP32 is currently detected nearby.
+  bool get isPresent => _state == _PresenceState.present;
+
+  String? _deviceId;
   String? lastError;
 
-  Future<bool> startAdvertising() async {
+  Timer? _scanTimer;
+
+  // Callback invoked on state transitions — set by the caller to trigger
+  // backend REST calls without creating a circular dependency.
+  Future<void> Function(String deviceId, String event, int awaySeconds)?
+      onPresenceChanged;
+
+  // ── Lifecycle ─────────────────────────────────────────────────
+
+  Future<bool> startScanning() async {
     lastError = null;
 
-    final supported = await _peripheral.isSupported;
-    if (!supported) {
-      lastError = 'BLE peripheral mode not supported on this device';
+    final enabled = await loadEnabled();
+    if (!enabled) return false;
+
+    _deviceId = await _loadDeviceId();
+    if (_deviceId == null) {
+      lastError = 'No device configured for presence detection';
       return false;
     }
 
-    // Check permission first
-    final permState = await _peripheral.requestPermission();
-    if (permState == BluetoothPeripheralState.denied ||
-        permState == BluetoothPeripheralState.permanentlyDenied) {
-      lastError = 'Bluetooth permission denied (state: ${permState.name})';
-      return false;
-    }
-    if (permState == BluetoothPeripheralState.turnedOff) {
-      lastError = 'Bluetooth is turned off';
-      return false;
-    }
-    if (permState == BluetoothPeripheralState.unsupported) {
-      lastError = 'BLE advertising not supported';
+    final adapterState = await FlutterBluePlus.adapterState.first;
+    if (adapterState != BluetoothAdapterState.on) {
+      lastError = 'Bluetooth is off';
       return false;
     }
 
-    // Manufacturer data is the most reliable presence identifier across all
-    // Android OEMs and SDK versions. service UUID parsing is inconsistent —
-    // Android may omit it from the advertisement payload depending on the
-    // flutter_ble_peripheral version, OEM BLE stack, or connectable mode.
-    // Manufacturer ID 0xFFFF (unassigned) + magic bytes 0xAB 0xCF uniquely
-    // identify this app. The ESP32 checks for this in addition to service UUID.
-    final advertiseData = AdvertiseData(
-      serviceUuid: '0000ffe4-0000-1000-8000-00805f9b34fb',
-      includeDeviceName: false,
-      manufacturerId: 0xFFFF,
-      manufacturerData: Uint8List.fromList([0xAB, 0xCF]),
-    );
+    _scanning = true;
+    _scheduleNextScan();
+    return true;
+  }
 
-    final settings = AdvertiseSettings(
-      // Balanced mode: ~250ms advertising interval.
-      // Low-power mode uses ~1000ms which combined with short scan windows
-      // causes missed detections. Balanced gives reliable detection while
-      // still being power-efficient for background operation.
-      advertiseMode: AdvertiseMode.advertiseModeBalanced,
-      // Connectable: true ensures Android includes the service UUID in the
-      // scan response packet. The ESP32 uses active scanning which sends
-      // scan requests to receive these scan responses — passive scanning
-      // with non-connectable ads is unreliable across Android OEMs.
-      connectable: true,
-      timeout: 0, // Advertise indefinitely
-      txPowerLevel: AdvertiseTxPower.advertiseTxPowerMedium,
-    );
+  Future<void> stopScanning() async {
+    _scanning = false;
+    _scanTimer?.cancel();
+    _scanTimer = null;
+    try {
+      await FlutterBluePlus.stopScan();
+    } catch (_) {}
+  }
+
+  // ── Scan loop ─────────────────────────────────────────────────
+
+  void _scheduleNextScan() {
+    if (!_scanning) return;
+    // Scan every scanDuration + 5s gap. When present, check less aggressively.
+    final intervalSec = _state == _PresenceState.present ? 15 : 8;
+    _scanTimer = Timer(Duration(seconds: intervalSec), _doScanCycle);
+  }
+
+  Future<void> _doScanCycle() async {
+    if (!_scanning) return;
+
+    int? bestRssi;
 
     try {
-      final result = await _peripheral.start(
-        advertiseData: advertiseData,
-        advertiseSettings: settings,
+      final rssiThreshold = await loadRssiThreshold();
+
+      await FlutterBluePlus.startScan(
+        timeout: const Duration(seconds: _scanDurationSec),
+        withNames: [_targetName],
       );
 
-      _isAdvertising = result == BluetoothPeripheralState.ready ||
-          result == BluetoothPeripheralState.granted ||
-          result == BluetoothPeripheralState.limited;
-
-      if (!_isAdvertising) {
-        _isAdvertising = await _peripheral.isAdvertising;
+      await for (final results in FlutterBluePlus.scanResults) {
+        for (final r in results) {
+          if (_isTargetDevice(r.device)) {
+            if (bestRssi == null || r.rssi > bestRssi) {
+              bestRssi = r.rssi;
+            }
+          }
+        }
       }
 
-      if (!_isAdvertising) {
-        lastError = 'Advertising failed to start (state: ${result.name})';
-      }
-
-      return _isAdvertising;
+      await _processScanResult(bestRssi, rssiThreshold.round());
     } catch (e) {
-      lastError = 'Advertising error: $e';
-      _isAdvertising = false;
-      return false;
+      lastError = 'Scan error: $e';
+    }
+
+    _scheduleNextScan();
+  }
+
+  bool _isTargetDevice(BluetoothDevice device) {
+    return device.platformName == _targetName ||
+        device.advName == _targetName;
+  }
+
+  Future<void> _processScanResult(int? rssi, int threshold) async {
+    final gracePeriod = await loadGracePeriod();
+
+    if (rssi != null && rssi >= threshold) {
+      // Device in range
+      _lastSeen = DateTime.now();
+      _leftAt = null;
+
+      if (_state == _PresenceState.away) {
+        _state = _PresenceState.present;
+        await _reportArrived();
+      } else {
+        _state = _PresenceState.present;
+      }
+    } else {
+      // Device not seen or below threshold
+      if (_state == _PresenceState.present) {
+        _state = _PresenceState.leaving;
+        _leftAt = DateTime.now();
+      } else if (_state == _PresenceState.leaving && _leftAt != null) {
+        final elapsed = DateTime.now().difference(_leftAt!).inSeconds;
+        if (elapsed >= gracePeriod) {
+          _state = _PresenceState.away;
+          await _reportDeparted();
+        }
+      }
     }
   }
 
-  /// Stops presence advertising.
-  Future<void> stopAdvertising() async {
-    await _peripheral.stop();
-    _isAdvertising = false;
+  Future<void> _reportArrived() async {
+    if (_deviceId == null || onPresenceChanged == null) return;
+    final silentWakeMin = await loadSilentWakeMinutes();
+    final awaySec = _lastSeen != null
+        ? 0
+        : (silentWakeMin * 60); // conservative if no prior seen time
+    await onPresenceChanged!(_deviceId!, 'arrived', awaySec);
   }
 
-  /// Checks if BLE peripheral mode is supported on this device.
-  Future<bool> get isSupported => _peripheral.isSupported;
+  Future<void> _reportDeparted() async {
+    if (_deviceId == null || onPresenceChanged == null) return;
+    await onPresenceChanged!(_deviceId!, 'departed', 0);
+  }
 
-  /// Stream of peripheral state changes. Null if the platform doesn't support it.
-  Stream<PeripheralState>? get peripheralStateStream =>
-      _peripheral.onPeripheralStateChanged;
+  // ── Configuration ─────────────────────────────────────────────
 
-  /// Checks current advertising state from the platform.
-  Future<bool> checkAdvertisingState() async {
-    _isAdvertising = await _peripheral.isAdvertising;
-    return _isAdvertising;
+  /// Call this when the user selects a device for presence detection.
+  Future<void> configureDevice(String deviceId) async {
+    _deviceId = deviceId;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefDeviceId, deviceId);
+  }
+
+  Future<String?> _loadDeviceId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_prefDeviceId);
+  }
+
+  /// Restores scanning on app startup if it was previously enabled.
+  Future<void> restoreState() async {
+    final enabled = await loadEnabled();
+    if (enabled) {
+      await startScanning();
+    }
   }
 
   // ── Persisted Settings ────────────────────────────────────────
@@ -168,13 +230,6 @@ class BlePresenceService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_prefSilentWake, minutes);
   }
-
-  /// Restores advertising state from saved preferences.
-  /// Call this on app startup to resume advertising if it was previously enabled.
-  Future<void> restoreState() async {
-    final enabled = await loadEnabled();
-    if (enabled) {
-      await startAdvertising();
-    }
-  }
 }
+
+enum _PresenceState { away, present, leaving }

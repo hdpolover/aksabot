@@ -427,25 +427,15 @@ static void onWsJson(const char* event, const char* data) {
                 power_manager::updateConfig(pwrCfg);
                 Serial.printf("[Main] Config: brightness=%d\n", br);
             }
-            // Presence RSSI threshold
+            // Presence RSSI threshold — saved for NVS persistence (used by app)
             if (!doc["presence_rssi_threshold"].isNull()) {
                 int rssi = doc["presence_rssi_threshold"] | -75;
                 nvs_store::setPresenceRssiThreshold(rssi);
-                presence_detector::Config presCfg;
-                presCfg.rssiThreshold = rssi;
-                presCfg.gracePeriodSec = nvs_store::getPresenceGracePeriodSec();
-                presence_detector::updateConfig(presCfg);
-                Serial.printf("[Main] Config: presence RSSI=%d\n", rssi);
             }
-            // Presence grace period
+            // Presence grace period — saved for NVS persistence (used by app)
             if (!doc["presence_grace_period"].isNull()) {
                 int grace = doc["presence_grace_period"] | 45;
                 nvs_store::setPresenceGracePeriodSec(grace);
-                presence_detector::Config presCfg;
-                presCfg.rssiThreshold = nvs_store::getPresenceRssiThreshold();
-                presCfg.gracePeriodSec = grace;
-                presence_detector::updateConfig(presCfg);
-                Serial.printf("[Main] Config: presence grace=%ds\n", grace);
             }
             // Audio jitter buffer (ms → frames at 20ms/frame)
             if (!doc["audio_jitter_ms"].isNull()) {
@@ -492,18 +482,14 @@ static void onWsJson(const char* event, const char* data) {
                 nvs_store::setDisplayTranscript(show);
                 Serial.printf("[Main] Config: display_transcript=%s\n", show ? "true" : "false");
             }
-            // Presence detection enable/disable at runtime
+            // Presence detection enable/disable — saved to NVS, app controls scanning
             if (!doc["presence_enabled"].isNull()) {
                 bool enabled = doc["presence_enabled"] | false;
                 nvs_store::setPresenceEnabled(enabled);
-                if (enabled) {
-                    ble_manager::initScanOnly();
-                    ble_manager::startPresenceScan();
-                    Serial.println("[Main] Config: presence scanning STARTED");
-                } else {
-                    ble_manager::stopPresenceScan();
-                    Serial.println("[Main] Config: presence scanning STOPPED");
+                if (!enabled) {
+                    appState.presenceState = PresenceState::UNKNOWN;
                 }
+                Serial.printf("[Main] Config: presence_enabled=%s\n", enabled ? "true" : "false");
             }
             // Idle timeout
             if (!doc["idle_timeout_seconds"].isNull()) {
@@ -514,6 +500,32 @@ static void onWsJson(const char* event, const char* data) {
                 Serial.printf("[Main] Config: idle timeout=%ds\n", timeout);
             }
         }
+    }
+    // ── Presence events (sent BY backend, triggered by app BLE scan) ──
+    else if (strcmp(event, "presence:arrived") == 0) {
+        appState.presenceState = PresenceState::PRESENT;
+        power_manager::recordInteraction();
+        Serial.println("[Presence] User arrived (app-driven)");
+        // Departure animation task
+        face::setExpression(face::Expression::HAPPY, 200);
+        scheduleFaceRevert(3000);
+    }
+    else if (strcmp(event, "presence:departed") == 0) {
+        appState.presenceState = PresenceState::AWAY;
+        Serial.println("[Presence] User departed (app-driven)");
+        // Run departure animation in a one-shot task
+        xTaskCreate([](void*) {
+            face::setExpression(face::Expression::SAD, 300);
+            vTaskDelay(pdMS_TO_TICKS(800));
+            face::setExpression(face::Expression::CALM, 600);
+            vTaskDelay(pdMS_TO_TICKS(900));
+            face::triggerYawn();
+            vTaskDelay(pdMS_TO_TICKS(3200));
+            face::setExpression(face::Expression::SLEEPING, 800);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            power_manager::setState(power_manager::PowerState::SLEEPING);
+            vTaskDelete(nullptr);
+        }, "departure_anim", 2048, nullptr, 1, nullptr);
     }
     // ── Remote re-provisioning request ───────────────────
     else if (strcmp(event, "device:provision") == 0) {
@@ -1139,51 +1151,11 @@ void setup() {
     recording_buffer::init();
     resilience_audio::init();
 
-    // Presence detector
-    {
-        presence_detector::Config presCfg;
-        presCfg.rssiThreshold = nvs_store::getPresenceRssiThreshold();
-        presCfg.gracePeriodSec = nvs_store::getPresenceGracePeriodSec();
-        presence_detector::init(presCfg);
-
-        presence_detector::onStateChange([](PresenceState newState, PresenceState oldState, uint32_t awaySec) {
-            if (newState == PresenceState::PRESENT && oldState == PresenceState::AWAY) {
-                power_manager::recordInteraction();
-                // Happy greeting — user is back at desk
-                face::setExpression(face::Expression::HAPPY, 200);
-                scheduleFaceRevert(3000);
-                if (appState.wsConnected) {
-                    char payload[48];
-                    snprintf(payload, sizeof(payload), "{\"awayDurationSeconds\":%u}", awaySec);
-                    ws_client::sendEvent("presence:arrived", payload);
-                }
-            }
-            else if (newState == PresenceState::AWAY) {
-                if (appState.wsConnected) {
-                    ws_client::sendEvent("presence:departed");
-                }
-                // Departure animation: sad → calm → yawn → sleeping → device sleep
-                // Runs in a one-shot task so the state-change callback returns quickly.
-                face::setExpression(face::Expression::SAD, 300);
-                xTaskCreate([](void*) {
-                    // Brief sad pause
-                    vTaskDelay(pdMS_TO_TICKS(800));
-                    // Fade to calm — winding down
-                    face::setExpression(face::Expression::CALM, 600);
-                    vTaskDelay(pdMS_TO_TICKS(900));
-                    // Yawn (3000ms animation)
-                    face::triggerYawn();
-                    vTaskDelay(pdMS_TO_TICKS(3200));
-                    // Transition to sleeping expression while the device is still on
-                    face::setExpression(face::Expression::SLEEPING, 800);
-                    vTaskDelay(pdMS_TO_TICKS(1500));
-                    // Sleep the display (keeps power_manager in sync)
-                    power_manager::setState(power_manager::PowerState::SLEEPING);
-                    vTaskDelete(nullptr);
-                }, "departure_anim", 2048, nullptr, 1, nullptr);
-            }
-        });
-    }
+    // Presence detection is now driven by the mobile app (reverse BLE scan).
+    // The app scans for this device's BLE advertisement and reports arrivals/
+    // departures via the backend REST API. The backend then sends
+    // presence:arrived / presence:departed events HERE via WebSocket.
+    // No local RSSI scanning is needed on the firmware side.
 
     touch::init();
     touch::onEvent(onTouchEvent);
@@ -1390,16 +1362,10 @@ void setup() {
         face::setExpression(face::Expression::THINKING, 200);
     }
 
-    // ── 13. BLE presence scanning ──────────────────────────
-    // NimBLE passive scanning coexists with WiFi on ESP32-S3.
-    // If BLE was already inited for provisioning, initScanOnly() is a no-op.
-    if (nvs_store::getPresenceEnabled()) {
-        ble_manager::initScanOnly();
-        ble_manager::startPresenceScan();
-        Serial.println("[Main] BLE presence scanning started");
-    } else {
-        Serial.println("[Main] BLE presence scanning disabled (enable in app settings)");
-    }
+    // ── 13. BLE presence (app-driven) ──────────────────────
+    // Presence detection is driven by the mobile app — no local BLE scanning.
+    Serial.printf("[Main] Presence detection: %s (app-driven)\n",
+        nvs_store::getPresenceEnabled() ? "enabled" : "disabled");
 
     // ── 14. Wake word detection ─────────────────────────────
 #if HANDS_FREE_ENABLED
@@ -1585,9 +1551,7 @@ void loop() {
         display::setMode(display::getHomeMode());
     }
 
-    // Tick presence detector + BLE scanner
-    presence_detector::tick(now);
-    ble_manager::tickPresenceScan(now);
+    // Presence is now app-driven — no local tick needed.
 
     // Tick gesture sensor (APDS-9960)
     gesture::tick(now);

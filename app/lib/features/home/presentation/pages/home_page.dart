@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shimmer/shimmer.dart';
@@ -227,26 +226,11 @@ class _DeviceList extends StatefulWidget {
 
 class _DeviceListState extends State<_DeviceList> {
   late final BlePresenceService _presence;
-  StreamSubscription<PeripheralState>? _stateSub;
-  bool _isAdvertising = false;
 
   @override
   void initState() {
     super.initState();
     _presence = sl<BlePresenceService>();
-    _isAdvertising = _presence.isAdvertising;
-    try {
-      _stateSub = _presence.peripheralStateStream?.listen((state) {
-        if (!mounted) return;
-        setState(() => _isAdvertising = _presence.isAdvertising);
-      });
-    } catch (_) {}
-  }
-
-  @override
-  void dispose() {
-    _stateSub?.cancel();
-    super.dispose();
   }
 
   @override
@@ -272,10 +256,13 @@ class _DeviceListState extends State<_DeviceList> {
           itemCount: widget.devices.length,
           itemBuilder: (context, index) {
             final device = widget.devices[index];
+            final presenceOn = _presence.isScanning || _presence.isPresent;
             String subtitle;
             if (!device.isOnline) {
               subtitle = 'Offline';
-            } else if (_isAdvertising) {
+            } else if (_presence.isPresent) {
+              subtitle = 'Online · You\'re here';
+            } else if (_presence.isScanning) {
               subtitle = 'Online · Presence on';
             } else {
               subtitle = 'Online';
@@ -284,7 +271,7 @@ class _DeviceListState extends State<_DeviceList> {
               name: device.name,
               subtitle: subtitle,
               isOnline: device.isOnline,
-              bleAdvertising: _isAdvertising,
+              bleAdvertising: presenceOn,
               onTap: () => widget.onNavigate(context, '/devices/${device.id}'),
             );
           },

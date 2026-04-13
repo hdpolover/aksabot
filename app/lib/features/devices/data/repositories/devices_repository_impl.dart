@@ -77,6 +77,21 @@ class DevicesRepositoryImpl implements DevicesRepository {
   }
 
   @override
+  Future<Either<Failure, void>> reportPresence(
+    String id,
+    String event, {
+    int awayDurationSeconds = 0,
+  }) async {
+    try {
+      await _datasource.reportPresence(id, event,
+          awayDurationSeconds: awayDurationSeconds);
+      return const Right(null);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
+
+  @override
   Future<Either<Failure, void>> deleteDevice(String id) async {
     try {
       await _datasource.deleteDevice(id);

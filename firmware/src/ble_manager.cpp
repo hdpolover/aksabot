@@ -228,15 +228,6 @@ static volatile uint32_t pendingScanGeneration  = 0;
 static bool presenceScanActive = false;
 static bool presenceScanPaused = false;
 
-// Diagnostic: accumulate raw ad info for up to N devices per cycle.
-// Written by NimBLE task (onResult), read by main loop (tickPresenceScan).
-// Only active until phone is first found — then cleared automatically.
-#define PRESENCE_DBG_MAX 8
-struct PresenceDbgEntry { char line[80]; };
-static PresenceDbgEntry presenceDbgBuf[PRESENCE_DBG_MAX];
-static volatile int     presenceDbgCount = 0;
-static bool             presenceDbgActive = true;  // cleared when phone is found
-
 static void resetCycleCounters() {
     presenceFoundThisCycle  = false;
     presenceCycleRssiSum    = 0;
@@ -250,29 +241,6 @@ class PresenceScanCallbacks : public NimBLEScanCallbacks {
     void onResult(const NimBLEAdvertisedDevice* device) override {
         presenceCycleTotalSeen++;
 
-        // Diagnostic: buffer one line per device so the main loop can print them
-        // safely. Active until the phone is first detected.
-        if (presenceDbgActive) {
-            int idx = presenceDbgCount;
-            if (idx < PRESENCE_DBG_MAX) {
-                char tmp[80] = {};
-                int n = snprintf(tmp, sizeof(tmp), "addr=%s rssi=%d",
-                    device->getAddress().toString().c_str(), device->getRSSI());
-                if (device->haveManufacturerData()) {
-                    const std::string& mfr = device->getManufacturerData();
-                    n += snprintf(tmp + n, sizeof(tmp) - n, " mfr(%d)=", (int)mfr.size());
-                    for (size_t i = 0; i < mfr.size() && i < 6 && n < 76; i++) {
-                        n += snprintf(tmp + n, sizeof(tmp) - n, "%02X ", (uint8_t)mfr[i]);
-                    }
-                }
-                if (device->haveServiceUUID()) {
-                    snprintf(tmp + n, sizeof(tmp) - n, " svc=0x%s",
-                        device->getServiceUUID().toString().c_str());
-                }
-                strncpy(presenceDbgBuf[idx].line, tmp, sizeof(presenceDbgBuf[idx].line) - 1);
-                presenceDbgCount = idx + 1;
-            }
-        }
 
         bool isPresenceDevice = false;
 
@@ -587,37 +555,10 @@ void ble_manager::tickPresenceScan(uint32_t nowMs) {
             // Stale result — just let the watchdog below restart if needed.
         } else {
             if (presenceFoundThisCycle && presenceCycleRssiCount > 0) {
-                // Phone seen this cycle — feed the averaged RSSI into the state machine.
                 int8_t avgRssi = (int8_t)(presenceCycleRssiSum / presenceCycleRssiCount);
                 Serial.printf("[BLE] Presence: PHONE FOUND rssi=%d\n", avgRssi);
-                presenceDbgActive = false;  // Stop diagnostic dumping — phone located
                 presence_detector::feedRssi(avgRssi);
-            } else {
-                // Dump buffered device data to Serial every cycle while phone is not found.
-                // Runs in main-loop context (Serial-safe). Shows exactly what was scanned
-                // so we can identify the phone's advertisement format.
-                int dbgCount = presenceDbgCount;  // snapshot before reset
-                if (presenceDbgActive && dbgCount > 0) {
-                    Serial.printf("[BLE] Scan cycle: %d device(s) seen, phone not found:\n", dbgCount);
-                    for (int i = 0; i < dbgCount; i++) {
-                        Serial.printf("  [%d] %s\n", i + 1, presenceDbgBuf[i].line);
-                    }
-                } else {
-                    // Rate-limit "nothing seen" log to once per minute
-                    static uint32_t lastNoneLogMs = 0;
-                    if (nowMs - lastNoneLogMs >= 60000) {
-                        lastNoneLogMs = nowMs;
-                        PresenceState st = presence_detector::getState();
-                        const char* stStr =
-                            st == PresenceState::PRESENT  ? "PRESENT"  :
-                            st == PresenceState::LEAVING  ? "LEAVING"  :
-                            st == PresenceState::AWAY     ? "AWAY"     : "UNKNOWN";
-                        Serial.printf("[BLE] Scan cycle: %d devices seen, phone not found (state=%s)\n",
-                            (int)presenceCycleTotalSeen, stStr);
-                    }
-                }
             }
-            presenceDbgCount = 0;  // Reset buffer for next cycle
             // Phone not seen this cycle — do nothing here. Departure is handled by a
             // time-based timeout in presence_detector::tick(): if lastScanHitMs hasn't
             // been updated for missingTimeoutSec seconds, tick() starts LEAVING.

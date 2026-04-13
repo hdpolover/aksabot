@@ -1,7 +1,4 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart'; // PeripheralState
 
 import '../../../../core/ble/ble_presence_service.dart';
 import '../../../../core/constants/app_constants.dart';
@@ -10,7 +7,9 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../domain/repositories/devices_repository.dart';
 
-/// Presence detection settings — wired to BLE presence advertising service.
+/// Presence detection settings — wired to the BLE scan service.
+/// The phone scans for the ESP32's advertisement and reports presence to
+/// the backend, which triggers greetings and departure animations.
 class PresenceSettingsPage extends StatefulWidget {
   final String deviceId;
   const PresenceSettingsPage({super.key, required this.deviceId});
@@ -22,11 +21,9 @@ class PresenceSettingsPage extends StatefulWidget {
 class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
   late final BlePresenceService _presence;
   late final DevicesRepository _devicesRepo;
-  StreamSubscription<PeripheralState>? _stateSub;
 
   bool _enabled = false;
   bool _isLoading = true;
-  bool _isSupported = true;
   double _rssiThreshold = -75;
   String _gracePeriod = '45';
   String _silentWake = '5';
@@ -37,52 +34,13 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
     _presence = sl<BlePresenceService>();
     _devicesRepo = sl<DevicesRepository>();
     _loadSettings();
-    _listenBleState();
-  }
-
-  void _listenBleState() {
-    try {
-      _stateSub = _presence.peripheralStateStream?.listen((state) {
-        if (!mounted) return;
-        // Only update UI — don't call start/stop advertising here to avoid
-        // "Reply already submitted" crash in the plugin when BT toggles.
-        setState(() {
-          if (state == PeripheralState.poweredOff) {
-            _enabled = false;
-          }
-        });
-      });
-    } catch (_) {
-      // BLE peripheral stream unavailable on this device — ignore.
-    }
-  }
-
-  Future<void> _refreshAdvertisingState() async {
-    final isNowAdvertising = await _presence.checkAdvertisingState();
-    if (mounted) setState(() {});
-    // If saved as enabled but not actually advertising, try to restart.
-    if (_enabled && !isNowAdvertising) {
-      await _presence.startAdvertising();
-      if (mounted) setState(() {});
-    }
-  }
-
-  @override
-  void dispose() {
-    _stateSub?.cancel();
-    super.dispose();
   }
 
   Future<void> _loadSettings() async {
-    bool supported = false;
     bool enabled = false;
     double rssi = -75.0;
     int grace = 45;
     int silent = 5;
-
-    try {
-      supported = await _presence.isSupported;
-    } catch (_) {}
 
     try {
       enabled = await _presence.loadEnabled();
@@ -93,10 +51,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
 
     if (!mounted) return;
     setState(() {
-      _isSupported = supported;
-      // Show the user's saved preference, not the hardware state.
-      // If BLE isn't supported, force off.
-      _enabled = supported ? enabled : false;
+      _enabled = enabled;
       _rssiThreshold = rssi;
       _gracePeriod = grace.toString();
       _silentWake = silent.toString();
@@ -104,7 +59,6 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
     });
   }
 
-  /// Maps raw RSSI threshold (–90 to –60) to a human-readable range label.
   String _rssiLabel(double rssi) {
     if (rssi >= -65) return 'Very close';
     if (rssi >= -72) return 'Nearby';
@@ -112,7 +66,6 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
     return 'Far away';
   }
 
-  /// Sync a presence setting to the backend so the ESP32 gets it via WebSocket.
   Future<void> _syncToBackend(Map<String, dynamic> patch) async {
     await _devicesRepo.updateSettings(widget.deviceId, patch);
   }
@@ -121,25 +74,25 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
     setState(() => _enabled = enabled);
 
     if (enabled) {
-      final started = await _presence.startAdvertising();
-      if (started) {
-        await _presence.saveEnabled(true);
-        _syncToBackend({'presence_enabled': true});
-        if (mounted) setState(() {}); // refresh advertising status text
-      } else {
-        await _presence.saveEnabled(false);
-        if (!mounted) return;
+      await _presence.configureDevice(widget.deviceId);
+      await _presence.saveEnabled(true);
+      final started = await _presence.startScanning();
+      if (!started && mounted) {
         setState(() => _enabled = false);
-        _showPermissionDialog();
+        await _presence.saveEnabled(false);
+        _showBluetoothErrorDialog();
+        return;
       }
+      _syncToBackend({'presence_enabled': true});
     } else {
-      await _presence.stopAdvertising();
+      await _presence.stopScanning();
       await _presence.saveEnabled(false);
       _syncToBackend({'presence_enabled': false});
     }
+    if (mounted) setState(() {});
   }
 
-  void _showPermissionDialog() {
+  void _showBluetoothErrorDialog() {
     final errorDetail = _presence.lastError ?? 'Unknown error';
     showDialog(
       context: context,
@@ -154,7 +107,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Presence detection needs Bluetooth advertising to work. '
+                  'Presence detection needs Bluetooth to scan for your device. '
                   'Make sure Bluetooth is on and permissions are granted.',
                 ),
                 const SizedBox(height: 12),
@@ -181,13 +134,6 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
               child: const Text('Cancel'),
-            ),
-            FilledButton.tonal(
-              onPressed: () async {
-                Navigator.of(ctx).pop();
-                await FlutterBlePeripheral().openAppSettings();
-              },
-              child: const Text('Open Settings'),
             ),
             FilledButton(
               onPressed: () async {
@@ -219,36 +165,11 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (!_isSupported) ...[
-            Card(
-              color: colors.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Icon(Icons.warning_amber, color: colors.onErrorContainer),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'BLE peripheral mode is not supported on this device.',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colors.onErrorContainer,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          // ── Live advertising status ──────────────────────────────────
+          // ── Live status ──────────────────────────────────────────────────
           _PresenceStatusCard(
             enabled: _enabled,
-            isAdvertising: _presence.isAdvertising,
-            lastError: _presence.lastError,
-            onRefresh: _refreshAdvertisingState,
+            isPresent: _presence.isPresent,
+            isScanning: _presence.isScanning,
           ),
           const SizedBox(height: 16),
 
@@ -256,19 +177,19 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
           Card(
             clipBehavior: Clip.antiAlias,
             child: SwitchListTile(
-              secondary: Icon(Icons.bluetooth_searching, color: colors.primary),
+              secondary: Icon(Icons.sensors_rounded, color: colors.primary),
               title: const Text('Enable presence'),
               subtitle: const Text(
-                'When your phone is nearby, Aksa wakes up and greets you. '
+                'When you sit at your desk, Aksa wakes up and greets you. '
                 'When you leave, Aksa goes to sleep.',
               ),
               value: _enabled,
-              onChanged: _isSupported ? _togglePresence : null,
+              onChanged: _togglePresence,
             ),
           ),
           const SizedBox(height: 24),
 
-          // Sensitivity
+          // Detection range
           Text('Detection range', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           Card(
@@ -296,13 +217,15 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                           }
                         : null,
                     onChangeEnd: _enabled
-                        ? (v) => _syncToBackend({'presence_rssi_threshold': v.round()})
+                        ? (v) => _syncToBackend(
+                            {'presence_rssi_threshold': v.round()})
                         : null,
                   ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      Icon(Icons.info_outline, size: 16, color: colors.onSurfaceVariant),
+                      Icon(Icons.info_outline,
+                          size: 16, color: colors.onSurfaceVariant),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -324,9 +247,12 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                         value: _gracePeriod,
                         underline: const SizedBox.shrink(),
                         items: const [
-                          DropdownMenuItem(value: '15', child: Text('15 sec')),
-                          DropdownMenuItem(value: '30', child: Text('30 sec')),
-                          DropdownMenuItem(value: '45', child: Text('45 sec')),
+                          DropdownMenuItem(
+                              value: '15', child: Text('15 sec')),
+                          DropdownMenuItem(
+                              value: '30', child: Text('30 sec')),
+                          DropdownMenuItem(
+                              value: '45', child: Text('45 sec')),
                           DropdownMenuItem(value: '60', child: Text('1 min')),
                         ],
                         onChanged: _enabled
@@ -334,7 +260,8 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                                 if (v != null) {
                                   setState(() => _gracePeriod = v);
                                   _presence.saveGracePeriod(int.parse(v));
-                                  _syncToBackend({'presence_grace_period': int.parse(v)});
+                                  _syncToBackend(
+                                      {'presence_grace_period': int.parse(v)});
                                 }
                               }
                             : null,
@@ -353,7 +280,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
           ),
           const SizedBox(height: 24),
 
-          // Behavior
+          // Greeting behavior
           Text('Greeting behavior', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           Card(
@@ -365,7 +292,8 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Expanded(child: Text('Skip greeting if away less than')),
+                      const Expanded(
+                          child: Text('Skip greeting if away less than')),
                       const SizedBox(width: 8),
                       DropdownButton<String>(
                         value: _silentWake,
@@ -373,14 +301,17 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                         items: const [
                           DropdownMenuItem(value: '2', child: Text('2 min')),
                           DropdownMenuItem(value: '5', child: Text('5 min')),
-                          DropdownMenuItem(value: '10', child: Text('10 min')),
+                          DropdownMenuItem(
+                              value: '10', child: Text('10 min')),
                         ],
                         onChanged: _enabled
                             ? (v) {
                                 if (v != null) {
                                   setState(() => _silentWake = v);
                                   _presence.saveSilentWakeMinutes(int.parse(v));
-                                  _syncToBackend({'presence_silent_wake_minutes': int.parse(v)});
+                                  _syncToBackend({
+                                    'presence_silent_wake_minutes': int.parse(v)
+                                  });
                                 }
                               }
                             : null,
@@ -405,20 +336,18 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
 }
 
 // ---------------------------------------------------------------------------
-// Live advertising status card
+// Live scan status card
 // ---------------------------------------------------------------------------
 
 class _PresenceStatusCard extends StatelessWidget {
   final bool enabled;
-  final bool isAdvertising;
-  final String? lastError;
-  final VoidCallback onRefresh;
+  final bool isPresent;
+  final bool isScanning;
 
   const _PresenceStatusCard({
     required this.enabled,
-    required this.isAdvertising,
-    required this.lastError,
-    required this.onRefresh,
+    required this.isPresent,
+    required this.isScanning,
   });
 
   @override
@@ -438,19 +367,25 @@ class _PresenceStatusCard extends StatelessWidget {
       iconColor = cs.onSurfaceVariant;
       icon = Icons.sensors_off_rounded;
       title = 'Presence detection is off';
-      subtitle = 'Enable the toggle below to start broadcasting.';
-    } else if (isAdvertising) {
+      subtitle = 'Enable the toggle below to start scanning.';
+    } else if (isPresent) {
       bgColor = ac.successContainer;
       iconColor = ac.success;
       icon = Icons.sensors_rounded;
-      title = 'Phone is broadcasting';
-      subtitle = 'Your device can detect you nearby.';
+      title = 'Device detected nearby';
+      subtitle = 'Aksa knows you are at your desk.';
+    } else if (isScanning) {
+      bgColor = cs.surfaceContainerHigh;
+      iconColor = cs.primary;
+      icon = Icons.radar_rounded;
+      title = 'Scanning for device…';
+      subtitle = 'Looking for your Aksabot nearby.';
     } else {
-      bgColor = cs.errorContainer;
-      iconColor = cs.onErrorContainer;
+      bgColor = cs.surfaceContainerHigh;
+      iconColor = cs.onSurfaceVariant;
       icon = Icons.sensors_off_rounded;
-      title = 'Not broadcasting';
-      subtitle = lastError ?? 'Check that Bluetooth is enabled and permissions are granted.';
+      title = 'Not scanning';
+      subtitle = 'Scanning will resume when the app is active.';
     }
 
     return Card(
@@ -480,20 +415,13 @@ class _PresenceStatusCard extends StatelessWidget {
                     subtitle,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: enabled
-                          ? (isAdvertising ? ac.success : cs.onErrorContainer)
+                          ? (isPresent ? ac.success : cs.onSurfaceVariant)
                           : cs.onSurfaceVariant,
                     ),
                   ),
                 ],
               ),
             ),
-            if (enabled && !isAdvertising)
-              IconButton(
-                icon: const Icon(Icons.refresh_rounded),
-                color: cs.onErrorContainer,
-                tooltip: 'Retry',
-                onPressed: onRefresh,
-              ),
           ],
         ),
       ),

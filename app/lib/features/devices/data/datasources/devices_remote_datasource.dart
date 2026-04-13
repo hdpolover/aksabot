@@ -58,6 +58,17 @@ class DevicesRemoteDatasource {
     await _client.post('/devices/$id/provision', data: {});
   }
 
+  Future<void> reportPresence(
+    String id,
+    String event, {
+    int awayDurationSeconds = 0,
+  }) async {
+    await _client.post('/devices/$id/presence', data: {
+      'event': event,
+      'awayDurationSeconds': awayDurationSeconds,
+    });
+  }
+
   Future<void> deleteDevice(String id) async {
     await _client.delete('/devices/$id');
   }

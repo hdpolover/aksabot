@@ -5,6 +5,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'core/ble/ble_presence_service.dart';
 import 'core/di/injection.dart';
 import 'core/notifications/notification_service.dart';
+import 'features/devices/domain/repositories/devices_repository.dart';
 import 'core/observer/bloc_observer.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
@@ -20,8 +21,19 @@ void main() async {
   // Initialize local notifications
   await sl<NotificationService>().init();
 
-  // Restore BLE presence advertising if previously enabled
-  sl<BlePresenceService>().restoreState();
+  // Wire up presence reporting: when the scan service detects arrival/departure,
+  // it calls the backend via the devices repository.
+  final presence = sl<BlePresenceService>();
+  presence.onPresenceChanged = (deviceId, event, awaySeconds) async {
+    await sl<DevicesRepository>().reportPresence(
+      deviceId,
+      event,
+      awayDurationSeconds: awaySeconds,
+    );
+  };
+
+  // Restore BLE presence scanning if previously enabled
+  presence.restoreState();
 
   runApp(const AksabotApp());
 }

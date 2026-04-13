@@ -363,7 +363,10 @@ export class AudioGateway
 
   // ── Presence handlers ──────────────────────────────────────────
 
-  private async onPresenceArrived(
+  /** Called when the user's phone is detected near the desk.
+   *  Can be triggered by the ESP32 (legacy BLE scan) OR by the mobile app
+   *  (reverse BLE scan via REST POST /devices/:id/presence). */
+  async onPresenceArrived(
     deviceId: string,
     data?: { awayDurationSeconds?: number },
   ) {
@@ -374,6 +377,9 @@ export class AudioGateway
 
     // Start tracking screen time
     this.proactive.startScreenTimeTracking(deviceId);
+
+    // Notify firmware of confirmed arrival (updates presence indicator + wakes display)
+    this.sendToDevice(deviceId, 'presence:arrived', {});
 
     // Send happy expression to firmware
     this.sendToDevice(deviceId, 'face:expression', {
@@ -446,10 +452,14 @@ export class AudioGateway
     );
   }
 
-  private onPresenceDeparted(deviceId: string) {
+  /** Called when the user's phone leaves the desk area.
+   *  Can be triggered by the ESP32 (legacy) OR by the mobile app REST call. */
+  onPresenceDeparted(deviceId: string) {
     this.logger.log(`Device ${deviceId} presence:departed`);
     // Stop screen time tracking — user left the desk
     this.proactive.stopScreenTimeTracking(deviceId);
+    // Notify firmware of departure (triggers departure animation + display sleep)
+    this.sendToDevice(deviceId, 'presence:departed', {});
     // Send sad expression — firmware handles display sleep
     this.sendToDevice(deviceId, 'face:expression', {
       expression: 'sad',
