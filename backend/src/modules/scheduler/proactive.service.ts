@@ -72,6 +72,19 @@ export class ProactiveService {
     this.sendToDevice = fn;
   }
 
+  private getLocalHour(timezone: string = process.env.TZ || 'Asia/Jakarta'): number {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: 'numeric',
+      hour12: false,
+    }).formatToParts(new Date());
+    return parseInt(parts.find((p) => p.type === 'hour')!.value, 10);
+  }
+
+  private getLocalDateString(timezone: string = process.env.TZ || 'Asia/Jakarta'): string {
+    return new Date().toLocaleDateString('en-CA', { timeZone: timezone }); // en-CA gives YYYY-MM-DD
+  }
+
   // ── Morning briefing ──────────────────────────────────
 
   /**
@@ -79,11 +92,11 @@ export class ProactiveService {
    * varied by time of day, whether it's the first session today, and mood.
    */
   async checkGreeting(deviceId: string): Promise<string | null> {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = this.getLocalDateString();
     const isFirstToday = this.lastGreetingDate.get(deviceId) !== today;
     this.lastGreetingDate.set(deviceId, today);
 
-    const hour = new Date().getHours();
+    const hour = this.getLocalHour();
     let timeOfDay: string;
     if (hour < 12) timeOfDay = 'morning';
     else if (hour < 17) timeOfDay = 'afternoon';
@@ -157,7 +170,7 @@ export class ProactiveService {
 
     // Check if we already greeted today via connection greeting
     // If this is the first return of the day, checkGreeting() handles it
-    const today = new Date().toISOString().slice(0, 10);
+    const today = this.getLocalDateString();
     if (this.lastGreetingDate.get(deviceId) !== today) {
       // First greeting of the day — let checkGreeting() handle it
       // (it includes morning briefing context)
@@ -178,7 +191,7 @@ export class ProactiveService {
           ? `You know these things about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
           : '';
 
-      const hour = new Date().getHours();
+      const hour = this.getLocalHour();
       const isLongAbsence = awayMinutes > 30;
 
       const { text } = await this.llm.generate(
@@ -214,7 +227,7 @@ export class ProactiveService {
   @Cron('0 */30 * * * *')
   async checkIdleNudges() {
     const now = Date.now();
-    const hour = new Date().getHours();
+    const hour = this.getLocalHour();
 
     // Only during work hours
     if (hour < this.workHoursStart || hour >= this.workHoursEnd) return;
@@ -442,7 +455,7 @@ export class ProactiveService {
           ? `You know these things about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
           : '';
 
-      const hour = new Date().getHours();
+      const hour = this.getLocalHour();
       const promptIdx = Math.floor(Math.random() * ProactiveService.IDLE_PROMPTS.length);
       const prompt = ProactiveService.IDLE_PROMPTS[promptIdx];
 
