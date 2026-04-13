@@ -97,6 +97,26 @@ class DevicesRepositoryImpl implements DevicesRepository {
   }
 
   @override
+  Future<Either<Failure, bool>> pushVoicePreviewToDevice(
+    String id, {
+    String? voicePreset,
+    double? speed,
+    double? stability,
+  }) async {
+    try {
+      final playing = await _datasource.pushVoicePreviewToDevice(
+        id,
+        voicePreset: voicePreset,
+        speed: speed,
+        stability: stability,
+      );
+      return Right(playing);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
+
+  @override
   Future<Either<Failure, Uint8List>> previewVoice(
     String id, {
     String? voicePreset,

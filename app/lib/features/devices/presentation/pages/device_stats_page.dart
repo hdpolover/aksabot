@@ -193,18 +193,14 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
                               color: colors.onSurfaceVariant,
                             ),
                           ),
-                          trailing: SizedBox(
-                            width: 90,
-                            height: 36,
-                            child: FilledButton.tonal(
-                              onPressed: _isRefilling ? null : _refillPool,
-                              style: FilledButton.styleFrom(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 12),
-                              ),
-                              child:
-                                  Text(_isRefilling ? 'Refilling...' : 'Refill'),
+                          trailing: FilledButton.tonal(
+                            onPressed: _isRefilling ? null : _refillPool,
+                            style: FilledButton.styleFrom(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
                             ),
+                            child:
+                                Text(_isRefilling ? 'Refilling...' : 'Refill'),
                           ),
                         ),
                       ),

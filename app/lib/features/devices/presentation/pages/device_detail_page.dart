@@ -47,6 +47,13 @@ class _DeviceDetailView extends StatelessWidget {
           appBar: AppBar(
             title: Text(device?.name ?? 'Device'),
             actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh_rounded),
+                tooltip: 'Refresh',
+                onPressed: () => context
+                    .read<DevicesBloc>()
+                    .add(LoadDevice(deviceId)),
+              ),
               if (device != null)
                 IconButton(
                   icon: const Icon(Icons.delete_outline),
@@ -126,13 +133,20 @@ class _DashboardBody extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final ac = Theme.of(context).extension<AppColors>()!;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(
-        AppConstants.spacingLg,
-        AppConstants.spacingMd,
-        AppConstants.spacingLg,
-        AppConstants.spacingXxxl,
-      ),
+    return RefreshIndicator(
+      onRefresh: () async {
+        context.read<DevicesBloc>().add(LoadDevice(device.id));
+        await context.read<DevicesBloc>().stream.firstWhere(
+              (s) => s is DeviceDetailLoaded || s is DevicesError,
+            );
+      },
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(
+          AppConstants.spacingLg,
+          AppConstants.spacingMd,
+          AppConstants.spacingLg,
+          AppConstants.spacingXxxl,
+        ),
       children: [
         _StatusCard(device: device),
         const SizedBox(height: AppConstants.spacingXxl),
@@ -234,6 +248,7 @@ class _DashboardBody extends StatelessWidget {
         const SizedBox(height: AppConstants.spacingMd),
         _ReconnectRow(deviceId: id, deviceIsOnline: device.isOnline),
       ],
+    ),
     );
   }
 }

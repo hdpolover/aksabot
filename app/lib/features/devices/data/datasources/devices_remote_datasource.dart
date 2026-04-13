@@ -67,6 +67,38 @@ class DevicesRemoteDatasource {
     return data as Map<String, dynamic>;
   }
 
+  /// Tells the backend to synthesize the preview phrase and stream it to the
+  /// device over WebSocket.  Returns true if the device accepted playback.
+  Future<bool> pushVoicePreviewToDevice(
+    String id, {
+    String? voicePreset,
+    double? speed,
+    double? stability,
+  }) async {
+    try {
+      final response = await _client.dio.post(
+        '/devices/$id/voice/preview/push',
+        data: {
+          'voice_preset': voicePreset,
+          'voice_speed': speed,
+          'voice_stability': stability,
+        }..removeWhere((_, v) => v == null),
+        options: Options(responseType: ResponseType.json),
+      );
+      final body = response.data as Map<String, dynamic>;
+      final payload = body['data'] as Map<String, dynamic>;
+      return payload['playing'] as bool? ?? false;
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      String message = 'Push preview failed';
+      if (data is Map) {
+        final msg = data['message'];
+        if (msg is String) message = msg;
+      }
+      throw ServerException(message, statusCode: e.response?.statusCode);
+    }
+  }
+
   /// Calls the backend to synthesize a short preview phrase with the given
   /// voice settings and returns the decoded MP3 bytes.
   Future<Uint8List> previewVoice(

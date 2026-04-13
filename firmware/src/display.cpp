@@ -984,16 +984,25 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     }
 
     // ── BLE presence indicator (next to connection dot) ──
-    // Only shown when presence scanning is enabled.
-    // Bright blue = phone present, dim blue = scanning/away.
+    // Hidden when presence is disabled.
+    // Solid bright blue  = phone detected (PRESENT / LEAVING).
+    // Blinking medium blue = scanning, phone not yet seen (1000ms period,
+    //   slower than the 500ms stall blink so the two are visually distinct).
     if (status.blePresenceEnabled) {
-        uint16_t btCol = status.blePresent
-            ? rgb(80, 160, 255)   // bright blue — phone detected
-            : rgb(40, 60, 120);   // dim blue — scanning, not yet detected
-        s.fillSmoothCircle(20, 8, 4, btCol);
-        // Mini "B" diacritic marks so it reads as BT, not just a dot
-        s.fillSmoothCircle(24, 5, 1, btCol);
-        s.fillSmoothCircle(24, 11, 1, btCol);
+        if (status.blePresent) {
+            // Solid bright blue — confirmed present
+            s.fillSmoothCircle(20, 8, 4, rgb(60, 160, 255));
+            s.fillSmoothCircle(24, 5, 1, rgb(60, 160, 255));
+            s.fillSmoothCircle(24, 11, 1, rgb(60, 160, 255));
+        } else {
+            // Blink 1000ms on / 1000ms off — scanning, not yet detected
+            if ((millis() / 1000) % 2 == 0) {
+                s.fillSmoothCircle(20, 8, 4, rgb(50, 90, 200));
+                s.fillSmoothCircle(24, 5, 1, rgb(50, 90, 200));
+                s.fillSmoothCircle(24, 11, 1, rgb(50, 90, 200));
+            }
+            // Off half of the cycle — dot disappears, clearly "not found yet"
+        }
     }
 
     // ── Status icon (bottom) — small icon instead of text label ──

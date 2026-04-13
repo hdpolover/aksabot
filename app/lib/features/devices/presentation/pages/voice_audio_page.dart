@@ -22,7 +22,10 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
   bool _loading = true;
   bool _saving = false;
   bool _previewing = false;
+  bool _previewingOnDevice = false;
   PlayerState _playerState = PlayerState.stopped;
+
+  bool _deviceOnline = false;
 
   // Voice settings fields — mirror the keys stored in settingsJson.
   String _voicePreset = 'ziggy';
@@ -71,6 +74,7 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
       _sleepSound = s['audio_sleep_sound'] as bool? ?? true;
       _reminderChime = s['audio_reminder_chime'] as bool? ?? true;
       _vadSensitivity = (s['vad_sensitivity'] as num?)?.toDouble() ?? 0.5;
+      _deviceOnline = device.isOnline;
       _loading = false;
     });
   }
@@ -94,6 +98,37 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
       (device) {
         _applySettings(device);
         setState(() => _saving = false);
+      },
+    );
+  }
+
+  Future<void> _pushPreviewToDevice() async {
+    setState(() => _previewingOnDevice = true);
+
+    final result = await _devicesRepo.pushVoicePreviewToDevice(
+      widget.deviceId,
+      voicePreset: _voicePreset,
+      speed: _speed,
+      stability: _stability,
+    );
+
+    if (!mounted) return;
+    setState(() => _previewingOnDevice = false);
+
+    result.fold(
+      (failure) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: ${failure.message}')),
+        );
+      },
+      (playing) {
+        if (!playing) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Device is busy or offline — try again shortly'),
+            ),
+          );
+        }
       },
     );
   }
@@ -246,11 +281,11 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  // ── Preview button ──────────────────────────
+                  // ── Preview buttons ─────────────────────────
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.tonal(
-                      onPressed: (_saving || _previewing) ? null : _togglePreview,
+                      onPressed: (_saving || _previewing || _previewingOnDevice) ? null : _togglePreview,
                       child: _previewing
                           ? const SizedBox(
                               width: 18,
@@ -272,6 +307,31 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
                             ),
                     ),
                   ),
+                  if (_deviceOnline) ...[
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: (_saving || _previewing || _previewingOnDevice)
+                            ? null
+                            : _pushPreviewToDevice,
+                        child: _previewingOnDevice
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.speaker_rounded, size: 20),
+                                  SizedBox(width: 6),
+                                  Text('Play on device'),
+                                ],
+                              ),
+                      ),
+                    ),
+                  ],
                   if (isPlaying) ...[
                     const SizedBox(height: 8),
                     Row(

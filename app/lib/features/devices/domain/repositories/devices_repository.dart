@@ -14,6 +14,13 @@ abstract class DevicesRepository {
   Future<Either<Failure, void>> requestProvision(String id);
   Future<Either<Failure, void>> deleteDevice(String id);
   Future<Either<Failure, Map<String, dynamic>>> getStats(String id);
+  Future<Either<Failure, bool>> pushVoicePreviewToDevice(
+    String id, {
+    String? voicePreset,
+    double? speed,
+    double? stability,
+  });
+
   Future<Either<Failure, Uint8List>> previewVoice(
     String id, {
     String? voicePreset,

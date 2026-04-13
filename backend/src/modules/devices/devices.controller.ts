@@ -112,6 +112,28 @@ export class DevicesController {
     };
   }
 
+  /** Push a TTS voice preview to the device for on-device playback.
+   *  Returns 200 { playing: true } if the device is online and accepted the
+   *  audio, or 200 { playing: false } if it is offline / busy (so the app
+   *  can fall back to local playback without treating it as an error). */
+  @Post(':id/voice/preview/push')
+  @RateLimit({ limit: 10, windowSeconds: 60, keyType: 'user' })
+  async voicePreviewPush(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+    @Body() dto: VoicePreviewDto,
+  ) {
+    await this.devicesService.findById(id, user.userId);
+
+    const voiceOpts = {
+      voice: dto.voice_preset,
+      speed: dto.voice_speed,
+      stability: dto.voice_stability,
+    };
+    const playing = await this.gateway.sendVoicePreviewToDevice(id, voiceOpts);
+    return { playing };
+  }
+
   /** Signal an online device to reboot into BLE provisioning mode.
    *  Sends `device:provision` via WebSocket so the ESP32 sets the force-provision
    *  NVS flag and restarts — the app can then re-provision it over BLE.

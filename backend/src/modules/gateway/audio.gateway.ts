@@ -255,6 +255,51 @@ export class AudioGateway
     );
   }
 
+  // ── Voice preview pushed to device ───────────────────────────────
+
+  /** Synthesize the preview phrase with custom voice opts and stream it
+   *  to the device exactly like an AI response (response:start → Opus
+   *  frames → response:end).  Returns false if the device is offline or busy. */
+  async sendVoicePreviewToDevice(
+    deviceId: string,
+    voiceOpts: { voice?: string; speed?: number; stability?: number },
+  ): Promise<boolean> {
+    const socket = this.deviceToSocket.get(deviceId);
+    if (!socket || socket.readyState !== 1) return false;
+
+    const session = this.sessions.get(deviceId);
+    if (!session || session.state !== 'idle') return false;
+
+    session.state = 'speaking';
+
+    const PREVIEW_PHRASE = "Yo, I'm Aksa — Hendra's desk companion. Built different, for real.";
+
+    try {
+      this.sendToDevice(deviceId, 'response:start', { type: 'voice_preview' });
+
+      const { opusAudio } = await this.aiService.synthesizeWithCache(
+        PREVIEW_PHRASE,
+        undefined,
+        voiceOpts,
+      );
+      this.sendToDevice(deviceId, 'response:text', {
+        text: PREVIEW_PHRASE,
+        isFinal: true,
+      });
+      await this.sendFramedOpusToDevice(deviceId, opusAudio);
+
+      this.sendToDevice(deviceId, 'response:end', {
+        fullText: PREVIEW_PHRASE,
+        cacheKeys: [],
+      });
+      this.logger.log(`Voice preview sent to device ${deviceId}`);
+      return true;
+    } finally {
+      const s = this.sessions.get(deviceId);
+      if (s && s.state === 'speaking') s.state = 'idle';
+    }
+  }
+
   // ── Idle personality chat (TTS audio for random quips) ──────────
 
   private async sendIdleChatAudio(
