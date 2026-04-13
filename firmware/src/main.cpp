@@ -299,7 +299,7 @@ static void onWsJson(const char* event, const char* data) {
             const char* action = doc["action"] | "";
 
             if (strcmp(action, "stop") == 0) {
-                display::setMode(display::Mode::FACE);
+                display::setMode(display::getHomeMode());
                 face::setExpression(face::Expression::IDLE);
             } else {
                 display::PomodoroData pd = {};
@@ -469,9 +469,10 @@ static void onWsJson(const char* event, const char* data) {
             // Idle display mode — what the screen shows at rest ("face", "clock", "status")
             if (!doc["idle_display_mode"].isNull()) {
                 const char* mode = doc["idle_display_mode"] | "face";
-                if (strcmp(mode, "clock") == 0)       display::setMode(display::Mode::CLOCK);
-                else if (strcmp(mode, "status") == 0) display::setMode(display::Mode::STATUS);
-                else                                  display::setMode(display::Mode::FACE);
+                display::Mode dm = display::Mode::FACE;
+                if (strcmp(mode, "clock") == 0)       dm = display::Mode::CLOCK;
+                else if (strcmp(mode, "status") == 0) dm = display::Mode::STATUS;
+                display::setHomeMode(dm);  // sets g_homeMode + switches immediately
                 nvs_store::setIdleDisplayMode(mode);
                 Serial.printf("[Main] Config: idle_display_mode=%s\n", mode);
             }
@@ -666,7 +667,7 @@ static void onTouchEvent(touch::Event event) {
             }
             else if (display::getMode() == display::Mode::REMINDER) {
                 // Dismiss reminder
-                display::setMode(display::Mode::FACE);
+                display::setMode(display::getHomeMode());
                 ws_client::sendEvent("proactive:dismiss");
             }
             else if (appState.botState == BotState::IDLE) {
@@ -1110,9 +1111,10 @@ void setup() {
         // Restore idle display mode from NVS
         char idleMode[16];
         nvs_store::getIdleDisplayMode(idleMode, sizeof(idleMode));
-        if (strcmp(idleMode, "clock") == 0)       display::setMode(display::Mode::CLOCK);
-        else if (strcmp(idleMode, "status") == 0) display::setMode(display::Mode::STATUS);
-        // default: FACE (already set by display::init())
+        display::Mode idleDm = display::Mode::FACE;
+        if (strcmp(idleMode, "clock") == 0)       idleDm = display::Mode::CLOCK;
+        else if (strcmp(idleMode, "status") == 0) idleDm = display::Mode::STATUS;
+        display::setHomeMode(idleDm);  // sets g_homeMode so wake() and dismissals respect it
     }
     boot_screen::init();
 
@@ -1429,7 +1431,7 @@ void setup() {
                 case gesture::Type::SWIPE_RIGHT:
                     // Dismiss current display/reminder
                     if (display::getMode() == display::Mode::REMINDER) {
-                        display::setMode(display::Mode::FACE);
+                        display::setMode(display::getHomeMode());
                         ws_client::sendEvent("proactive:dismiss");
                     }
                     break;
@@ -1569,7 +1571,7 @@ void loop() {
         updateStatusBar();
 
         // Dismiss any lingering reminder ("Almost there...")
-        display::setMode(display::Mode::FACE);
+        display::setMode(display::getHomeMode());
     }
 
     // Tick presence detector + BLE scanner

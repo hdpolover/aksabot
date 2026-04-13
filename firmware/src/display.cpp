@@ -62,6 +62,9 @@ static const int CY = LCD_HEIGHT / 2 - 20;
 static const int EYE_SPACE = 48;
 static const int MOUTH_Y   = CY + 70;
 
+// ── Home mode — what the display returns to after wake/dismiss ────────────
+static display::Mode g_homeMode = display::Mode::FACE;
+
 // ── Active face style ─────────────────────────────────
 // Points to one of the built-in presets (ORBIT or NOVA).
 // Changed at runtime via display::setFaceStyle() — loaded from NVS on boot.
@@ -305,6 +308,7 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
                       float amp, float bounceY, float breathPhase) {
     int my = MOUTH_Y + (int)bounceY;
     bool talking = amp > 0.02f;
+    const bool nova = (g_faceStyle && g_faceStyle->id == face_style::StyleId::NOVA);
 
     // Scale amplitude for mouth opening (boosted for visibility)
     float a = amp * 4.0f;
@@ -313,7 +317,7 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
     switch (expr) {
         case face::Expression::IDLE: {
             if (talking) {
-                // Rect slot — grows in height with amplitude
+                // Rect slot — grows in height with amplitude (same for both styles)
                 int mw = 60;
                 int mh = 6 + (int)(a * 40);
                 int cr = (mh < 8) ? mh / 2 : 8;
@@ -324,33 +328,59 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
                                     blendRGB565(pal.accent, pal.bg, 20));
                 }
             } else {
-                float breathOff = sinf(breathPhase * 2 * 3.14159f) * 1.5f;
-                thickBezier(s, CX - 30, my, CX, my + 10 + breathOff, CX + 30, my, 3, pal.mouth);
+                if (nova) {
+                    // Flat wide rounded rect with subtle breathe variation
+                    float breathOff = sinf(breathPhase * 2 * 3.14159f) * 1.5f;
+                    int mw = 52, mh = 7 + (int)breathOff;
+                    if (mh < 5) mh = 5;
+                    s.fillRoundRect(CX - mw / 2, my - mh / 2, mw, mh, mh / 2, pal.mouth);
+                } else {
+                    float breathOff = sinf(breathPhase * 2 * 3.14159f) * 1.5f;
+                    thickBezier(s, CX - 30, my, CX, my + 10 + breathOff, CX + 30, my, 3, pal.mouth);
+                }
             }
             break;
         }
         case face::Expression::LISTENING: {
-            s.fillEllipse(CX, my, 7, 9, pal.mouth);
-            s.fillEllipse(CX, my, 4, 6, blendRGB565(pal.accent, pal.bg, 40));
+            if (nova) {
+                // Small rounded rect dot — attentive pause
+                s.fillRoundRect(CX - 8, my - 9, 16, 18, 4, pal.mouth);
+                s.fillRoundRect(CX - 4, my - 5, 8, 10, 3, blendRGB565(pal.accent, pal.bg, 40));
+            } else {
+                s.fillEllipse(CX, my, 7, 9, pal.mouth);
+                s.fillEllipse(CX, my, 4, 6, blendRGB565(pal.accent, pal.bg, 40));
+            }
             break;
         }
         case face::Expression::THINKING: {
             // Animated pursed lip — shifts side-to-side like "hmm"
             float thinkT = breathPhase * 6.28318f;
             int mxOff = (int)(sinf(thinkT * 1.5f) * 10.0f);
-            // Pursed mouth that subtly opens and closes
-            float mOpen = (sinf(thinkT * 2.0f) * 0.5f + 0.5f) * 0.3f;
-            int mw = 8 + (int)(mOpen * 6);
-            int mh = 5 + (int)(mOpen * 8);
-            s.fillEllipse(CX + mxOff, my, mw, mh, pal.mouth);
-            if (mh > 6) {
-                s.fillEllipse(CX + mxOff, my, mw - 3, mh - 3,
-                              blendRGB565(pal.accent, pal.bg, 30));
+            if (nova) {
+                float mOpen = (sinf(thinkT * 2.0f) * 0.5f + 0.5f) * 0.3f;
+                int mw = 18 + (int)(mOpen * 10);
+                int mh = 8 + (int)(mOpen * 12);
+                int cr = mh / 2;
+                s.fillRoundRect(CX + mxOff - mw / 2, my - mh / 2, mw, mh, cr, pal.mouth);
+                if (mh > 10) {
+                    s.fillRoundRect(CX + mxOff - mw / 2 + 3, my - mh / 2 + 3,
+                                    mw - 6, mh - 6, cr,
+                                    blendRGB565(pal.accent, pal.bg, 30));
+                }
+            } else {
+                float mOpen = (sinf(thinkT * 2.0f) * 0.5f + 0.5f) * 0.3f;
+                int mw = 8 + (int)(mOpen * 6);
+                int mh = 5 + (int)(mOpen * 8);
+                s.fillEllipse(CX + mxOff, my, mw, mh, pal.mouth);
+                if (mh > 6) {
+                    s.fillEllipse(CX + mxOff, my, mw - 3, mh - 3,
+                                  blendRGB565(pal.accent, pal.bg, 30));
+                }
             }
             break;
         }
         case face::Expression::SPEAKING: {
-            // Wide rect slot — more dramatic range than idle
+            // Wide rect slot — more dramatic range than idle (same for both styles)
             int mw = 68;
             int mh = 8 + (int)(a * 46);
             int cr = (mh < 8) ? mh / 2 : 8;
@@ -364,7 +394,7 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
         }
         case face::Expression::HAPPY: {
             if (talking) {
-                // Wide rect slot, shifted down 4px to sit where the smile curve was
+                // Wide rect slot, shifted down 4px (same for both styles)
                 int mw = 70;
                 int mh = 8 + (int)(a * 42);
                 int cr = (mh < 8) ? mh / 2 : 8;
@@ -375,99 +405,196 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
                                     blendRGB565(pal.accent, pal.bg, 20));
                 }
             } else {
-                // Closed: keep the bezier smile — it's a line, fits fine
-                thickBezier(s, CX - 26, my, CX, my + 16, CX + 26, my, 3, pal.mouth);
-                thickBezier(s, CX - 16, my + 2, CX, my + 10, CX + 16, my + 2, 2,
-                            blendRGB565(TFT_WHITE, pal.mouth, 160), 16);
+                if (nova) {
+                    // Wide short rounded rect — happy smile bar
+                    int mw = 54, mh = 8;
+                    s.fillRoundRect(CX - mw / 2, my + 4, mw, mh, mh / 2, pal.mouth);
+                    s.fillRoundRect(CX - mw / 2 + 6, my + 5, mw - 12, 3, 1,
+                                    blendRGB565(TFT_WHITE, pal.mouth, 160));
+                } else {
+                    thickBezier(s, CX - 26, my, CX, my + 16, CX + 26, my, 3, pal.mouth);
+                    thickBezier(s, CX - 16, my + 2, CX, my + 10, CX + 16, my + 2, 2,
+                                blendRGB565(TFT_WHITE, pal.mouth, 160), 16);
+                }
             }
             break;
         }
         case face::Expression::SAD: {
             if (talking) {
-                // Sad talking — downturned oval
-                int ow = 38 + (int)(a * 16);
-                int oh = 12 + (int)(a * 32);
-                s.fillEllipse(CX, my + 2, ow / 2, oh / 2, pal.mouth);
-                if (oh > 14) {
-                    s.fillEllipse(CX, my + 3, ow / 2 - 4, oh / 2 - 4,
-                                  blendRGB565(pal.accent, pal.bg, 20));
+                if (nova) {
+                    int mw = 34 + (int)(a * 20);
+                    int mh = 10 + (int)(a * 32);
+                    int cr = (mh < 10) ? mh / 2 : 6;
+                    s.fillRoundRect(CX - mw / 2, my - mh / 2 + 2, mw, mh, cr, pal.mouth);
+                    if (mh > 14) {
+                        s.fillRoundRect(CX - mw / 2 + 3, my - mh / 2 + 5,
+                                        mw - 6, mh - 6, cr,
+                                        blendRGB565(pal.accent, pal.bg, 20));
+                    }
+                } else {
+                    int ow = 38 + (int)(a * 16);
+                    int oh = 12 + (int)(a * 32);
+                    s.fillEllipse(CX, my + 2, ow / 2, oh / 2, pal.mouth);
+                    if (oh > 14) {
+                        s.fillEllipse(CX, my + 3, ow / 2 - 4, oh / 2 - 4,
+                                      blendRGB565(pal.accent, pal.bg, 20));
+                    }
                 }
             } else {
-                float trem = sinf(breathPhase * 6.28318f * 3) * 1.0f;
-                thickBezier(s, CX - 18, my + 4, CX, my - 6 + trem, CX + 18, my + 4, 2, pal.mouth);
+                if (nova) {
+                    // Narrow short rect sitting lower — sad flat line
+                    float trem = sinf(breathPhase * 6.28318f * 3) * 1.0f;
+                    int mw = 30, mh = 6;
+                    s.fillRoundRect(CX - mw / 2, my + 2 + (int)trem, mw, mh, mh / 2, pal.mouth);
+                } else {
+                    float trem = sinf(breathPhase * 6.28318f * 3) * 1.0f;
+                    thickBezier(s, CX - 18, my + 4, CX, my - 6 + trem, CX + 18, my + 4, 2, pal.mouth);
+                }
             }
             break;
         }
         case face::Expression::ENCOURAGING: {
             if (talking) {
-                // Confident wide oval that opens
-                int ow = 48 + (int)(a * 20);
-                int oh = 14 + (int)(a * 42);
-                s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
-                if (oh > 16) {
-                    s.fillEllipse(CX, my + 1, ow / 2 - 4, oh / 2 - 4,
-                                  blendRGB565(pal.accent, pal.bg, 20));
+                if (nova) {
+                    int mw = 50 + (int)(a * 18);
+                    int mh = 10 + (int)(a * 40);
+                    int cr = (mh < 10) ? mh / 2 : 8;
+                    s.fillRoundRect(CX - mw / 2, my - mh / 2, mw, mh, cr, pal.mouth);
+                    if (mh > 16) {
+                        s.fillRoundRect(CX - mw / 2 + 4, my - mh / 2 + 4,
+                                        mw - 8, mh - 8, cr,
+                                        blendRGB565(pal.accent, pal.bg, 20));
+                    }
+                } else {
+                    int ow = 48 + (int)(a * 20);
+                    int oh = 14 + (int)(a * 42);
+                    s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
+                    if (oh > 16) {
+                        s.fillEllipse(CX, my + 1, ow / 2 - 4, oh / 2 - 4,
+                                      blendRGB565(pal.accent, pal.bg, 20));
+                    }
                 }
             } else {
-                thickBezier(s, CX - 24, my, CX, my + 14, CX + 24, my, 3, pal.mouth);
-                thickBezier(s, CX - 14, my + 2, CX, my + 9, CX + 14, my + 2, 2,
-                            blendRGB565(TFT_WHITE, pal.mouth, 120), 14);
+                if (nova) {
+                    // Wide short rect — confident smile bar
+                    int mw = 48, mh = 8;
+                    s.fillRoundRect(CX - mw / 2, my + 4, mw, mh, mh / 2, pal.mouth);
+                    s.fillRoundRect(CX - mw / 2 + 5, my + 5, mw - 10, 3, 1,
+                                    blendRGB565(TFT_WHITE, pal.mouth, 120));
+                } else {
+                    thickBezier(s, CX - 24, my, CX, my + 14, CX + 24, my, 3, pal.mouth);
+                    thickBezier(s, CX - 14, my + 2, CX, my + 9, CX + 14, my + 2, 2,
+                                blendRGB565(TFT_WHITE, pal.mouth, 120), 14);
+                }
             }
             break;
         }
         case face::Expression::CALM: {
             if (talking) {
-                // Gentle small opening — soft, rounded
-                int ow = 36 + (int)(a * 14);
-                int oh = 10 + (int)(a * 28);
-                s.fillEllipse(CX, my + 2, ow / 2, oh / 2, pal.mouth);
-                if (oh > 12) {
-                    s.fillEllipse(CX, my + 3, ow / 2 - 3, oh / 2 - 3,
-                                  blendRGB565(pal.accent, pal.bg, 25));
+                if (nova) {
+                    int mw = 32 + (int)(a * 16);
+                    int mh = 8 + (int)(a * 26);
+                    int cr = (mh < 8) ? mh / 2 : 6;
+                    s.fillRoundRect(CX - mw / 2, my - mh / 2 + 2, mw, mh, cr, pal.mouth);
+                    if (mh > 12) {
+                        s.fillRoundRect(CX - mw / 2 + 3, my - mh / 2 + 5,
+                                        mw - 6, mh - 6, cr,
+                                        blendRGB565(pal.accent, pal.bg, 25));
+                    }
+                } else {
+                    int ow = 36 + (int)(a * 14);
+                    int oh = 10 + (int)(a * 28);
+                    s.fillEllipse(CX, my + 2, ow / 2, oh / 2, pal.mouth);
+                    if (oh > 12) {
+                        s.fillEllipse(CX, my + 3, ow / 2 - 3, oh / 2 - 3,
+                                      blendRGB565(pal.accent, pal.bg, 25));
+                    }
                 }
             } else {
-                thickBezier(s, CX - 22, my + 2, CX, my + 5, CX + 22, my + 2, 3, pal.mouth);
+                if (nova) {
+                    // Medium short rect — relaxed neutral
+                    int mw = 38, mh = 6;
+                    s.fillRoundRect(CX - mw / 2, my + 1, mw, mh, mh / 2, pal.mouth);
+                } else {
+                    thickBezier(s, CX - 22, my + 2, CX, my + 5, CX + 22, my + 2, 3, pal.mouth);
+                }
             }
             break;
         }
         case face::Expression::CONFUSED: {
             if (talking) {
-                // Wavering asymmetric open — slightly off-center, wobbles
                 float wobble = sinf(breathPhase * 6.28f * 2) * 3.0f;
-                int ow = 36 + (int)(a * 18);
-                int oh = 12 + (int)(a * 30);
-                s.fillEllipse(CX + (int)wobble, my, ow / 2, oh / 2, pal.mouth);
-                if (oh > 14) {
-                    s.fillEllipse(CX + (int)wobble, my + 1, ow / 2 - 4, oh / 2 - 4,
-                                  blendRGB565(pal.accent, pal.bg, 25));
+                if (nova) {
+                    int mw = 32 + (int)(a * 18);
+                    int mh = 10 + (int)(a * 28);
+                    int cr = (mh < 10) ? mh / 2 : 6;
+                    s.fillRoundRect(CX + (int)wobble - mw / 2, my - mh / 2, mw, mh, cr, pal.mouth);
+                    if (mh > 14) {
+                        s.fillRoundRect(CX + (int)wobble - mw / 2 + 3, my - mh / 2 + 3,
+                                        mw - 6, mh - 6, cr,
+                                        blendRGB565(pal.accent, pal.bg, 25));
+                    }
+                } else {
+                    int ow = 36 + (int)(a * 18);
+                    int oh = 12 + (int)(a * 30);
+                    s.fillEllipse(CX + (int)wobble, my, ow / 2, oh / 2, pal.mouth);
+                    if (oh > 14) {
+                        s.fillEllipse(CX + (int)wobble, my + 1, ow / 2 - 4, oh / 2 - 4,
+                                      blendRGB565(pal.accent, pal.bg, 25));
+                    }
                 }
             } else {
-                for (int i = 0; i <= 40; i++) {
-                    float t = (float)i / 40;
-                    int wx = CX - 20 + (int)(40 * t);
-                    int wy = my + (int)(5.0f * sinf(t * 3.14159f * 3.0f + breathPhase * 6.28f));
-                    s.fillCircle(wx, wy, 2, pal.mouth);
+                if (nova) {
+                    // Small rect with wobble offset — confused tic
+                    float wobbleOff = sinf(breathPhase * 6.28f * 3.0f) * 3.0f;
+                    int mw = 28, mh = 7;
+                    s.fillRoundRect(CX - mw / 2 + (int)wobbleOff, my - mh / 2, mw, mh, mh / 2, pal.mouth);
+                } else {
+                    for (int i = 0; i <= 40; i++) {
+                        float t = (float)i / 40;
+                        int wx = CX - 20 + (int)(40 * t);
+                        int wy = my + (int)(5.0f * sinf(t * 3.14159f * 3.0f + breathPhase * 6.28f));
+                        s.fillCircle(wx, wy, 2, pal.mouth);
+                    }
                 }
             }
             break;
         }
         case face::Expression::FOCUSED: {
             if (talking) {
-                // Firm controlled opening — tight but visible
-                int ow = 32 + (int)(a * 12);
-                int oh = 10 + (int)(a * 24);
-                s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
-                if (oh > 12) {
-                    s.fillEllipse(CX, my + 1, ow / 2 - 3, oh / 2 - 3,
-                                  blendRGB565(pal.accent, pal.bg, 25));
+                if (nova) {
+                    int mw = 28 + (int)(a * 12);
+                    int mh = 8 + (int)(a * 22);
+                    int cr = (mh < 8) ? mh / 2 : 5;
+                    s.fillRoundRect(CX - mw / 2, my - mh / 2, mw, mh, cr, pal.mouth);
+                    if (mh > 12) {
+                        s.fillRoundRect(CX - mw / 2 + 3, my - mh / 2 + 3,
+                                        mw - 6, mh - 6, cr,
+                                        blendRGB565(pal.accent, pal.bg, 25));
+                    }
+                } else {
+                    int ow = 32 + (int)(a * 12);
+                    int oh = 10 + (int)(a * 24);
+                    s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
+                    if (oh > 12) {
+                        s.fillEllipse(CX, my + 1, ow / 2 - 3, oh / 2 - 3,
+                                      blendRGB565(pal.accent, pal.bg, 25));
+                    }
                 }
             } else {
-                thickBezier(s, CX - 16, my, CX - 5, my + 1, CX + 5, my + 1, 2, pal.mouth);
-                thickBezier(s, CX + 5, my + 1, CX + 16, my, CX + 16, my, 2, pal.mouth);
+                if (nova) {
+                    // Very narrow thin rect — tight focused line
+                    int mw = 26, mh = 5;
+                    s.fillRoundRect(CX - mw / 2, my - mh / 2, mw, mh, mh / 2, pal.mouth);
+                } else {
+                    thickBezier(s, CX - 16, my, CX - 5, my + 1, CX + 5, my + 1, 2, pal.mouth);
+                    thickBezier(s, CX + 5, my + 1, CX + 16, my, CX + 16, my, 2, pal.mouth);
+                }
             }
             break;
         }
         case face::Expression::SLEEPING: {
+            // Z text — same for both styles
             float bOff = sinf(breathPhase * 2 * 3.14159f) * 5;
             s.setTextSize(2);
             s.setTextColor(pal.accent);
@@ -477,15 +604,25 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             break;
         }
         case face::Expression::OFFLINE:
-            thickBezier(s, CX - 18, my, CX, my, CX + 18, my, 2, pal.mouth);
+            if (nova) {
+                // Thin flat rounded rect — straight dead line
+                s.fillRoundRect(CX - 16, my - 3, 32, 6, 3, pal.mouth);
+            } else {
+                thickBezier(s, CX - 18, my, CX, my, CX + 18, my, 2, pal.mouth);
+            }
             break;
         case face::Expression::SHRUG: {
-            // Pursed lips blowing a bubble
             float bp = breathPhase * 2 * 3.14159f;
-            // Pursed mouth (small circle)
-            s.fillSmoothCircle(CX, my, 5, pal.mouth);
-            s.fillSmoothCircle(CX, my, 2, blendRGB565(pal.accent, pal.bg, 40));
-            // Floating bubble — grows and drifts right from mouth
+            if (nova) {
+                // Small square rounded rect — pursed lips
+                s.fillRoundRect(CX - 6, my - 6, 12, 12, 3, pal.mouth);
+                s.fillRoundRect(CX - 3, my - 3, 6, 6, 2, blendRGB565(pal.accent, pal.bg, 40));
+            } else {
+                // Pursed mouth (small circle)
+                s.fillSmoothCircle(CX, my, 5, pal.mouth);
+                s.fillSmoothCircle(CX, my, 2, blendRGB565(pal.accent, pal.bg, 40));
+            }
+            // Floating bubble — grows and drifts right from mouth (same for both)
             float bubbleT = fmodf(breathPhase * 3.0f, 1.0f);  // 3x faster cycle
             int bubbleR = 3 + (int)(bubbleT * 8);
             int bubbleX = CX + 10 + (int)(bubbleT * 30);
@@ -493,7 +630,6 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             uint8_t bubbleAlpha = (uint8_t)(200 * (1.0f - bubbleT));
             uint16_t bubbleCol = blendRGB565(pal.accent, pal.bg, bubbleAlpha);
             s.drawCircle(bubbleX, bubbleY, bubbleR, bubbleCol);
-            // Highlight
             if (bubbleR > 4) {
                 s.fillSmoothCircle(bubbleX - bubbleR/3, bubbleY - bubbleR/3, 2,
                                    blendRGB565(TFT_WHITE, pal.bg, bubbleAlpha));
@@ -503,33 +639,66 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
         case face::Expression::SURPRISED: {
             // Wide open "O" mouth — "oh wow!"
             float pulse = sinf(breathPhase * 2 * 3.14159f) * 0.1f + 0.9f;
-            int ow = (int)(26 * pulse);
-            int oh = (int)(28 * pulse);
-            s.fillEllipse(CX, my, ow, oh, pal.mouth);
-            s.fillEllipse(CX, my + 1, ow - 5, oh - 5, blendRGB565(pal.accent, pal.bg, 25));
+            if (nova) {
+                // Tall rounded rect — rectangular O-mouth
+                int mw = (int)(44 * pulse);
+                int mh = (int)(52 * pulse);
+                int cr = mw / 3;
+                s.fillRoundRect(CX - mw / 2, my - mh / 2, mw, mh, cr, pal.mouth);
+                s.fillRoundRect(CX - mw / 2 + 5, my - mh / 2 + 5, mw - 10, mh - 10, cr,
+                                blendRGB565(pal.accent, pal.bg, 25));
+            } else {
+                int ow = (int)(26 * pulse);
+                int oh = (int)(28 * pulse);
+                s.fillEllipse(CX, my, ow, oh, pal.mouth);
+                s.fillEllipse(CX, my + 1, ow - 5, oh - 5, blendRGB565(pal.accent, pal.bg, 25));
+            }
             break;
         }
         case face::Expression::SHOCKED: {
             // Maximum gape — jaw dropped open, trembling slightly
             float trem = sinf(breathPhase * 6.28f * 5) * 1.5f;
-            int ow = 32;
-            int oh = 34 + (int)trem;
-            s.fillEllipse(CX, my + 4, ow, oh, pal.mouth);
-            s.fillEllipse(CX, my + 5, ow - 6, oh - 6, blendRGB565(pal.accent, pal.bg, 20));
+            if (nova) {
+                // Tall rounded rect with tremor
+                int mw = 52;
+                int mh = 56 + (int)trem;
+                int cr = mw / 3;
+                s.fillRoundRect(CX - mw / 2, my - mh / 2 + 4, mw, mh, cr, pal.mouth);
+                s.fillRoundRect(CX - mw / 2 + 5, my - mh / 2 + 9, mw - 10, mh - 10, cr,
+                                blendRGB565(pal.accent, pal.bg, 20));
+            } else {
+                int ow = 32;
+                int oh = 34 + (int)trem;
+                s.fillEllipse(CX, my + 4, ow, oh, pal.mouth);
+                s.fillEllipse(CX, my + 5, ow - 6, oh - 6, blendRGB565(pal.accent, pal.bg, 20));
+            }
             break;
         }
         case face::Expression::ANGRY: {
             if (talking) {
-                // Aggressive choppy talking mouth
-                int ow = 28 + (int)(a * 12);
-                int oh = 10 + (int)(a * 20);
-                s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
+                if (nova) {
+                    int mw = 24 + (int)(a * 14);
+                    int mh = 8 + (int)(a * 20);
+                    int cr = (mh < 8) ? mh / 2 : 5;
+                    s.fillRoundRect(CX - mw / 2, my - mh / 2, mw, mh, cr, pal.mouth);
+                } else {
+                    // Aggressive choppy talking mouth
+                    int ow = 28 + (int)(a * 12);
+                    int oh = 10 + (int)(a * 20);
+                    s.fillEllipse(CX, my, ow / 2, oh / 2, pal.mouth);
+                }
             } else {
-                // Tight clenched frown
-                thickBezier(s, CX - 20, my + 2, CX, my - 6, CX + 20, my + 2, 3, pal.mouth);
-                // Teeth-clenched line
-                thickBezier(s, CX - 12, my + 2, CX, my - 2, CX + 12, my + 2, 1,
-                            blendRGB565(TFT_WHITE, pal.mouth, 100), 12);
+                if (nova) {
+                    // Narrow short rect — tight angry line
+                    int mw = 32, mh = 6;
+                    s.fillRoundRect(CX - mw / 2, my + 1, mw, mh, mh / 2, pal.mouth);
+                } else {
+                    // Tight clenched frown
+                    thickBezier(s, CX - 20, my + 2, CX, my - 6, CX + 20, my + 2, 3, pal.mouth);
+                    // Teeth-clenched line
+                    thickBezier(s, CX - 12, my + 2, CX, my - 2, CX + 12, my + 2, 1,
+                                blendRGB565(TFT_WHITE, pal.mouth, 100), 12);
+                }
             }
             break;
         }
@@ -538,10 +707,18 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             float t = breathPhase * 2 * 3.14159f;
             float wobble = sinf(t * 2.3f) * 3.0f;
             float twist = sinf(t * 1.7f) * 4.0f;
-            int lx = CX - 22, rx = CX + 22;
-            int lOff = (int)(wobble + twist);
-            int rOff = (int)(-wobble * 0.5f);
-            thickBezier(s, lx, my + 4 + lOff, CX, my - 2, rx, my + 4 + rOff, 2, pal.mouth);
+            if (nova) {
+                // Short rounded rect with wobble offsets
+                int mw = 36, mh = 7;
+                int xOff = (int)(wobble * 0.7f);
+                int yOff = (int)(twist * 0.5f);
+                s.fillRoundRect(CX - mw / 2 + xOff, my - mh / 2 + yOff, mw, mh, mh / 2, pal.mouth);
+            } else {
+                int lx = CX - 22, rx = CX + 22;
+                int lOff = (int)(wobble + twist);
+                int rOff = (int)(-wobble * 0.5f);
+                thickBezier(s, lx, my + 4 + lOff, CX, my - 2, rx, my + 4 + rOff, 2, pal.mouth);
+            }
             break;
         }
         default: break;
@@ -1110,6 +1287,15 @@ void renderGlance(const display::GlanceData& data) {
 
 // ── Public API ─────────────────────────────────────────
 
+void display::setHomeMode(Mode mode) {
+    g_homeMode = mode;
+    setMode(mode);
+}
+
+display::Mode display::getHomeMode() {
+    return g_homeMode;
+}
+
 void display::setFaceStyle(uint8_t styleId) {
     g_faceStyle = face_style::fromId(styleId);
     Serial.printf("[Display] Face style: %s\n", g_faceStyle->name);
@@ -1289,7 +1475,7 @@ void display::wake() {
     if (!sleeping) return;
     sleeping = false;
     face::setExpression(face::Expression::IDLE, 300);
-    setMode(Mode::FACE);
+    setMode(g_homeMode);  // restore to user's configured idle mode, not always FACE
     // Don't set brightness before fade — fadeBrightness checks target == brightness
     // and skips if they match. We need it to fade FROM current (0) TO userBrightness.
     fadeBrightness(userBrightness, 300);

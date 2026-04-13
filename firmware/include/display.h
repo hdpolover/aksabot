@@ -137,4 +137,12 @@ void setFaceStyle(uint8_t styleId);
 /// Returns the current face style ID.
 uint8_t getFaceStyleId();
 
+/// Set the home mode — the mode the display returns to after wake, reminder
+/// dismiss, and other events that would otherwise hard-reset to FACE.
+/// Also calls setMode() to switch immediately.
+void setHomeMode(Mode mode);
+
+/// Returns the configured home mode (default: FACE).
+Mode getHomeMode();
+
 }  // namespace display
