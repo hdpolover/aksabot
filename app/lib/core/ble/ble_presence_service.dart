@@ -66,7 +66,9 @@ class BlePresenceService {
     }
 
     _scanning = true;
-    _scheduleNextScan();
+    // Scan immediately on enable (1s delay to let BLE settle) rather than
+    // waiting the full 8s interval — gives fast feedback after toggle.
+    _scanTimer = Timer(const Duration(seconds: 1), _doScanCycle);
     return true;
   }
 
@@ -74,6 +76,12 @@ class BlePresenceService {
     _scanning = false;
     _scanTimer?.cancel();
     _scanTimer = null;
+    // Reset state to away so that re-enabling always triggers a fresh
+    // _reportArrived() on the next detection. Without this, _state stays
+    // 'present' and _processScanResult skips the report entirely.
+    _state = _PresenceState.away;
+    _lastSeen = null;
+    _leftAt = null;
     try {
       await FlutterBluePlus.stopScan();
     } catch (_) {}

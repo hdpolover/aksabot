@@ -7,6 +7,8 @@ export interface DeviceSession {
   conversationId: string | null;
   state: 'idle' | 'listening' | 'thinking' | 'speaking';
   sttStream: SttStream | null;
+  /** Watchdog timer: fires if no audio chunks arrive for too long, ending the STT stream cleanly. */
+  sttIdleTimer: ReturnType<typeof setTimeout> | null;
   interrupted: boolean;
   idleTimer: ReturnType<typeof setTimeout> | null;
   /** Audio format for current recording session. 'opus' (default, ESP32) or 'pcm16' (web simulator). */
@@ -29,6 +31,7 @@ export class SessionManager {
       conversationId: null,
       state: 'idle',
       sttStream: null,
+      sttIdleTimer: null,
       interrupted: false,
       idleTimer: null,
       audioFormat: 'opus',
@@ -51,9 +54,34 @@ export class SessionManager {
     const session = this.sessions.get(deviceId);
     if (session) {
       this.clearIdleTimer(session);
+      this.clearSttIdleTimer(session);
       session.sttStream?.destroy();
     }
     this.sessions.delete(deviceId);
+  }
+
+  /** Start (or reset) the per-stream watchdog. If no audio arrives within ms, calls onTimeout. */
+  resetSttIdleTimer(
+    deviceId: string,
+    ms: number,
+    onTimeout: () => void,
+  ): void {
+    const session = this.sessions.get(deviceId);
+    if (!session) return;
+    this.clearSttIdleTimer(session);
+    session.sttIdleTimer = setTimeout(onTimeout, ms);
+  }
+
+  clearSttIdleTimer(deviceId: string): void;
+  clearSttIdleTimer(session: DeviceSession): void;
+  clearSttIdleTimer(arg: string | DeviceSession): void {
+    const session =
+      typeof arg === 'string' ? this.sessions.get(arg) : arg;
+    if (!session) return;
+    if (session.sttIdleTimer) {
+      clearTimeout(session.sttIdleTimer);
+      session.sttIdleTimer = null;
+    }
   }
 
   setState(

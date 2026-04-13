@@ -488,10 +488,16 @@ static void onWsJson(const char* event, const char* data) {
                 nvs_store::setPresenceEnabled(enabled);
                 if (enabled) {
                     ble_manager::startPresenceAdvertising();
+                    // Restore last known state so the dot is correct immediately
+                    if (nvs_store::getPresencePresent()) {
+                        appState.presenceState = PresenceState::PRESENT;
+                    }
                 } else {
                     ble_manager::stopAdvertising();
                     appState.presenceState = PresenceState::UNKNOWN;
+                    nvs_store::setPresencePresent(false);  // Clear on disable
                 }
+                updateStatusBar();
                 Serial.printf("[Main] Config: presence_enabled=%s\n", enabled ? "true" : "false");
             }
             // Idle timeout

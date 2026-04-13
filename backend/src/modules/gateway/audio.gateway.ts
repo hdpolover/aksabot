@@ -751,6 +751,20 @@ export class AudioGateway
     session.sttStream = sttStream;
     this.logger.log(`[${deviceId}] STT stream created (format=${session.audioFormat})`);
 
+    // Watchdog: if no audio chunks arrive (or gap between chunks) exceeds 8s,
+    // end the stream cleanly rather than letting Google time it out with an error.
+    const startWatchdog = () => {
+      this.sessions.resetSttIdleTimer(deviceId, 8000, () => {
+        const s = this.sessions.get(deviceId);
+        if (s?.sttStream === sttStream) {
+          this.logger.warn(`[${deviceId}] STT watchdog: no audio for 8s — ending stream`);
+          s.sttStream = null;
+          sttStream.end();
+        }
+      });
+    };
+    startWatchdog();
+
     sttStream.on('partial', (text: string) => {
       this.sendToDevice(deviceId, 'transcript:partial', {
         text,
@@ -759,6 +773,7 @@ export class AudioGateway
     });
 
     sttStream.on('final', (result: SttResult) => {
+      this.sessions.clearSttIdleTimer(deviceId);
       this.logger.log(`[${deviceId}] STT final: "${result.transcript}" (confidence=${result.confidence?.toFixed(2)})`);
       this.onSttFinal(deviceId, result).catch((err) =>
         this.logger.error(`[${deviceId}] onSttFinal error: ${err.message}`, err.stack),
@@ -768,6 +783,7 @@ export class AudioGateway
     sttStream.on('error', (err: Error) => {
       // Only log first error per stream — avoid flooding from "write after destroyed"
       if (session.sttStream === sttStream) {
+        this.sessions.clearSttIdleTimer(deviceId);
         this.logger.error(`[${deviceId}] STT error: ${err.message}`, err.stack);
         session.sttStream = null;  // Stop further writes
         this.sendToDevice(deviceId, 'error', {
@@ -817,6 +833,17 @@ export class AudioGateway
     const session = this.sessions.get(deviceId);
     if (!session?.sttStream) return;
 
+    // Reset watchdog — audio is still flowing
+    this.sessions.resetSttIdleTimer(deviceId, 8000, () => {
+      const s = this.sessions.get(deviceId);
+      const stream = session.sttStream;
+      if (s?.sttStream === stream && stream) {
+        this.logger.warn(`[${deviceId}] STT watchdog: no audio for 8s — ending stream`);
+        s.sttStream = null;
+        stream.end();
+      }
+    });
+
     const count = (this.chunkCount.get(deviceId) ?? 0) + 1;
     this.chunkCount.set(deviceId, count);
 
@@ -851,6 +878,7 @@ export class AudioGateway
       return;
     }
     this.logger.log(`[${deviceId}] audio:end — finalizing STT (${chunksSent} chunks received)`);
+    this.sessions.clearSttIdleTimer(deviceId);
     const stream = session.sttStream;
     session.sttStream = null;  // Prevent late chunks from writing after end
     stream.end();
@@ -860,6 +888,7 @@ export class AudioGateway
     const session = this.sessions.get(deviceId);
     if (!session) return;
 
+    this.sessions.clearSttIdleTimer(deviceId);
     this.sessions.markInterrupted(deviceId);
     session.sttStream?.destroy();
     session.sttStream = null;
