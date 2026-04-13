@@ -18,6 +18,7 @@ class VoiceAudioPage extends StatefulWidget {
 class _VoiceAudioPageState extends State<VoiceAudioPage> {
   final _devicesRepo = sl<DevicesRepository>();
   final _audioPlayer = AudioPlayer();
+  final _previewTextController = TextEditingController();
 
   bool _loading = true;
   bool _saving = false;
@@ -48,6 +49,7 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
   @override
   void dispose() {
     _audioPlayer.dispose();
+    _previewTextController.dispose();
     super.dispose();
   }
 
@@ -105,11 +107,13 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
   Future<void> _pushPreviewToDevice() async {
     setState(() => _previewingOnDevice = true);
 
+    final customText = _previewTextController.text.trim();
     final result = await _devicesRepo.pushVoicePreviewToDevice(
       widget.deviceId,
       voicePreset: _voicePreset,
       speed: _speed,
       stability: _stability,
+      text: customText.isEmpty ? null : customText,
     );
 
     if (!mounted) return;
@@ -142,11 +146,13 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
 
     setState(() => _previewing = true);
 
+    final customText = _previewTextController.text.trim();
     final result = await _devicesRepo.previewVoice(
       widget.deviceId,
       voicePreset: _voicePreset,
       speed: _speed,
       stability: _stability,
+      text: customText.isEmpty ? null : customText,
     );
 
     if (!mounted) return;
@@ -280,7 +286,32 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
                       Text('Stable', style: theme.textTheme.bodySmall),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
+                  // ── Custom preview text ─────────────────────
+                  TextField(
+                    controller: _previewTextController,
+                    maxLength: 300,
+                    maxLines: 2,
+                    minLines: 1,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      hintText: "What should Aksa say?",
+                      helperText: 'Leave empty to use the default phrase',
+                      counterStyle: theme.textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                      suffixIcon: ListenableBuilder(
+                        listenable: _previewTextController,
+                        builder: (context, _) => _previewTextController.text.isEmpty
+                            ? const SizedBox.shrink()
+                            : IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                onPressed: _previewTextController.clear,
+                              ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
                   // ── Preview buttons ─────────────────────────
                   SizedBox(
                     width: double.infinity,

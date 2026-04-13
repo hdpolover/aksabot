@@ -114,8 +114,8 @@ bool nvs_store::hasDeviceToken() {
 // ── Device settings ────────────────────────────────────
 
 uint8_t nvs_store::getVolume() {
-    if (!initialized) return 50;
-    return prefs.getUChar(K_VOLUME, 50);
+    if (!initialized) return 70;
+    return prefs.getUChar(K_VOLUME, 70);
 }
 
 bool nvs_store::setVolume(uint8_t volume) {

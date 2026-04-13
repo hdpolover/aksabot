@@ -166,16 +166,11 @@ void audio_io::setVolume(uint8_t percent) {
     if (percent == 0) {
         mapped = 0;
     } else {
-        // ES8311 DAC_VOL (reg 0x32) maps 0-100% → register 0-255, with ~0.5dB/step.
-        // Hardware testing shows the comfortable audible range is ES8311 vol 65-82%:
-        //   < 65% = inaudible in a normal room
-        //   > 82% = uncomfortably loud / distorted
-        // Map app 1-100% to this band with a sqrt curve for perceptual linearity.
-        // Result: 10%→69, 25%→73, 50%→77, 70%→79, 100%→82
-        const float HW_BASE  = 65.0f;  // minimum audible floor
-        const float HW_RANGE = 17.0f;  // usable range above floor (65+17=82 max)
-        float t = sqrtf((float)percent / 100.0f);
-        mapped = (uint8_t)(HW_BASE + t * HW_RANGE);
+        // Perceptual volume curve: sqrt maps linear slider to perceived loudness.
+        // Capped at 75% ES8311 max — hardware testing shows >82% distorts/blasts.
+        // No floor: low app percentages produce genuinely quiet ES8311 values so
+        // the full slider range (10%→24%, 50%→53%, 70%→63%, 100%→75%) feels natural.
+        mapped = (uint8_t)(sqrtf((float)percent / 100.0f) * 75.0f);
     }
 
     es8311_handle_t handle = es8311_create(I2C_NUM_0, ES8311_ADDRESS_0);

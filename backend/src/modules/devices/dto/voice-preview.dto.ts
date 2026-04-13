@@ -1,4 +1,4 @@
-import { IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsNumber, IsOptional, IsString, MaxLength, Min, Max } from 'class-validator';
 
 export class VoicePreviewDto {
   @IsString()
@@ -16,4 +16,9 @@ export class VoicePreviewDto {
   @Max(1)
   @IsOptional()
   voice_stability?: number;
+
+  @IsString()
+  @MaxLength(300)
+  @IsOptional()
+  text?: string;
 }

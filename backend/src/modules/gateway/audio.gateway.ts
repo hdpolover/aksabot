@@ -263,6 +263,7 @@ export class AudioGateway
   async sendVoicePreviewToDevice(
     deviceId: string,
     voiceOpts: { voice?: string; speed?: number; stability?: number },
+    text?: string,
   ): Promise<boolean> {
     const socket = this.deviceToSocket.get(deviceId);
     if (!socket || socket.readyState !== 1) return false;
@@ -272,7 +273,7 @@ export class AudioGateway
 
     session.state = 'speaking';
 
-    const PREVIEW_PHRASE = "Yo, I'm Aksa — Hendra's desk companion. Built different, for real.";
+    const PREVIEW_PHRASE = text?.trim() || "Yo, I'm Aksa — Hendra's desk companion. Built different, for real.";
 
     try {
       this.sendToDevice(deviceId, 'response:start', { type: 'voice_preview' });

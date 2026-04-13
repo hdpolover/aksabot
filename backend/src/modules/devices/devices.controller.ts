@@ -99,7 +99,7 @@ export class DevicesController {
     // Verify device ownership — throws NotFoundException/ForbiddenException if wrong
     await this.devicesService.findById(id, user.userId);
 
-    const mp3Buffer = await this.tts.synthesize(PREVIEW_PHRASE, {
+    const mp3Buffer = await this.tts.synthesize(dto.text ?? PREVIEW_PHRASE, {
       voice: dto.voice_preset,
       speed: dto.voice_speed,
       stability: dto.voice_stability,
@@ -130,7 +130,7 @@ export class DevicesController {
       speed: dto.voice_speed,
       stability: dto.voice_stability,
     };
-    const playing = await this.gateway.sendVoicePreviewToDevice(id, voiceOpts);
+    const playing = await this.gateway.sendVoicePreviewToDevice(id, voiceOpts, dto.text);
     return { playing };
   }
 

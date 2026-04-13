@@ -102,6 +102,7 @@ class DevicesRepositoryImpl implements DevicesRepository {
     String? voicePreset,
     double? speed,
     double? stability,
+    String? text,
   }) async {
     try {
       final playing = await _datasource.pushVoicePreviewToDevice(
@@ -109,6 +110,7 @@ class DevicesRepositoryImpl implements DevicesRepository {
         voicePreset: voicePreset,
         speed: speed,
         stability: stability,
+        text: text,
       );
       return Right(playing);
     } on ServerException catch (e) {
@@ -122,6 +124,7 @@ class DevicesRepositoryImpl implements DevicesRepository {
     String? voicePreset,
     double? speed,
     double? stability,
+    String? text,
   }) async {
     try {
       final bytes = await _datasource.previewVoice(
@@ -129,6 +132,7 @@ class DevicesRepositoryImpl implements DevicesRepository {
         voicePreset: voicePreset,
         speed: speed,
         stability: stability,
+        text: text,
       );
       return Right(bytes);
     } on ServerException catch (e) {

@@ -19,6 +19,7 @@ abstract class DevicesRepository {
     String? voicePreset,
     double? speed,
     double? stability,
+    String? text,
   });
 
   Future<Either<Failure, Uint8List>> previewVoice(
@@ -26,5 +27,6 @@ abstract class DevicesRepository {
     String? voicePreset,
     double? speed,
     double? stability,
+    String? text,
   });
 }

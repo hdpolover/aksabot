@@ -104,6 +104,14 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
     });
   }
 
+  /// Maps raw RSSI threshold (–90 to –60) to a human-readable range label.
+  String _rssiLabel(double rssi) {
+    if (rssi >= -65) return 'Very close';
+    if (rssi >= -72) return 'Nearby';
+    if (rssi >= -80) return 'Same room';
+    return 'Far away';
+  }
+
   /// Sync a presence setting to the backend so the ESP32 gets it via WebSocket.
   Future<void> _syncToBackend(Map<String, dynamic> patch) async {
     await _devicesRepo.updateSettings(widget.deviceId, patch);
@@ -261,7 +269,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
           const SizedBox(height: 24),
 
           // Sensitivity
-          Text('Sensitivity', style: theme.textTheme.titleMedium),
+          Text('Detection range', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           Card(
             child: Padding(
@@ -271,8 +279,8 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Farther', style: theme.textTheme.bodySmall),
-                      Text('Closer', style: theme.textTheme.bodySmall),
+                      Text('Far away', style: theme.textTheme.bodySmall),
+                      Text('Very close', style: theme.textTheme.bodySmall),
                     ],
                   ),
                   Slider(
@@ -280,7 +288,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                     min: -90,
                     max: -60,
                     divisions: 6,
-                    label: '${_rssiThreshold.round()} dBm',
+                    label: _rssiLabel(_rssiThreshold),
                     onChanged: _enabled
                         ? (v) {
                             setState(() => _rssiThreshold = v);
@@ -298,7 +306,8 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'RSSI threshold for the ESP32. Values closer to 0 = shorter range.',
+                          'How close you need to be for Aksa to detect you. '
+                          'Start with "Nearby" — adjust if it triggers too early or too late.',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: colors.onSurfaceVariant,
                           ),
@@ -310,7 +319,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Grace period'),
+                      const Text('Sleep delay'),
                       DropdownButton<String>(
                         value: _gracePeriod,
                         underline: const SizedBox.shrink(),
@@ -318,7 +327,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                           DropdownMenuItem(value: '15', child: Text('15 sec')),
                           DropdownMenuItem(value: '30', child: Text('30 sec')),
                           DropdownMenuItem(value: '45', child: Text('45 sec')),
-                          DropdownMenuItem(value: '60', child: Text('60 sec')),
+                          DropdownMenuItem(value: '60', child: Text('1 min')),
                         ],
                         onChanged: _enabled
                             ? (v) {
@@ -333,7 +342,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                     ],
                   ),
                   Text(
-                    'Delay before sleep after losing signal.',
+                    'How long to wait after you leave before Aksa goes to sleep.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: colors.onSurfaceVariant,
                     ),
@@ -345,7 +354,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
           const SizedBox(height: 24),
 
           // Behavior
-          Text('Behavior', style: theme.textTheme.titleMedium),
+          Text('Greeting behavior', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           Card(
             child: Padding(
@@ -356,7 +365,8 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Silent wake if away less than'),
+                      const Expanded(child: Text('Skip greeting if away less than')),
+                      const SizedBox(width: 8),
                       DropdownButton<String>(
                         value: _silentWake,
                         underline: const SizedBox.shrink(),
@@ -379,7 +389,7 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Skips the greeting if you just stepped away briefly.',
+                    "Aksa won't say hello if you just stepped away for a moment.",
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: colors.onSurfaceVariant,
                     ),

@@ -74,6 +74,7 @@ class DevicesRemoteDatasource {
     String? voicePreset,
     double? speed,
     double? stability,
+    String? text,
   }) async {
     try {
       final response = await _client.dio.post(
@@ -82,6 +83,7 @@ class DevicesRemoteDatasource {
           'voice_preset': voicePreset,
           'voice_speed': speed,
           'voice_stability': stability,
+          'text': text,
         }..removeWhere((_, v) => v == null),
         options: Options(responseType: ResponseType.json),
       );
@@ -106,6 +108,7 @@ class DevicesRemoteDatasource {
     String? voicePreset,
     double? speed,
     double? stability,
+    String? text,
   }) async {
     try {
       final response = await _client.dio.post(
@@ -114,6 +117,7 @@ class DevicesRemoteDatasource {
           'voice_preset': voicePreset,
           'voice_speed': speed,
           'voice_stability': stability,
+          'text': text,
         }..removeWhere((_, v) => v == null),
         options: Options(responseType: ResponseType.json),
       );
