@@ -102,6 +102,7 @@ export class DevicesController {
     await this.devicesService.findById(id, user.userId);
 
     const mp3Buffer = await this.tts.synthesize(dto.text ?? PREVIEW_PHRASE, {
+      language: dto.language,
       voice: dto.voice_preset,
       speed: dto.voice_speed,
       stability: dto.voice_stability,
@@ -128,6 +129,7 @@ export class DevicesController {
     await this.devicesService.findById(id, user.userId);
 
     const voiceOpts = {
+      language: dto.language,
       voice: dto.voice_preset,
       speed: dto.voice_speed,
       stability: dto.voice_stability,

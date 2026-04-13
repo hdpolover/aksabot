@@ -136,6 +136,7 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
     final customText = _previewTextController.text.trim();
     final result = await _devicesRepo.pushVoicePreviewToDevice(
       widget.deviceId,
+      language: _language,
       voicePreset: _voicePreset,
       speed: _speed,
       stability: _stability,
@@ -175,6 +176,7 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
     final customText = _previewTextController.text.trim();
     final result = await _devicesRepo.previewVoice(
       widget.deviceId,
+      language: _language,
       voicePreset: _voicePreset,
       speed: _speed,
       stability: _stability,

@@ -21,6 +21,7 @@ abstract class DevicesRepository {
   Future<Either<Failure, Map<String, dynamic>>> getStats(String id);
   Future<Either<Failure, bool>> pushVoicePreviewToDevice(
     String id, {
+    String? language,
     String? voicePreset,
     double? speed,
     double? stability,
@@ -29,6 +30,7 @@ abstract class DevicesRepository {
 
   Future<Either<Failure, Uint8List>> previewVoice(
     String id, {
+    String? language,
     String? voicePreset,
     double? speed,
     double? stability,

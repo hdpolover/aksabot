@@ -114,6 +114,7 @@ class DevicesRepositoryImpl implements DevicesRepository {
   @override
   Future<Either<Failure, bool>> pushVoicePreviewToDevice(
     String id, {
+    String? language,
     String? voicePreset,
     double? speed,
     double? stability,
@@ -122,6 +123,7 @@ class DevicesRepositoryImpl implements DevicesRepository {
     try {
       final playing = await _datasource.pushVoicePreviewToDevice(
         id,
+        language: language,
         voicePreset: voicePreset,
         speed: speed,
         stability: stability,
@@ -136,6 +138,7 @@ class DevicesRepositoryImpl implements DevicesRepository {
   @override
   Future<Either<Failure, Uint8List>> previewVoice(
     String id, {
+    String? language,
     String? voicePreset,
     double? speed,
     double? stability,
@@ -144,6 +147,7 @@ class DevicesRepositoryImpl implements DevicesRepository {
     try {
       final bytes = await _datasource.previewVoice(
         id,
+        language: language,
         voicePreset: voicePreset,
         speed: speed,
         stability: stability,

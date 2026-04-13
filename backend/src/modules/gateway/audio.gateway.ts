@@ -263,7 +263,7 @@ export class AudioGateway
    *  frames → response:end).  Returns false if the device is offline or busy. */
   async sendVoicePreviewToDevice(
     deviceId: string,
-    voiceOpts: { voice?: string; speed?: number; stability?: number },
+    voiceOpts: { language?: 'en' | 'id'; voice?: string; speed?: number; stability?: number },
     text?: string,
   ): Promise<boolean> {
     const socket = this.deviceToSocket.get(deviceId);

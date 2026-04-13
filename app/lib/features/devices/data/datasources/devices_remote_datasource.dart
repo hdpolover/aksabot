@@ -82,6 +82,7 @@ class DevicesRemoteDatasource {
   /// device over WebSocket.  Returns true if the device accepted playback.
   Future<bool> pushVoicePreviewToDevice(
     String id, {
+    String? language,
     String? voicePreset,
     double? speed,
     double? stability,
@@ -91,6 +92,7 @@ class DevicesRemoteDatasource {
       final response = await _client.dio.post(
         '/devices/$id/voice/preview/push',
         data: {
+          'language': language,
           'voice_preset': voicePreset,
           'voice_speed': speed,
           'voice_stability': stability,
@@ -116,6 +118,7 @@ class DevicesRemoteDatasource {
   /// voice settings and returns the decoded MP3 bytes.
   Future<Uint8List> previewVoice(
     String id, {
+    String? language,
     String? voicePreset,
     double? speed,
     double? stability,
@@ -125,6 +128,7 @@ class DevicesRemoteDatasource {
       final response = await _client.dio.post(
         '/devices/$id/voice/preview',
         data: {
+          'language': language,
           'voice_preset': voicePreset,
           'voice_speed': speed,
           'voice_stability': stability,
