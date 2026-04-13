@@ -396,7 +396,7 @@ export class AudioGateway
       this.logger.warn(`Failed to save device info: ${err.message}`),
     );
     this.logger.log(
-      `Device ${deviceId} info: fw=${data.firmwareVersion} wifi=${data.wifiSsid} rssi=${data.wifiRssi}`,
+      `Device ${deviceId} info: fw=${data.firmwareVersion} wifi=${data.wifiSsid} rssi=${data.wifiRssi} ip=${data.ip ?? '-'} uptime=${data.uptimeSec ?? '-'}s heap=${data.freeHeap ?? '-'} sd=${data.sdMounted ?? '-'}`,
     );
   }
 
