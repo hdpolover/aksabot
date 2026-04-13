@@ -507,6 +507,7 @@ static void onWsJson(const char* event, const char* data) {
     // ── Presence events (sent BY backend, triggered by app BLE scan) ──
     else if (strcmp(event, "presence:arrived") == 0) {
         appState.presenceState = PresenceState::PRESENT;
+        nvs_store::setPresencePresent(true);  // Persist so dot is solid after reboot
         updateStatusBar();  // Switch dot from blinking to solid
         power_manager::recordInteraction();
         Serial.println("[Presence] User arrived (app-driven)");
@@ -515,6 +516,7 @@ static void onWsJson(const char* event, const char* data) {
     }
     else if (strcmp(event, "presence:departed") == 0) {
         appState.presenceState = PresenceState::AWAY;
+        nvs_store::setPresencePresent(false);  // Persist departure
         updateStatusBar();  // Switch dot back to blinking
         Serial.println("[Presence] User departed (app-driven)");
         // Run departure animation in a one-shot task
@@ -1367,15 +1369,19 @@ void setup() {
         face::setExpression(face::Expression::THINKING, 200);
     }
 
-    // ── 13. BLE presence advertising ───────────────────────
+    // ── 13. BLE presence advertising (deferred to WS connect) ──
     // Presence detection is app-driven: the phone scans for "Aksabot" by name.
-    // We only need to advertise our device name — no GATT server required.
-    // Start advertising so the phone can find us during its scan cycles.
-    if (nvs_store::getPresenceEnabled()) {
-        ble_manager::startPresenceAdvertising();
+    // BLE advertising is started AFTER the WebSocket connects (in the WS-connected
+    // handler below) to avoid NimBLE init disrupting the WS TCP handshake.
+    // Restore last known presence state from NVS so the display dot is correct
+    // immediately on boot, before the first WS event arrives.
+    if (nvs_store::getPresenceEnabled() && nvs_store::getPresencePresent()) {
+        appState.presenceState = PresenceState::PRESENT;
     }
-    Serial.printf("[Main] Presence detection: %s (app-driven)\n",
-        nvs_store::getPresenceEnabled() ? "enabled" : "disabled");
+    updateStatusBar();
+    Serial.printf("[Main] Presence detection: %s (app-driven), last state: %s\n",
+        nvs_store::getPresenceEnabled() ? "enabled" : "disabled",
+        nvs_store::getPresencePresent() ? "present" : "away");
 
     // ── 14. Wake word detection ─────────────────────────────
 #if HANDS_FREE_ENABLED
@@ -1630,6 +1636,13 @@ void loop() {
 
         // WS just connected — happy face + send device info
         if (appState.wsConnected && !prevWs) {
+            // Start BLE advertising here (after WS is confirmed connected) so the
+            // phone can scan for "Aksabot". Deferred from setup() to avoid NimBLE
+            // init disrupting the WS TCP handshake.
+            if (nvs_store::getPresenceEnabled()) {
+                ble_manager::startPresenceAdvertising();
+            }
+
             static bool wasEverConnected = false;  // Distinguish boot vs reconnect
 
             appState.botState = BotState::IDLE;

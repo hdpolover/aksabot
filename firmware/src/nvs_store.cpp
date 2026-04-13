@@ -15,9 +15,10 @@ static const char* K_BACKEND_URL  = "backend_url";
 static const char* K_DEVICE_TOKEN = "dev_token";
 static const char* K_VOLUME       = "volume";
 static const char* K_BRIGHTNESS   = "brightness";
-static const char* K_PRES_ENABLED = "pres_en";
-static const char* K_PRES_RSSI    = "pres_rssi";
-static const char* K_PRES_GRACE   = "pres_grace";
+static const char* K_PRES_ENABLED  = "pres_en";
+static const char* K_PRES_PRESENT  = "pres_present";
+static const char* K_PRES_RSSI     = "pres_rssi";
+static const char* K_PRES_GRACE    = "pres_grace";
 static const char* K_DISP_TRANSCRIPT = "disp_transcript";
 static const char* K_FACE_STYLE   = "face_style";
 static const char* K_IDLE_DISP    = "idle_disp";
@@ -143,6 +144,16 @@ bool nvs_store::getPresenceEnabled() {
 bool nvs_store::setPresenceEnabled(bool enabled) {
     if (!initialized) return false;
     return prefs.putBool(K_PRES_ENABLED, enabled) > 0;
+}
+
+bool nvs_store::getPresencePresent() {
+    if (!initialized) return false;
+    return prefs.getBool(K_PRES_PRESENT, false);
+}
+
+bool nvs_store::setPresencePresent(bool present) {
+    if (!initialized) return false;
+    return prefs.putBool(K_PRES_PRESENT, present) > 0;
 }
 
 int8_t nvs_store::getPresenceRssiThreshold() {

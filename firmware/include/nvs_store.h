@@ -46,6 +46,11 @@ bool setBrightness(uint8_t brightness);
 bool getPresenceEnabled();             // default false
 bool setPresenceEnabled(bool enabled);
 
+/// Last confirmed presence state. Persisted so the display dot shows the
+/// correct state immediately on reboot, before the first WS event arrives.
+bool getPresencePresent();             // default false
+bool setPresencePresent(bool present);
+
 int8_t getPresenceRssiThreshold();     // default -75
 bool setPresenceRssiThreshold(int8_t rssi);
 

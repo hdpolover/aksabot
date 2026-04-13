@@ -157,7 +157,8 @@ export class AiService {
     voiceOptions?: TtsOptions,
     signal?: AbortSignal,
   ): Promise<{ opusAudio: Buffer; pcmAudio: Buffer; cacheKey: string }> {
-    const ttsOpts: TtsOptions = { ...voiceOptions, language };
+    // Only override language if explicitly provided — don't clobber voiceOptions.language with undefined
+    const ttsOpts: TtsOptions = { ...voiceOptions, ...(language !== undefined ? { language } : {}) };
     const cacheKey = this.ttsCacheKey(sentence, ttsOpts);
 
     // Check cache (cache hits are instant, signal not needed)
