@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <HTTPClient.h>
+#include <SD_MMC.h>
 #include <ESPmDNS.h>
 #include "config.h"
 #include "state.h"
@@ -145,6 +147,79 @@ static void updateStatusBar() {
         // No extra stall flag here — the thinking dots already indicate waiting
     }
     display::updateStatusBar(sb);
+}
+
+// ── Image download helper ────────────────────────────────
+//
+// Downloads an image from a URL via HTTP and saves it to the SD card at
+// /images/remote/latest.{ext}.  Returns the saved path, or nullptr on failure.
+// Runs synchronously in the wsLoop task (Core 1).
+// Images are small (≤200 KB after app-side compression) so this blocks <2s.
+
+static const char* downloadImage(const char* url) {
+    if (!sd_storage::isMounted()) {
+        Serial.println("[ImgDL] SD not mounted");
+        return nullptr;
+    }
+
+    // Determine extension from URL (last segment after final '.')
+    static char savedPath[64];
+    const char* dot = strrchr(url, '.');
+    const char* ext = (dot && strlen(dot) <= 5) ? dot : ".jpg";
+    snprintf(savedPath, sizeof(savedPath), "/images/remote/latest%s", ext);
+
+    // Ensure directory exists
+    SD_MMC.mkdir("/images/remote");
+
+    HTTPClient http;
+    http.begin(url);
+    http.setTimeout(10000);
+    int code = http.GET();
+    if (code != 200) {
+        Serial.printf("[ImgDL] HTTP %d for %s\n", code, url);
+        http.end();
+        return nullptr;
+    }
+
+    int contentLen = http.getSize();
+    if (contentLen <= 0 || contentLen > 512 * 1024) {
+        Serial.printf("[ImgDL] Bad content-length: %d\n", contentLen);
+        http.end();
+        return nullptr;
+    }
+
+    // Remove any previous file
+    if (SD_MMC.exists(savedPath)) SD_MMC.remove(savedPath);
+
+    File f = SD_MMC.open(savedPath, FILE_WRITE);
+    if (!f) {
+        Serial.printf("[ImgDL] Cannot open %s for write\n", savedPath);
+        http.end();
+        return nullptr;
+    }
+
+    WiFiClient* stream = http.getStreamPtr();
+    uint8_t buf[2048];
+    int totalRead = 0;
+    while (http.connected() && totalRead < contentLen) {
+        int avail = stream->available();
+        if (avail == 0) { vTaskDelay(pdMS_TO_TICKS(5)); continue; }
+        int toRead = min(avail, (int)sizeof(buf));
+        int n = stream->readBytes(buf, toRead);
+        f.write(buf, n);
+        totalRead += n;
+    }
+    f.close();
+    http.end();
+
+    if (totalRead < contentLen) {
+        Serial.printf("[ImgDL] Incomplete: %d/%d bytes\n", totalRead, contentLen);
+        SD_MMC.remove(savedPath);
+        return nullptr;
+    }
+
+    Serial.printf("[ImgDL] Saved %d bytes → %s\n", totalRead, savedPath);
+    return savedPath;
 }
 
 // ── WebSocket event handlers ────────────────────────────
@@ -597,6 +672,35 @@ static void onWsJson(const char* event, const char* data) {
         // Brief pause so the user can read the screen before restart.
         vTaskDelay(pdMS_TO_TICKS(1500));
         esp_restart();
+    }
+    // ── Image push from backend ───────────────────────────
+    else if (strcmp(event, "display:image") == 0) {
+        // Payload (on-the-fly upload): {"url":"http://...","durationMs":10000}
+        // Payload (pre-existing SD file): {"path":"/images/foo.jpg","durationMs":10000}
+        // durationMs is optional — defaults to 10s (0 = stay permanently).
+        JsonDocument doc;
+        if (deserializeJson(doc, data) == DeserializationError::Ok) {
+            uint16_t    durationMs = doc["durationMs"] | (uint16_t)10000;
+            const char* url        = doc["url"]  | "";
+            const char* path       = doc["path"] | "";
+
+            power_manager::recordInteraction();
+
+            if (url && *url) {
+                // Download from backend, save to SD, then display
+                Serial.printf("[Main] display:image downloading: %s\n", url);
+                const char* savedPath = downloadImage(url);
+                if (savedPath) {
+                    display::showImageFromSD(savedPath, durationMs);
+                } else {
+                    Serial.println("[Main] display:image download failed");
+                }
+            } else if (path && *path) {
+                // Already on SD card
+                Serial.printf("[Main] display:image from SD: %s (%ums)\n", path, (unsigned)durationMs);
+                display::showImageFromSD(path, durationMs);
+            }
+        }
     }
     else {
         Serial.printf("[Main] Unknown event: %s = %s\n", event, data);

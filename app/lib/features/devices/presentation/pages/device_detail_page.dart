@@ -1,6 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
@@ -192,6 +196,16 @@ class DeviceDashboardBody extends StatelessWidget {
           iconFg: ac.onSuccess,
           onTap: () => context.push('/devices/$id/reminders'),
         ),
+        const SizedBox(height: AppConstants.spacingMd),
+        _WideCard(
+          icon: Icons.image_rounded,
+          label: 'Push Image',
+          description: 'Send a photo to the device display',
+          cardBg: cs.secondaryContainer,
+          iconBg: cs.secondary,
+          iconFg: cs.onSecondary,
+          onTap: () => _showPushImageSheet(context, id),
+        ),
         const SizedBox(height: AppConstants.spacingXxl),
 
         // ── Bot ────────────────────────────────────────────────────────────
@@ -244,6 +258,225 @@ class DeviceDashboardBody extends StatelessWidget {
         _ReconnectRow(deviceId: id, deviceIsOnline: device.isOnline),
       ],
     ),
+    );
+  }
+}
+
+void _showPushImageSheet(BuildContext context, String deviceId) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(
+        top: Radius.circular(AppConstants.radiusXl),
+      ),
+    ),
+    builder: (_) => _PushImageSheet(deviceId: deviceId),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Push Image bottom sheet
+// ---------------------------------------------------------------------------
+
+class _PushImageSheet extends StatefulWidget {
+  final String deviceId;
+  const _PushImageSheet({required this.deviceId});
+
+  @override
+  State<_PushImageSheet> createState() => _PushImageSheetState();
+}
+
+class _PushImageSheetState extends State<_PushImageSheet> {
+  final _picker = ImagePicker();
+
+  Uint8List? _compressed;
+  bool _picking = false;
+  bool _sending = false;
+  String? _error;
+  int _durationSec = 10;
+
+  // Screen size of the ESP32 display — compress to fit
+  static const int _targetWidth = 240;
+  static const int _targetHeight = 320;
+
+  Future<void> _pick(ImageSource source) async {
+    setState(() { _picking = true; _error = null; });
+    try {
+      final file = await _picker.pickImage(source: source, imageQuality: 100);
+      if (file == null) { setState(() => _picking = false); return; }
+
+      final raw = await file.readAsBytes();
+
+      // Compress + resize to 240×320 JPEG, quality 85
+      final compressed = await FlutterImageCompress.compressWithList(
+        raw,
+        minWidth: _targetWidth,
+        minHeight: _targetHeight,
+        quality: 85,
+        format: CompressFormat.jpeg,
+      );
+
+      setState(() { _compressed = compressed; _picking = false; });
+    } catch (e) {
+      setState(() { _error = 'Could not load image: $e'; _picking = false; });
+    }
+  }
+
+  Future<void> _send() async {
+    if (_compressed == null) return;
+    setState(() { _sending = true; _error = null; });
+
+    final repo = sl<DevicesRepository>();
+    final result = await repo.pushImage(
+      widget.deviceId,
+      _compressed!,
+      durationMs: _durationSec * 1000,
+    );
+
+    if (!mounted) return;
+    result.fold(
+      (failure) => setState(() { _sending = false; _error = failure.message; }),
+      (_) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Image sent to device')),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        AppConstants.spacingXxl,
+        AppConstants.spacingLg,
+        AppConstants.spacingXxl,
+        AppConstants.spacingXxl + MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Handle
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: cs.outlineVariant,
+                borderRadius: BorderRadius.circular(AppConstants.radiusFull),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppConstants.spacingXxl),
+
+          Text('Push Image to Device', style: theme.textTheme.titleLarge),
+          const SizedBox(height: AppConstants.spacingXs),
+          Text(
+            'Image is compressed to 240×320 JPEG before sending. '
+            'Device downloads it over Wi-Fi and shows it on screen.',
+            style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppConstants.spacingXxl),
+
+          // Preview or picker buttons
+          if (_compressed != null) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+              child: Image.memory(
+                _compressed!,
+                height: 200,
+                width: double.infinity,
+                fit: BoxFit.cover,
+              ),
+            ),
+            const SizedBox(height: AppConstants.spacingXs),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Text(
+                  '${(_compressed!.length / 1024).toStringAsFixed(1)} KB',
+                  style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                ),
+                const SizedBox(width: AppConstants.spacingMd),
+                TextButton(
+                  onPressed: _picking || _sending ? null : () => setState(() => _compressed = null),
+                  child: const Text('Change'),
+                ),
+              ],
+            ),
+          ] else ...[
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _picking ? null : () => _pick(ImageSource.gallery),
+                    icon: _picking
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.photo_library_rounded),
+                    label: const Text('Gallery'),
+                  ),
+                ),
+                const SizedBox(width: AppConstants.spacingMd),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _picking ? null : () => _pick(ImageSource.camera),
+                    icon: const Icon(Icons.camera_alt_rounded),
+                    label: const Text('Camera'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+
+          const SizedBox(height: AppConstants.spacingXxl),
+
+          // Duration slider
+          Row(
+            children: [
+              Text('Show for:', style: theme.textTheme.bodyMedium),
+              const Spacer(),
+              Text(
+                _durationSec == 0 ? 'Until dismissed' : '${_durationSec}s',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: cs.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          Slider(
+            value: _durationSec.toDouble(),
+            min: 0,
+            max: 60,
+            divisions: 12,
+            onChanged: _sending ? null : (v) => setState(() => _durationSec = v.round()),
+          ),
+
+          if (_error != null) ...[
+            const SizedBox(height: AppConstants.spacingSm),
+            Text(_error!, style: theme.textTheme.bodySmall?.copyWith(color: cs.error)),
+          ],
+
+          const SizedBox(height: AppConstants.spacingMd),
+
+          FilledButton(
+            onPressed: _compressed == null || _sending ? null : _send,
+            child: _sending
+                ? const SizedBox(
+                    height: 20, width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : const Text('Send to Device'),
+          ),
+        ],
+      ),
     );
   }
 }

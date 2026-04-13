@@ -26,5 +26,5 @@ void ui_audio::play(Clip clip) {
 
     char path[72];
     snprintf(path, sizeof(path), "%s/%s", UI_AUDIO_DIR, fname);
-    ogg_player::playFile(path, 32 * 1024);
+    ogg_player::playFile(path);
 }

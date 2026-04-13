@@ -49,6 +49,10 @@
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Aksabot uses your location to provide local weather information for your AI desk companion.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Aksabot needs access to your photo library to push images to your desk companion display.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Aksabot needs access to your camera to take photos and push them to your desk companion display.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Aksabot uses Bluetooth to discover, configure, and detect presence of your AI desk companion.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>

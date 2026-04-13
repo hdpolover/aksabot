@@ -168,4 +168,18 @@ class DevicesRepositoryImpl implements DevicesRepository {
       return Left(ServerFailure(e.message, statusCode: e.statusCode));
     }
   }
+
+  @override
+  Future<Either<Failure, void>> pushImage(
+    String id,
+    Uint8List imageBytes, {
+    int durationMs = 10000,
+  }) async {
+    try {
+      await _datasource.pushImage(id, imageBytes, durationMs: durationMs);
+      return const Right(null);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
 }

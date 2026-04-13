@@ -75,6 +75,12 @@ export class EnvironmentVariables {
   @IsString()
   @IsOptional()
   SMTP_FROM?: string;
+
+  // Public URL of this backend — used to generate download URLs for device image push.
+  // e.g. https://api.yourdomain.com or http://192.168.1.10:4280 for local dev.
+  @IsString()
+  @IsOptional()
+  BACKEND_URL?: string;
 }
 
 export function validate(config: Record<string, unknown>) {

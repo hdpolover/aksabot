@@ -10,7 +10,7 @@ void emotion_audio::play(const char* expression) {
     char path[72];
     snprintf(path, sizeof(path), "%s/%s.opus", EMOTION_DIR, expression);
 
-    if (!ogg_player::playFile(path, 32 * 1024)) {
+    if (!ogg_player::playFile(path)) {
         Serial.printf("[EmotionAudio] Could not play: %s\n", path);
     }
 }

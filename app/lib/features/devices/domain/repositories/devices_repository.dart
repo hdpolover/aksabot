@@ -37,4 +37,12 @@ abstract class DevicesRepository {
     double? stability,
     String? text,
   });
+
+  /// Upload a compressed image to the backend and push it to the device display.
+  /// [imageBytes] must be JPEG-encoded. [durationMs] controls auto-return time.
+  Future<Either<Failure, void>> pushImage(
+    String id,
+    Uint8List imageBytes, {
+    int durationMs = 10000,
+  });
 }

@@ -156,4 +156,27 @@ class DevicesRemoteDatasource {
       throw ServerException(message, statusCode: e.response?.statusCode);
     }
   }
+
+  /// Upload a compressed JPEG image to the backend and push it to the device.
+  Future<void> pushImage(
+    String id,
+    Uint8List imageBytes, {
+    int durationMs = 10000,
+  }) async {
+    try {
+      final formData = FormData.fromMap({
+        'image': MultipartFile.fromBytes(imageBytes, filename: 'image.jpg'),
+        'durationMs': durationMs.toString(),
+      });
+      await _client.dio.post('/devices/$id/push-image', data: formData);
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      String message = 'Image push failed';
+      if (data is Map) {
+        final msg = data['message'];
+        if (msg is String) message = msg;
+      }
+      throw ServerException(message, statusCode: e.response?.statusCode);
+    }
+  }
 }

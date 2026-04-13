@@ -6,10 +6,11 @@
 /// and resilience_audio. Keeps the Ogg page parser in one place.
 namespace ogg_player {
 
-/// Open an Ogg Opus file from SD, decode all audio pages, and write to speaker.
-/// Handles file open → malloc → decode → free internally.
-/// Returns false if SD not mounted, file missing, alloc failed, or bot is SPEAKING/LISTENING.
-bool playFile(const char* path, size_t maxBytes = 64 * 1024);
+/// Open an Ogg Opus file from SD and stream it page-by-page, decoding audio
+/// without loading the whole file into heap. No size cap — works for ambient
+/// loops, long clips, and music tracks. Returns false if SD not mounted,
+/// file missing, or bot is SPEAKING/LISTENING.
+bool playFile(const char* path);
 
 /// Decode and play an Ogg Opus buffer already loaded in memory.
 /// Used by resilience_audio which preloads clips into PSRAM.

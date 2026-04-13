@@ -20,6 +20,7 @@ enum class Mode : uint8_t {
     COUNTDOWN,      // Large countdown number (eye break 20s)
     STATUS,         // Wi-Fi, battery, uptime, stats
     GLANCE,         // Temporary idle screen — time + weather
+    IMAGE,          // Static image from SD — tick() skips sprite rendering
 };
 
 /// Status bar data (visible in face and clock modes).
@@ -145,5 +146,12 @@ void setHomeMode(Mode mode);
 
 /// Returns the configured home mode (default: FACE).
 Mode getHomeMode();
+
+/// Show an image from the SD card on the display.
+/// Supports JPEG (.jpg/.jpeg), BMP (.bmp), and PNG (.png) via LovyanGFX.
+/// Image is centered on screen. Display wakes if sleeping.
+/// Switches back to previous mode after durationMs (default 10s, 0 = permanent).
+/// Path must be absolute from SD root, e.g. "/images/hello.jpg".
+void showImageFromSD(const char* path, uint16_t durationMs = 10000);
 
 }  // namespace display

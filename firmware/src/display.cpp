@@ -4,6 +4,7 @@
 #include "config.h"
 #include "lgfx_config.h"
 #include <Arduino.h>
+#include <SD_MMC.h>
 #include <cmath>
 
 // Pre-allocated sprite buffer from main.cpp (allocated before WiFi eats PSRAM)
@@ -1334,6 +1335,53 @@ uint8_t display::getFaceStyleId() {
     return static_cast<uint8_t>(g_faceStyle->id);
 }
 
+void display::showImageFromSD(const char* path, uint16_t durationMs) {
+    if (!path || !*path) return;
+
+    // Wake the display if it's sleeping
+    if (sleeping) wake();
+
+    // Determine image format from extension
+    const char* ext = strrchr(path, '.');
+    if (!ext) {
+        Serial.printf("[Display] showImageFromSD: no extension in path: %s\n", path);
+        return;
+    }
+
+    // Fill screen black before drawing
+    tft.fillScreen(TFT_BLACK);
+
+    bool ok = false;
+    if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0) {
+        // LovyanGFX decodes JPEG via built-in TJpgDec or LovyanGFX JPEG decoder.
+        // drawJpgFile(fs, path, x, y, maxWidth, maxHeight, offX, offY, scale)
+        // Passing 0,0 for x/y and LCD_WIDTH/LCD_HEIGHT as maxW/H centers+scales automatically.
+        ok = tft.drawJpgFile(SD_MMC, path, 0, 0, LCD_WIDTH, LCD_HEIGHT);
+    } else if (strcasecmp(ext, ".bmp") == 0) {
+        ok = tft.drawBmpFile(SD_MMC, path, 0, 0);
+    } else if (strcasecmp(ext, ".png") == 0) {
+        ok = tft.drawPngFile(SD_MMC, path, 0, 0, LCD_WIDTH, LCD_HEIGHT);
+    } else {
+        Serial.printf("[Display] showImageFromSD: unsupported format: %s\n", ext);
+        return;
+    }
+
+    if (!ok) {
+        Serial.printf("[Display] showImageFromSD: draw failed for: %s\n", path);
+        return;
+    }
+
+    Serial.printf("[Display] showImageFromSD: showing %s\n", path);
+
+    // Switch to IMAGE mode — tick() skips sprite rendering so the image stays visible.
+    // After durationMs, auto-return to whatever mode was active before.
+    if (durationMs > 0) {
+        setModeTemporary(Mode::IMAGE, durationMs);
+    } else {
+        setMode(Mode::IMAGE);
+    }
+}
+
 void display::init() {
     display_hw::init();
     face::init();
@@ -1366,6 +1414,11 @@ void display::tick(uint32_t nowMs) {
     }
 
     if (sleeping) return;
+
+    // IMAGE mode: image drawn directly to TFT hardware — skip sprite rendering
+    // to avoid overwriting it. Auto-return timer (set by showImageFromSD) will
+    // revert to the previous mode when durationMs elapses.
+    if (currentMode == Mode::IMAGE) return;
 
     // Rate-limit rendering
     if ((nowMs - lastRenderMs) < RENDER_INTERVAL_MS) return;

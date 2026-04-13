@@ -6,12 +6,22 @@ import {
   HttpCode,
   HttpStatus,
   Inject,
+  NotFoundException,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname, join } from 'path';
+import { existsSync, createReadStream, mkdirSync, unlink } from 'fs';
+import { randomUUID } from 'crypto';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
   RateLimit,
@@ -26,6 +36,9 @@ import { DevicesService } from './devices.service';
 import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { VoicePreviewDto } from './dto/voice-preview.dto';
+
+const UPLOADS_DIR = join(process.cwd(), 'uploads', 'device-images');
+const IMAGE_TTL_MS = 5 * 60 * 1000; // 5 min — long enough for the ESP32 to download it
 
 /** Sample phrase used for every voice preview. Short, punchy, Aksa-style. */
 const PREVIEW_PHRASE = "Yo, I'm Aksa — Hendra's desk companion. Built different, for real.";
@@ -198,5 +211,92 @@ export class DevicesController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.devicesService.remove(id, user.userId);
+  }
+
+  /** Accept an image upload from the app, save it to disk, push a WS
+   *  `display:image` event so the device downloads and shows it.
+   *  The file is auto-deleted after IMAGE_TTL_MS (5 min).
+   *  Accepts JPEG, PNG, or BMP. Rate-limited to 10/min (images are large). */
+  @Post(':id/push-image')
+  @RateLimit({ limit: 10, windowSeconds: 60, keyType: 'user' })
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: diskStorage({
+        destination: (_req, _file, cb) => {
+          mkdirSync(UPLOADS_DIR, { recursive: true });
+          cb(null, UPLOADS_DIR);
+        },
+        filename: (_req, file, cb) => {
+          const ext = extname(file.originalname).toLowerCase() || '.jpg';
+          cb(null, `${randomUUID()}${ext}`);
+        },
+      }),
+      limits: { fileSize: 2 * 1024 * 1024 }, // 2 MB max (compressed images are tiny)
+      fileFilter: (_req, file, cb) => {
+        const allowed = ['image/jpeg', 'image/png', 'image/bmp'];
+        cb(null, allowed.includes(file.mimetype));
+      },
+    }),
+  )
+  async pushImage(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+    @UploadedFile() file: Express.Multer.File,
+    @Body('durationMs') durationMsRaw?: string,
+  ) {
+    await this.devicesService.findById(id, user.userId);
+
+    if (!file) {
+      throw new NotFoundException('No image file provided or unsupported format (use JPEG, PNG, or BMP)');
+    }
+
+    const durationMs = durationMsRaw ? parseInt(durationMsRaw, 10) : 10000;
+    const baseUrl = process.env.BACKEND_URL ?? 'http://localhost:4280';
+    const imageUrl = `${baseUrl}/devices/${id}/device-images/${file.filename}`;
+
+    // Push to device — fire and forget (device may be offline; user sees image when it reconnects)
+    this.gateway.sendToDevice(id, 'display:image', { url: imageUrl, durationMs });
+
+    // Schedule file cleanup
+    setTimeout(() => {
+      unlink(file.path, (err) => {
+        if (err && (err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          // Ignore "file not found" (already cleaned up), log other errors
+          console.warn(`[PushImage] cleanup failed for ${file.filename}:`, err.message);
+        }
+      });
+    }, IMAGE_TTL_MS);
+
+    return { url: imageUrl, durationMs, filename: file.filename };
+  }
+
+  /** Serve a previously uploaded device image. No auth required — the UUID
+   *  filename is unguessable and the file is deleted after 5 minutes. */
+  @Get(':id/device-images/:filename')
+  async serveDeviceImage(
+    @Param('id', ParseUUIDPipe) _id: string,
+    @Param('filename') filename: string,
+    @Res() res: Response,
+  ) {
+    // Sanitise: only allow safe filenames (UUID + extension, no path traversal)
+    if (!/^[\w-]+\.(jpg|jpeg|png|bmp)$/i.test(filename)) {
+      res.status(400).json({ message: 'Invalid filename' });
+      return;
+    }
+
+    const filePath = join(UPLOADS_DIR, filename);
+    if (!existsSync(filePath)) {
+      res.status(404).json({ message: 'Image not found or already expired' });
+      return;
+    }
+
+    const ext = extname(filename).toLowerCase();
+    const mimeMap: Record<string, string> = {
+      '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+      '.png': 'image/png', '.bmp': 'image/bmp',
+    };
+    res.setHeader('Content-Type', mimeMap[ext] ?? 'application/octet-stream');
+    res.setHeader('Cache-Control', 'no-store'); // don't cache expiring files
+    createReadStream(filePath).pipe(res);
   }
 }

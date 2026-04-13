@@ -10,7 +10,7 @@ void sfx_audio::play(const char* clipName) {
     char path[72];
     snprintf(path, sizeof(path), "%s/%s.opus", SFX_DIR, clipName);
 
-    if (!ogg_player::playFile(path, 128 * 1024)) {
+    if (!ogg_player::playFile(path)) {
         Serial.printf("[SfxAudio] Could not play: %s\n", path);
     }
 }
