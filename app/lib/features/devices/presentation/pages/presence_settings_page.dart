@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../../core/ble/ble_presence_service.dart';
@@ -21,6 +23,7 @@ class PresenceSettingsPage extends StatefulWidget {
 class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
   late final BlePresenceService _presence;
   late final DevicesRepository _devicesRepo;
+  Timer? _statusRefreshTimer;
 
   bool _enabled = false;
   bool _isLoading = true;
@@ -34,6 +37,18 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
     _presence = sl<BlePresenceService>();
     _devicesRepo = sl<DevicesRepository>();
     _loadSettings();
+    // Refresh the status card every 2s — BlePresenceService has no streams,
+    // so isPresent / isScanning won't update the UI otherwise.
+    _statusRefreshTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) { if (mounted) setState(() {}); },
+    );
+  }
+
+  @override
+  void dispose() {
+    _statusRefreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadSettings() async {
