@@ -2,10 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { ITtsProvider, TtsOptions } from '../interfaces';
 
-// Voice preset name → ElevenLabs voice ID mapping
-// All presets are male to match Aksa's identity.
+// English voice presets — all male to match Aksa's identity.
 // Ziggy is the default — energetic, slightly synthetic, fits the gen-z personality.
-const VOICE_PRESETS: Record<string, string> = {
+const VOICE_PRESETS_EN: Record<string, string> = {
   ziggy:       '87n4zM8Wuy87vFILuKvE',  // Ziggy — young, energetic, slightly synthetic (default)
   little_dude: 'fBD19tfE58bkETeiwUoC',  // Little Dude
   sean:        '4NJLA7OQNVkeKe4jVdHw',  // Sean
@@ -13,7 +12,15 @@ const VOICE_PRESETS: Record<string, string> = {
   nathan:      'g2W4HAjKvdW93AmsjsOx',  // Nathan
 };
 
-const DEFAULT_VOICE_ID = VOICE_PRESETS.ziggy;
+// Indonesian voice presets
+const VOICE_PRESETS_ID: Record<string, string> = {
+  maskito:   'bEUyorX06jkv9l51DuwR',  // Maskito (default)
+  mark:      'DUnzBkwtjRWXPr6wRbmL',  // Mark
+  cornelius: '6sFKzaJr574YWVu4UuJF',  // Cornelius
+};
+
+const DEFAULT_VOICE_EN = VOICE_PRESETS_EN.ziggy;
+const DEFAULT_VOICE_ID_LANG = VOICE_PRESETS_ID.maskito;
 const DEFAULT_SPEED = 0.7;
 const DEFAULT_STABILITY = 0.6;
 
@@ -29,10 +36,13 @@ export class ElevenLabsTtsProvider implements ITtsProvider {
   }
 
   async synthesize(text: string, options?: TtsOptions, signal?: AbortSignal): Promise<Buffer> {
-    // Resolve voice ID from preset name or direct ID
-    let voiceId = DEFAULT_VOICE_ID;
+    // Resolve voice ID from preset name, using the language-appropriate map.
+    const isId = options?.language === 'id';
+    const presetMap = isId ? VOICE_PRESETS_ID : VOICE_PRESETS_EN;
+    const defaultVoice = isId ? DEFAULT_VOICE_ID_LANG : DEFAULT_VOICE_EN;
+    let voiceId = defaultVoice;
     if (options?.voice) {
-      voiceId = VOICE_PRESETS[options.voice] ?? DEFAULT_VOICE_ID;
+      voiceId = presetMap[options.voice] ?? defaultVoice;
     }
 
     const stability = options?.stability ?? DEFAULT_STABILITY;

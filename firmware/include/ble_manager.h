@@ -22,6 +22,13 @@ void init();
 /// GATT overhead. Safe to call if init() was already called — becomes a no-op.
 void initScanOnly();
 
+/// Start minimal BLE advertising so the phone can find "Aksabot" during
+/// presence scanning. Does NOT create a GATT server — just announces the
+/// device name so flutter_blue_plus can detect it by name filter.
+/// Safe to call even if init() was already called (re-inits if needed).
+/// Call from main.cpp after WiFi is up, when presence is enabled.
+void startPresenceAdvertising();
+
 /// Returns true if BLE has been initialized (via init() or initScanOnly()).
 bool isInitialized();
 
@@ -31,6 +38,10 @@ bool waitForProvisioning(uint32_t timeoutMs = 0);
 
 /// Returns true if WiFi credentials were received via BLE this boot.
 bool isProvisioned();
+
+/// Deinitialize NimBLE entirely (frees radio for WiFi coexistence).
+/// Resets the initialized flag so startPresenceAdvertising() can re-init.
+void deinit();
 
 /// Start/stop BLE advertising.
 void startAdvertising();

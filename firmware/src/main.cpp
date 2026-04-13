@@ -482,11 +482,14 @@ static void onWsJson(const char* event, const char* data) {
                 nvs_store::setDisplayTranscript(show);
                 Serial.printf("[Main] Config: display_transcript=%s\n", show ? "true" : "false");
             }
-            // Presence detection enable/disable — saved to NVS, app controls scanning
+            // Presence detection enable/disable — saved to NVS, start/stop BLE advertising
             if (!doc["presence_enabled"].isNull()) {
                 bool enabled = doc["presence_enabled"] | false;
                 nvs_store::setPresenceEnabled(enabled);
-                if (!enabled) {
+                if (enabled) {
+                    ble_manager::startPresenceAdvertising();
+                } else {
+                    ble_manager::stopAdvertising();
                     appState.presenceState = PresenceState::UNKNOWN;
                 }
                 Serial.printf("[Main] Config: presence_enabled=%s\n", enabled ? "true" : "false");
@@ -1258,8 +1261,9 @@ void setup() {
         // On this ESP32-S3 board, BLE + WiFi radio coexistence is unreliable —
         // WiFi drops if BLE is still active. Deiniting NimBLE releases the
         // BLE controller and frees radio resources for a stable WiFi connection.
-        ble_manager::stopAdvertising();
-        NimBLEDevice::deinit(true);
+        // ble_manager::deinit() also resets bleInitialized so startPresenceAdvertising()
+        // can re-init cleanly after WiFi is up (section 13).
+        ble_manager::deinit();
         delay(300);  // let radio settle
 
         wifi_manager::init();
@@ -1362,8 +1366,13 @@ void setup() {
         face::setExpression(face::Expression::THINKING, 200);
     }
 
-    // ── 13. BLE presence (app-driven) ──────────────────────
-    // Presence detection is driven by the mobile app — no local BLE scanning.
+    // ── 13. BLE presence advertising ───────────────────────
+    // Presence detection is app-driven: the phone scans for "Aksabot" by name.
+    // We only need to advertise our device name — no GATT server required.
+    // Start advertising so the phone can find us during its scan cycles.
+    if (nvs_store::getPresenceEnabled()) {
+        ble_manager::startPresenceAdvertising();
+    }
     Serial.printf("[Main] Presence detection: %s (app-driven)\n",
         nvs_store::getPresenceEnabled() ? "enabled" : "disabled");
 

@@ -11,6 +11,8 @@ export interface DeviceSession {
   idleTimer: ReturnType<typeof setTimeout> | null;
   /** Audio format for current recording session. 'opus' (default, ESP32) or 'pcm16' (web simulator). */
   audioFormat: 'opus' | 'pcm16';
+  /** Language the device is configured to use. Drives STT primary language + LLM response language. */
+  language: 'en' | 'id';
 }
 
 @Injectable()
@@ -20,7 +22,7 @@ export class SessionManager {
   /** Default idle timeout before ending a conversation (5 minutes). */
   private readonly IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
-  create(deviceId: string, userId: string): DeviceSession {
+  create(deviceId: string, userId: string, language: 'en' | 'id' = 'en'): DeviceSession {
     const session: DeviceSession = {
       deviceId,
       userId,
@@ -30,9 +32,15 @@ export class SessionManager {
       interrupted: false,
       idleTimer: null,
       audioFormat: 'opus',
+      language,
     };
     this.sessions.set(deviceId, session);
     return session;
+  }
+
+  setLanguage(deviceId: string, language: 'en' | 'id'): void {
+    const session = this.sessions.get(deviceId);
+    if (session) session.language = language;
   }
 
   get(deviceId: string): DeviceSession | undefined {

@@ -29,6 +29,7 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
   bool _deviceOnline = false;
 
   // Voice settings fields — mirror the keys stored in settingsJson.
+  String _language = 'en';
   String _voicePreset = 'ziggy';
   double _speed = 0.7;
   double _stability = 0.6;
@@ -36,6 +37,27 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
   bool _sleepSound = true;
   bool _reminderChime = true;
   double _vadSensitivity = 0.5;
+
+  // Voice presets per language. Indonesian IDs will be added once confirmed.
+  static const _voicesByLanguage = {
+    'en': [
+      ('ziggy',       'Ziggy'),
+      ('little_dude', 'Little Dude'),
+      ('sean',        'Sean'),
+      ('nelson',      'Nelson'),
+      ('nathan',      'Nathan'),
+    ],
+    'id': [
+      ('maskito',   'Maskito'),
+      ('mark',      'Mark'),
+      ('cornelius', 'Cornelius'),
+    ],
+  };
+
+  static const _defaultVoiceByLanguage = {
+    'en': 'ziggy',
+    'id': 'maskito',
+  };
 
   @override
   void initState() {
@@ -63,13 +85,15 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
     );
   }
 
-  static const _validPresets = {'ziggy', 'little_dude', 'sean', 'nelson', 'nathan'};
-
   void _applySettings(Device device) {
     final s = device.settingsJson;
-    final preset = s['voice_preset'] as String? ?? 'ziggy';
+    final lang = (s['language'] as String?) == 'id' ? 'id' : 'en';
+    final validPresets = _voicesByLanguage[lang]!.map((e) => e.$1).toSet();
+    final defaultPreset = _defaultVoiceByLanguage[lang]!;
+    final preset = s['voice_preset'] as String? ?? defaultPreset;
     setState(() {
-      _voicePreset = _validPresets.contains(preset) ? preset : 'ziggy';
+      _language = lang;
+      _voicePreset = validPresets.contains(preset) ? preset : defaultPreset;
       _speed = (s['voice_speed'] as num?)?.toDouble() ?? 0.7;
       _stability = (s['voice_stability'] as num?)?.toDouble() ?? 0.6;
       _wakeSound = s['audio_wake_sound'] as bool? ?? true;
@@ -213,33 +237,68 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Text('Language', style: theme.textTheme.bodyMedium),
+                  const SizedBox(height: 8),
+                  SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(value: 'en', label: Text('English')),
+                      ButtonSegment(value: 'id', label: Text('Bahasa Indonesia')),
+                    ],
+                    selected: {_language},
+                    onSelectionChanged: _saving
+                        ? null
+                        : (selected) {
+                            final lang = selected.first;
+                            final newDefault = _defaultVoiceByLanguage[lang]!;
+                            setState(() {
+                              _language = lang;
+                              _voicePreset = newDefault;
+                            });
+                            // Save both language and reset voice preset atomically
+                            _save('language', lang);
+                            _save('voice_preset', newDefault);
+                          },
+                  ),
+                  const SizedBox(height: 16),
                   Text('Voice preset', style: theme.textTheme.bodyMedium),
                   const SizedBox(height: 8),
-                  InputDecorator(
-                    decoration: const InputDecoration(
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    ),
-                    child: DropdownButton<String>(
-                      value: _voicePreset,
-                      isExpanded: true,
-                      underline: const SizedBox.shrink(),
-                      items: const [
-                        DropdownMenuItem(value: 'ziggy',       child: Text('Ziggy')),
-                        DropdownMenuItem(value: 'little_dude', child: Text('Little Dude')),
-                        DropdownMenuItem(value: 'sean',        child: Text('Sean')),
-                        DropdownMenuItem(value: 'nelson',      child: Text('Nelson')),
-                        DropdownMenuItem(value: 'nathan',      child: Text('Nathan')),
-                      ],
-                      onChanged: _saving
-                          ? null
-                          : (v) {
-                              if (v == null) return;
-                              setState(() => _voicePreset = v);
-                              _save('voice_preset', v);
-                            },
-                    ),
-                  ),
+                  Builder(builder: (context) {
+                    final presets = _voicesByLanguage[_language]!;
+                    if (presets.isEmpty) {
+                      return Text(
+                        'Indonesian voices coming soon.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
+                      );
+                    }
+                    return InputDecorator(
+                      decoration: const InputDecoration(
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      ),
+                      child: DropdownButton<String>(
+                        value: presets.any((e) => e.$1 == _voicePreset)
+                            ? _voicePreset
+                            : presets.first.$1,
+                        isExpanded: true,
+                        underline: const SizedBox.shrink(),
+                        items: presets
+                            .map((e) => DropdownMenuItem<String>(
+                                  value: e.$1,
+                                  child: Text(e.$2),
+                                ))
+                            .toList(),
+                        onChanged: _saving
+                            ? null
+                            : (v) {
+                                if (v == null) return;
+                                setState(() => _voicePreset = v);
+                                _save('voice_preset', v);
+                              },
+                      ),
+                    );
+                  }),
                   const SizedBox(height: 16),
                   Text('Speed', style: theme.textTheme.bodyMedium),
                   Row(

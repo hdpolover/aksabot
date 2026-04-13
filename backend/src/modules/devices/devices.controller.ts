@@ -67,6 +67,8 @@ export class DevicesController {
     const device = await this.devicesService.updateSettings(id, user.userId, dto);
     // Push only the changed keys to the ESP32 (not the entire settings blob)
     this.gateway.sendToDevice(id, 'config:update', dto);
+    // Keep the in-memory session in sync for language changes
+    this.gateway.onSettingsUpdated(id, dto);
     return device;
   }
 

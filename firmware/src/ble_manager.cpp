@@ -415,6 +415,24 @@ void ble_manager::initScanOnly() {
     Serial.println("[BLE] Initialized (scan-only mode)");
 }
 
+void ble_manager::startPresenceAdvertising() {
+    // bleInitialized may be stale true if NimBLEDevice::deinit() was called
+    // (e.g., post-provisioning WiFi startup). Always re-init here to ensure
+    // a clean advertising state after WiFi is up.
+    if (!bleInitialized) {
+        NimBLEDevice::init("Aksabot");
+        NimBLEDevice::setPower(6);
+        bleInitialized = true;
+    }
+
+    NimBLEAdvertising* pAdv = NimBLEDevice::getAdvertising();
+    pAdv->setName("Aksabot");
+    pAdv->enableScanResponse(false);
+    pAdv->start();
+
+    Serial.println("[BLE] Presence advertising started — phone can now detect 'Aksabot'");
+}
+
 bool ble_manager::isInitialized() {
     return bleInitialized;
 }
@@ -435,6 +453,12 @@ bool ble_manager::waitForProvisioning(uint32_t timeoutMs) {
 
 bool ble_manager::isProvisioned() {
     return provisioned;
+}
+
+void ble_manager::deinit() {
+    NimBLEDevice::deinit(true);
+    bleInitialized = false;
+    Serial.println("[BLE] NimBLE deinitialized");
 }
 
 void ble_manager::startAdvertising() {

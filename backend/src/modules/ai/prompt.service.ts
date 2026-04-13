@@ -11,6 +11,7 @@ export interface ContextInfo {
   weatherEnabled?: boolean;
   latitude?: number;
   longitude?: number;
+  language?: 'en' | 'id';    // response language; defaults to 'en'
 }
 
 export interface MoodHistoryEntry {
@@ -126,7 +127,11 @@ Available tags: [happy] [sad] [excited] [calm] [confused] [focused] [sarcastic] 
 Example: "Bruh that's actually sick! [excited] OK so basically here's how it works. [focused]"
 Always include the tag — never skip it. The tag is stripped before TTS, the user won't hear it.`;
 
-    return `${SYSTEM_PROMPT}${energyBlock}${memoryBlock}${moodBlock}${timeBlock}${weatherBlock}${emotionInstruction}\n\nRespond in whatever language the user speaks.`;
+    const languageInstruction = context?.language === 'id'
+      ? `\n\nRespond in Bahasa Indonesia. Use informal/casual style (lo/gue), include English tech terms naturally — that's how Indonesian devs actually speak. Keep the same gen-z, sarcastic, funny personality.`
+      : `\n\nRespond in English.`;
+
+    return `${SYSTEM_PROMPT}${energyBlock}${memoryBlock}${moodBlock}${timeBlock}${weatherBlock}${emotionInstruction}${languageInstruction}`;
   }
 
   /**

@@ -1,6 +1,10 @@
-import { IsBoolean, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class UpdateSettingsDto {
+  @IsIn(['en', 'id'])
+  @IsOptional()
+  language?: 'en' | 'id';
+
   @IsString()
   @IsOptional()
   voice_preset?: string;

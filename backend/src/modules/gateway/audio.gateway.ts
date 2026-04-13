@@ -106,7 +106,8 @@ export class AudioGateway
 
     this.socketToDevice.set(client, device.id);
     this.deviceToSocket.set(device.id, client);
-    this.sessions.create(device.id, device.userId);
+    const deviceLanguage = (device.settingsJson?.language as 'en' | 'id' | undefined) ?? 'en';
+    this.sessions.create(device.id, device.userId, deviceLanguage);
 
     // Register message handler FIRST to avoid race condition —
     // client may send messages before async setup completes
@@ -741,8 +742,11 @@ export class AudioGateway
     session.state = 'listening';
     this.chunkCount.set(deviceId, 0);
 
+    const sttLanguages = session.language === 'id'
+      ? ['id-ID', 'en-US']
+      : ['en-US', 'id-ID'];
     const sttStream = this.aiService.createSttStream({
-      languages: ['en-US', 'id-ID'],
+      languages: sttLanguages,
     });
     session.sttStream = sttStream;
     this.logger.log(`[${deviceId}] STT stream created (format=${session.audioFormat})`);
@@ -935,12 +939,14 @@ export class AudioGateway
       voice: settings.voice_preset as string | undefined,
       speed: settings.voice_speed as number | undefined,
       stability: settings.voice_stability as number | undefined,
+      language: (settings.language as 'en' | 'id' | undefined) ?? 'en',
     };
     const context = {
       timezone: settings.timezone as string | undefined,
       weatherEnabled: settings.integrations_weather as boolean | undefined,
       latitude: settings.latitude as number | undefined,
       longitude: settings.longitude as number | undefined,
+      language: (settings.language as 'en' | 'id' | undefined) ?? 'en',
     };
 
     // Map mood entries for prompt
@@ -1115,6 +1121,7 @@ export class AudioGateway
       voice: settings.voice_preset as string | undefined,
       speed: settings.voice_speed as number | undefined,
       stability: settings.voice_stability as number | undefined,
+      language: (settings.language as 'en' | 'id' | undefined) ?? 'en',
     };
 
     try {
@@ -1361,6 +1368,11 @@ export class AudioGateway
     const socket = this.deviceToSocket.get(deviceId);
     if (!socket || socket.readyState !== 1) return;
     socket.send(JSON.stringify({ event, data }));
+  }
+
+  /** Called by DevicesController after settings are saved so the in-memory session stays in sync. */
+  onSettingsUpdated(deviceId: string, dto: { language?: 'en' | 'id' }) {
+    if (dto.language) this.sessions.setLanguage(deviceId, dto.language);
   }
 
   private sendBinaryToDevice(deviceId: string, data: Buffer) {
