@@ -5,6 +5,8 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <mbedtls/sha256.h>
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
 #include <Arduino.h>
 
 static const char* OTA_PATH = "/ota/firmware.bin";
@@ -206,17 +208,108 @@ bool ota_update::apply() {
     }
 
     state = State::FLASHING;
+    progress = 0;
 
-    // TODO: Hardware-dependent flash operation
-    // Use esp_ota_begin(), esp_ota_write(), esp_ota_end()
-    // Read from /ota/firmware.bin in chunks and write to OTA partition
-    // On success: esp_ota_set_boot_partition(), esp_restart()
-    // On failure: rollback to factory partition
+    // Find next OTA partition (alternates between ota_0 and ota_1)
+    const esp_partition_t* updatePart = esp_ota_get_next_update_partition(NULL);
+    if (!updatePart) {
+        strncpy(errorMsg, "No OTA partition found", sizeof(errorMsg));
+        state = State::ERROR;
+        Serial.println("[OTA] ERROR: No OTA partition available — check partition table");
+        return false;
+    }
+    Serial.printf("[OTA] Target partition: %s (offset 0x%08" PRIx32 ", size 0x%08" PRIx32 ")\n",
+        updatePart->label, updatePart->address, updatePart->size);
 
-    Serial.println("[OTA] apply() — flash operation not yet implemented (needs hardware)");
-    strncpy(errorMsg, "Flash not implemented — needs hardware", sizeof(errorMsg));
-    state = State::ERROR;
-    return false;
+    // Open the staged firmware
+    File fwFile = SD.open(OTA_PATH, FILE_READ);
+    if (!fwFile) {
+        strncpy(errorMsg, "Cannot open staged firmware", sizeof(errorMsg));
+        state = State::ERROR;
+        return false;
+    }
+    size_t fwSize = fwFile.size();
+    if (fwSize == 0 || fwSize > updatePart->size) {
+        snprintf(errorMsg, sizeof(errorMsg), "Firmware size %u invalid", (unsigned)fwSize);
+        state = State::ERROR;
+        fwFile.close();
+        return false;
+    }
+
+    // Begin OTA — OTA_WITH_SEQUENTIAL_WRITES lets ESP-IDF validate the image header
+    esp_ota_handle_t otaHandle;
+    esp_err_t err = esp_ota_begin(updatePart, OTA_WITH_SEQUENTIAL_WRITES, &otaHandle);
+    if (err != ESP_OK) {
+        snprintf(errorMsg, sizeof(errorMsg), "esp_ota_begin: %s", esp_err_to_name(err));
+        state = State::ERROR;
+        fwFile.close();
+        Serial.printf("[OTA] ERROR: %s\n", errorMsg);
+        return false;
+    }
+
+    // Write firmware in chunks
+    static uint8_t flashBuf[4096];
+    size_t totalWritten = 0;
+
+    while (fwFile.available()) {
+        size_t bytesRead = fwFile.read(flashBuf, sizeof(flashBuf));
+        if (bytesRead == 0) break;
+
+        err = esp_ota_write(otaHandle, flashBuf, bytesRead);
+        if (err != ESP_OK) {
+            snprintf(errorMsg, sizeof(errorMsg), "esp_ota_write: %s", esp_err_to_name(err));
+            esp_ota_abort(otaHandle);
+            fwFile.close();
+            SD.remove(OTA_PATH);
+            state = State::ERROR;
+            Serial.printf("[OTA] Write error at offset %u: %s\n", (unsigned)totalWritten, esp_err_to_name(err));
+            return false;
+        }
+
+        totalWritten += bytesRead;
+        progress = (uint8_t)((totalWritten * 100UL) / fwSize);
+    }
+    fwFile.close();
+
+    if (totalWritten != fwSize) {
+        snprintf(errorMsg, sizeof(errorMsg), "Write incomplete (%u/%u bytes)", (unsigned)totalWritten, (unsigned)fwSize);
+        esp_ota_abort(otaHandle);
+        SD.remove(OTA_PATH);
+        state = State::ERROR;
+        Serial.printf("[OTA] ERROR: %s\n", errorMsg);
+        return false;
+    }
+
+    // Finalise — ESP-IDF validates the image checksum internally
+    err = esp_ota_end(otaHandle);
+    if (err != ESP_OK) {
+        snprintf(errorMsg, sizeof(errorMsg), "esp_ota_end: %s", esp_err_to_name(err));
+        state = State::ERROR;
+        SD.remove(OTA_PATH);
+        Serial.printf("[OTA] Validation failed: %s\n", esp_err_to_name(err));
+        return false;
+    }
+
+    // Mark partition as the boot target
+    err = esp_ota_set_boot_partition(updatePart);
+    if (err != ESP_OK) {
+        snprintf(errorMsg, sizeof(errorMsg), "set_boot_partition: %s", esp_err_to_name(err));
+        state = State::ERROR;
+        SD.remove(OTA_PATH);
+        Serial.printf("[OTA] ERROR: %s\n", errorMsg);
+        return false;
+    }
+
+    SD.remove(OTA_PATH);  // Clean up — no longer needed after successful flash
+
+    Serial.printf("[OTA] Flash complete (%u bytes). Rebooting into %s...\n",
+        (unsigned)totalWritten, updatePart->label);
+
+    progress = 100;
+    delay(500);   // Brief pause so the log line flushes over serial
+    esp_restart();
+
+    return true;  // unreachable — esp_restart() doesn't return
 }
 
 bool ota_update::hasStagedFirmware() {

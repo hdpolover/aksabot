@@ -120,6 +120,13 @@ export class PromptService {
       ? `\n\nUser's recent mood journal:\n${moodHistory.map((m) => `- ${m.date}: ${m.mood}${m.note ? ` (${m.note})` : ''}`).join('\n')}\nUse this to be emotionally aware. If you notice patterns (e.g. tired every Thursday), mention it naturally. Don't bring it up every response — only when relevant.`
       : '';
 
+    const sfxInstruction = `
+
+OPTIONAL — Sound effects: You can trigger a sound effect by adding [sfx:clipname] at the very start of a sentence. Use at most once per response, only when it genuinely adds humor or personality — not every time.
+Available clips: rimshot (classic punchline drop), ba_dum_tss (drum hit after a joke), sad_trombone (fail/disappointment), dry_laugh (awkward forced laugh), mind_blown (revelation/shock), level_up (achievement unlocked), quest_complete (task done), keyboard_fury (angry typing), coffee_slurp (morning/tired vibes), deep_sigh (frustration/done), hbd_jingle (birthday wishes), applause (celebrating something great), fanfare (big win/announcement), mic_drop (perfect comeback), crickets (awkward silence/bad joke), glitch (tech going wrong), dial_up (nostalgia/slow internet), thinking_music (pondering something dumb)
+Example: "[sfx:rimshot] Why do programmers always mix up Christmas and Halloween? Because Oct 31 equals Dec 25. [sarcastic]"
+The sfx tag is stripped before TTS — the user hears the sound, then your voice.`;
+
     const emotionInstruction = `
 
 IMPORTANT — Emotion tags: End EVERY sentence with exactly one emotion tag in brackets. This controls your animated face on the device screen.
@@ -131,7 +138,7 @@ Always include the tag — never skip it. The tag is stripped before TTS, the us
       ? `\n\nRespond in Bahasa Indonesia. All sentences must be in Indonesian — do NOT switch to full English sentences. You may use English only for tech/code nouns (framework names, variable names, error messages, etc.) embedded inside Indonesian sentences — that's natural for Indonesian devs. Use lo/gue pronouns and casual gen-z Indonesian slang.`
       : `\n\nRespond in English.`;
 
-    return `${SYSTEM_PROMPT}${energyBlock}${memoryBlock}${moodBlock}${timeBlock}${weatherBlock}${emotionInstruction}${languageInstruction}`;
+    return `${SYSTEM_PROMPT}${energyBlock}${memoryBlock}${moodBlock}${timeBlock}${weatherBlock}${sfxInstruction}${emotionInstruction}${languageInstruction}`;
   }
 
   /**

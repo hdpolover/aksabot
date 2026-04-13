@@ -31,6 +31,8 @@
 #include "wake_word.h"
 #include "gesture.h"
 #include "ui_audio.h"
+#include "emotion_audio.h"
+#include "sfx_audio.h"
 
 // Global application state
 AppState appState;
@@ -373,13 +375,14 @@ static void onWsJson(const char* event, const char* data) {
     // ── Face expression control from backend ─────────
     else if (strcmp(event, "face:expression") == 0) {
         // Backend/LLM sends expression based on conversation sentiment.
-        // Payload: {"expression":"happy","durationMs":3000}
-        // If durationMs is set, reverts to IDLE after that duration.
-        // If omitted, expression persists until next state change.
+        // Payload: {"expression":"happy","durationMs":3000,"withSound":false}
+        // withSound:true  — standalone trigger (presence, proactive) → play emotion clip
+        // withSound:false — pipeline sentence (TTS follows immediately) → face only
         JsonDocument doc;
         if (deserializeJson(doc, data) == DeserializationError::Ok) {
             const char* exprName = doc["expression"] | "";
             uint16_t durationMs = doc["durationMs"] | 0;
+            bool withSound = doc["withSound"] | false;
 
             // Map name to expression enum
             struct ExprMap { const char* name; face::Expression expr; };
@@ -407,13 +410,31 @@ static void onWsJson(const char* event, const char* data) {
                     if (durationMs > 0) {
                         scheduleFaceRevert(durationMs);
                     }
-                    Serial.printf("[Main] Face expression: %s (duration=%dms)\n", exprName, durationMs);
+                    if (withSound) {
+                        emotion_audio::play(exprName);
+                    }
+                    Serial.printf("[Main] Face expression: %s (sound=%d duration=%dms)\n",
+                        exprName, (int)withSound, durationMs);
                     found = true;
                     break;
                 }
             }
             if (!found) {
                 Serial.printf("[Main] Unknown expression: %s\n", exprName);
+            }
+        }
+    }
+    // ── SFX clip from backend LLM [sfx:clipname] tags ────
+    else if (strcmp(event, "audio:sfx") == 0) {
+        // Payload: {"clip":"rimshot"}
+        // Backend extracts [sfx:xxx] tags from LLM text and sends this event
+        // before the TTS frames for that sentence, so the clip plays first.
+        JsonDocument doc;
+        if (deserializeJson(doc, data) == DeserializationError::Ok) {
+            const char* clipName = doc["clip"] | "";
+            if (clipName && *clipName) {
+                Serial.printf("[Main] SFX: %s\n", clipName);
+                sfx_audio::play(clipName);
             }
         }
     }

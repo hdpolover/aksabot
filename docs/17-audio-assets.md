@@ -359,6 +359,201 @@ Short, punchy, and characterful. Each clip should feel like the sound effect ver
 
 ---
 
+## SFX clips — `/audio/sfx/`
+
+Triggered by the backend via `audio:sfx` WS event: `{ "clip": "rimshot" }`. The LLM decides when to fire these — they're intentional comedy beats and personality moments, not automatic state changes. Played once on demand from SD.
+
+### Sonic direction
+Two sub-groups with different energy:
+
+**Comedy clips** (`rimshot`, `crickets`, `sad_trombone`, `drumroll`, `level_up`, `evil_laugh`, `chef_kiss`, `applause`, `hbd`) — playful and slightly stylised. Electronic but with character. Think: a robot that watches too much internet comedy.
+
+**Personality + context clips** (`roast`, `thinking_hard`, `mind_blown`, `sigh`, `gasp`, `deploy_success`, `build_fail`, `midnight`, `morning`, `coffee_time`, `rain`) — more grounded. These should feel like genuine personality moments, not gags. Rain is a special case — it's a loopable ambient clip.
+
+---
+
+### `rimshot.opus` — Ba dum tss
+
+**Trigger**: After a punchline. The LLM tags jokes with this.
+
+**ElevenLabs prompt**:
+> A classic electronic rimshot — two quick snare hits followed by a cymbal crash, about 0.7 seconds. Synthesized and slightly robotic rather than acoustic. The two snare hits are "ba dum", the cymbal is "tss" with a short decay tail. Satisfying and clear. No background noise.
+
+---
+
+### `crickets.opus` — Awkward silence
+
+**Trigger**: Joke didn't land. Aksa acknowledges it flopped.
+
+**ElevenLabs prompt**:
+> Three or four looped cricket chirps — rhythmic, dry, slightly comedic, about 1.5 seconds. Classic "awkward silence" crickets. Electronic or lightly synthesized is fine. Sparse and quiet, with clear silence between each chirp group. No background noise.
+
+---
+
+### `sad_trombone.opus` — Wah wah wah
+
+**Trigger**: Something failed comically, a plan fell apart.
+
+**ElevenLabs prompt**:
+> The classic descending "wah wah wah wahhh" trombone fail sound — four descending notes, the last one slightly drawn out and deflating, about 1.2 seconds. Electronic or slightly synthesized is fine. Unmistakably the "you lose" sound. No background noise.
+
+---
+
+### `drumroll.opus` — Dramatic buildup
+
+**Trigger**: Before a reveal, announcement, or suspenseful moment.
+
+**ElevenLabs prompt**:
+> A short electronic snare drumroll that builds in intensity over about 1.5 seconds — starts quiet and accelerates, ending with a single loud accent hit. Synthesized drum texture. Tight and punchy, not muddy. No background noise.
+
+---
+
+### `level_up.opus` — Achievement unlocked
+
+**Trigger**: User hits a goal, productivity milestone, or streak.
+
+**ElevenLabs prompt**:
+> A bright ascending 4-note electronic fanfare — video-game style "level up" sound, about 0.8 seconds. Each note steps up in pitch with a satisfying progression. The final note has a short reverb tail. Celebratory and upbeat. No background noise.
+
+---
+
+### `evil_laugh.opus` — Mischievous
+
+**Trigger**: Aksa is being sassy, smug, or plotting something.
+
+**ElevenLabs prompt**:
+> Three short electronic chuckle pulses — a quick "heh heh heh" in synthesized robot form, about 0.6 seconds. Slightly low-pitched and rounded, not harsh. Playful rather than menacing. Each pulse is distinct with a short gap between them. No background noise.
+
+---
+
+### `chef_kiss.opus` — That's excellent
+
+**Trigger**: Something is genuinely impressive or perfect.
+
+**ElevenLabs prompt**:
+> A quick bright ascending pip followed by a tiny flourish — two or three rapid notes going up, the last one with a soft sparkle tail, about 0.4 seconds. Like a tiny "magnifique!" in sound form. Light and celebratory. No reverb on the main tone, just the sparkle tail. No background noise.
+
+---
+
+### `applause.opus` — Clapping
+
+**Trigger**: Congratulating the user on something.
+
+**ElevenLabs prompt**:
+> A short burst of electronic applause — about 1.5 seconds. Starts with a few quick claps, swells briefly, then fades. Synthesized or lightly processed clapping texture. Genuine-feeling without being over the top. Fades out naturally. No background noise.
+
+---
+
+### `hbd.opus` — Happy birthday jingle
+
+**Trigger**: It's the user's birthday (backend reads this from profile).
+
+**ElevenLabs prompt**:
+> A short 4-note ascending electronic birthday jingle — warm, celebratory, slightly whimsical, about 1 second. Distinctly birthday-ish in character without being the actual song. Electronic synth tones with a gentle reverb tail on the final note. Sounds like a tiny party. No background noise.
+
+---
+
+### `roast.opus` — Crowd reaction for a roast
+
+**Trigger**: Aksa just delivered a roast or burns the user gently.
+
+**ElevenLabs prompt**:
+> A short "ohhhhh" crowd reaction — electronic and stylised, about 0.8 seconds. Like an impressed/scandalized audience reacting to a good burn. Starts with a collective gasp-rise, peaks with the "ohh", fades. Synthesized rather than recorded. No background noise.
+
+---
+
+### `thinking_hard.opus` — Intensive processing
+
+**Trigger**: LLM tags a response as requiring heavy reasoning — "this is a hard one."
+
+**ElevenLabs prompt**:
+> A rapidly repeating electronic trill or chatter — faster and more intense than the ambient thinking beeps, about 0.6 seconds. Like a processor spinning up under load. Mid-to-high frequency, rhythmic, slightly buzzy. Starts immediately at full intensity and cuts off clean. No background noise.
+
+---
+
+### `mind_blown.opus` — Blown away
+
+**Trigger**: Something genuinely impressive or mind-expanding was said or learned.
+
+**ElevenLabs prompt**:
+> A quick ascending electronic sweep followed by a soft explosion-like bloom — like a small firework going off in electronic form, about 0.5 seconds. The sweep rises fast, peaks, then blooms outward with a short reverb tail. Bright and surprising. No harsh transients. No background noise.
+
+---
+
+### `sigh.opus` — Exasperated
+
+**Trigger**: Aksa is done with you (affectionate exasperation). Very gen-z.
+
+**ElevenLabs prompt**:
+> A slow, slightly deflating electronic exhale — a tone that starts mid-range, bends very slightly downward, and fades over about 0.6 seconds. Like a small robot letting out a tired sigh. Rounded and warm, slightly breathy timbre. Conveys "I can't with you" energy. No background noise.
+
+---
+
+### `gasp.opus` — Theatrical gasp
+
+**Trigger**: Dramatic reaction, more theatrical than `surprised.opus`.
+
+**ElevenLabs prompt**:
+> A quick sharp inward-sweeping electronic sound — a downward pitch sweep that feels like a sudden intake of breath, about 0.25 seconds. Higher register, bright attack, immediate cutoff. More theatrical and over-the-top than `surprised.opus`. Like a dramatic gasp emoji. Completely dry. No background noise.
+
+---
+
+### `deploy_success.opus` — Ship it
+
+**Trigger**: Deployment pipeline succeeds (GitHub/CI webhook via backend).
+
+**ElevenLabs prompt**:
+> A satisfying 3-note ascending electronic fanfare — confident and punchy, about 0.6 seconds. Each note is clear and bright. The final note has a short upward bend, like something locking into place perfectly. Developer-energy: this is the "it's live" sound. No background noise.
+
+---
+
+### `build_fail.opus` — Build broken
+
+**Trigger**: CI build fails.
+
+**ElevenLabs prompt**:
+> A short descending 3-note electronic groan — mid-range, slightly flat and deflating, about 0.5 seconds. Like `sad_trombone` but shorter and more understated — this isn't catastrophic, just annoying. The final note bends slightly downward and fades. No background noise.
+
+---
+
+### `midnight.opus` — It's late
+
+**Trigger**: Backend detects it's past midnight while user is still active — "go to sleep."
+
+**ElevenLabs prompt**:
+> A slow, low, slightly spooky two-note electronic toll — like a distant clock striking midnight in electronic form, about 1 second. Low register, hollow timbre, long gentle decay on the second note. Conveys "it's very late." Slightly eerie but not alarming. No background noise.
+
+---
+
+### `morning.opus` — Good morning
+
+**Trigger**: Morning briefing intro, first interaction of the day.
+
+**ElevenLabs prompt**:
+> A warm, gentle 3-note ascending electronic chime — soft and unhurried, about 0.8 seconds. Like a quiet sunrise in sound form. Warmer and more personal than `boot.opus` — this is a greeting, not a startup. Light reverb tail on the final note. No background noise.
+
+---
+
+### `coffee_time.opus` — Caffeine reminder
+
+**Trigger**: Morning reminder, or after a long focus session.
+
+**ElevenLabs prompt**:
+> A warm, cozy 2-note ascending electronic tone with a tiny bubbling quality — about 0.5 seconds. Like the sound of something warm and comforting. Mid-range, rounded, slightly rich timbre. Suggests "take a break and get a coffee" without spelling it out. Short natural decay. No background noise.
+
+---
+
+### `rain.opus` — Ambient rain
+
+**Trigger**: Weather context shows it's raining outside. Looped as background ambience while Aksa talks about weather or sets the mood.
+
+**Special**: This is a **loopable ambient clip** — generate at 5–8 seconds and the firmware will loop it. Like `thinking.opus`, it must start and end in silence so it loops without a click.
+
+**ElevenLabs prompt**:
+> Gentle steady rain — soft and even, neither heavy downpour nor light drizzle. About 6 seconds. Loopable: starts and ends gradually so there's no audible click when repeated. Clean rain texture, no thunder, no wind. Slightly muffled as if heard from indoors. Cozy rather than melancholic. No background music or tones — pure rain ambience.
+
+---
+
 1. **Tool**: Use ElevenLabs Sound Effects (not TTS) — the audio generation tool that takes descriptive prompts.
 2. **Too long**: Add "under X seconds total" and regenerate.
 3. **Too harsh**: Add "soft rounded edges, no sharp transients, warm timbre."

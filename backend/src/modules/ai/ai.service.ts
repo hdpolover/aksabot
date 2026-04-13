@@ -23,8 +23,8 @@ export interface CacheEntry {
 }
 
 export type PipelineEvent =
-  | { type: 'text'; text: string; emotion?: string }
-  | { type: 'audio'; data: Buffer; cacheKey?: string; emotion?: string }
+  | { type: 'text'; text: string; emotion?: string; sfx?: string }
+  | { type: 'audio'; data: Buffer; cacheKey?: string; emotion?: string; sfx?: string }
   | { type: 'done'; fullText: string; cacheKeys: CacheEntry[] };
 
 // Known emotion tags → ESP32 expression mapping
@@ -52,11 +52,14 @@ const EMOTION_MAP: Record<string, string> = {
   teasing: 'sarcastic',
 };
 
-function extractEmotion(sentence: string): { text: string; emotion?: string } {
-  // Match [word] anywhere — case-insensitive, handles spaces inside brackets
+function extractEmotion(sentence: string): { text: string; emotion?: string; sfx?: string } {
+  // Match [sfx:clipname] tags first (e.g. [sfx:rimshot])
+  const sfxMatch = sentence.match(/\[\s*sfx:(\w+)\s*\]/i);
+  const sfx = sfxMatch ? sfxMatch[1].toLowerCase() : undefined;
+
+  // Match plain [emotion] tags — case-insensitive
   const allTags = [...sentence.matchAll(/\[\s*(\w+)\s*\]/gi)];
   let emotion: string | undefined;
-
   for (const m of allTags) {
     const tag = m[1].toLowerCase();
     if (tag in EMOTION_MAP) {
@@ -65,9 +68,13 @@ function extractEmotion(sentence: string): { text: string; emotion?: string } {
     }
   }
 
-  // Strip ALL bracket tags from the text (even unrecognized ones)
-  const cleaned = sentence.replace(/\[\s*\w+\s*\]/g, '').replace(/\s{2,}/g, ' ').trim();
-  return { text: cleaned, emotion };
+  // Strip ALL bracket tags (emotion + sfx) and collapse extra whitespace
+  const cleaned = sentence
+    .replace(/\[\s*sfx:\w+\s*\]/gi, '')
+    .replace(/\[\s*\w+\s*\]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return { text: cleaned, emotion, sfx };
 }
 
 // Per-emotion TTS voice adjustments (speed + stability modulation)
@@ -217,7 +224,7 @@ export class AiService {
       const rawSentence = sentenceBuffer.feed(token);
       if (rawSentence) {
         if (signal?.aborted) return;
-        const { text: cleanText, emotion } = extractEmotion(rawSentence);
+        const { text: cleanText, emotion, sfx } = extractEmotion(rawSentence);
         const emotionVoice = applyEmotionToVoice(voiceOptions, emotion);
         // synthesizeWithCache passes signal to fetch — aborts the HTTP request if cancelled
         const { opusAudio, cacheKey } = await this.synthesizeWithCache(
@@ -228,8 +235,8 @@ export class AiService {
         );
         cacheKeys.push({ hash: cacheKey, sentence: cleanText });
 
-        yield { type: 'text', text: cleanText, emotion };
-        yield { type: 'audio', data: opusAudio, cacheKey, emotion };
+        yield { type: 'text', text: cleanText, emotion, sfx };
+        yield { type: 'audio', data: opusAudio, cacheKey, emotion, sfx };
       }
     }
 
@@ -237,7 +244,7 @@ export class AiService {
 
     const remaining = sentenceBuffer.flush();
     if (remaining) {
-      const { text: cleanText, emotion } = extractEmotion(remaining);
+      const { text: cleanText, emotion, sfx } = extractEmotion(remaining);
       const emotionVoice = applyEmotionToVoice(voiceOptions, emotion);
       const { opusAudio, cacheKey } = await this.synthesizeWithCache(
         cleanText,
@@ -247,8 +254,8 @@ export class AiService {
       );
       cacheKeys.push({ hash: cacheKey, sentence: cleanText });
 
-      yield { type: 'text', text: cleanText, emotion };
-      yield { type: 'audio', data: opusAudio, cacheKey, emotion };
+      yield { type: 'text', text: cleanText, emotion, sfx };
+      yield { type: 'audio', data: opusAudio, cacheKey, emotion, sfx };
     }
 
     yield { type: 'done', fullText: fullResponseText, cacheKeys };

@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../conversations/domain/entities/conversation_entity.dart';
-import '../../../conversations/domain/entities/message_entity.dart';
 import '../../../conversations/presentation/bloc/conversations_bloc.dart';
+import '../../../conversations/presentation/pages/conversation_detail_page.dart';
 import '../../../devices/domain/entities/device_entity.dart';
 import '../../../devices/domain/repositories/devices_repository.dart';
 import '../../../memories/domain/entities/memory_entity.dart';
@@ -193,7 +193,6 @@ class _ConversationsView extends StatelessWidget {
             }
             return _ConversationsList(
               conversations: state.conversations,
-              messagesCache: state.messagesCache,
               deviceId: deviceId,
             );
           }
@@ -204,46 +203,26 @@ class _ConversationsView extends StatelessWidget {
   }
 }
 
-class _ConversationsList extends StatefulWidget {
+class _ConversationsList extends StatelessWidget {
   final List<Conversation> conversations;
-  final Map<String, List<Message>> messagesCache;
   final String deviceId;
 
   const _ConversationsList({
     required this.conversations,
-    required this.messagesCache,
     required this.deviceId,
   });
-
-  @override
-  State<_ConversationsList> createState() => _ConversationsListState();
-}
-
-class _ConversationsListState extends State<_ConversationsList> {
-  String? _expandedId;
-
-  void _toggleExpanded(String conversationId) {
-    setState(() {
-      if (_expandedId == conversationId) {
-        _expandedId = null;
-      } else {
-        _expandedId = conversationId;
-        context.read<ConversationsBloc>().add(LoadMessages(conversationId));
-      }
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
     return RefreshIndicator(
       onRefresh: () async {
-        context.read<ConversationsBloc>().add(LoadConversations(widget.deviceId));
+        context.read<ConversationsBloc>().add(LoadConversations(deviceId));
       },
       child: ListView.builder(
-        itemCount: widget.conversations.length,
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: conversations.length,
         itemBuilder: (context, index) {
-          final conversation = widget.conversations[index];
-          final isExpanded = _expandedId == conversation.id;
+          final conversation = conversations[index];
           return Dismissible(
             key: ValueKey(conversation.id),
             direction: DismissDirection.endToStart,
@@ -260,44 +239,34 @@ class _ConversationsListState extends State<_ConversationsList> {
                 color: Theme.of(context).colorScheme.onError,
               ),
             ),
-            confirmDismiss: (_) async {
-              if (_expandedId == conversation.id) {
-                setState(() => _expandedId = null);
-              }
-              return await showDialog<bool>(
-                context: context,
-                builder: (dialogContext) => AlertDialog(
-                  title: const Text('Delete conversation?'),
-                  content: const Text(
-                      'This will permanently remove the conversation and all its messages.'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.of(dialogContext).pop(false),
-                      child: const Text('Cancel'),
-                    ),
-                    FilledButton(
-                      style: FilledButton.styleFrom(
-                        backgroundColor:
-                            Theme.of(context).colorScheme.error,
-                      ),
-                      onPressed: () => Navigator.of(dialogContext).pop(true),
-                      child: const Text('Delete'),
-                    ),
-                  ],
+            confirmDismiss: (_) => showDialog<bool>(
+              context: context,
+              builder: (dialogContext) => AlertDialog(
+                title: const Text('Delete conversation?'),
+                content: const Text(
+                  'This will permanently remove the conversation and all its messages.',
                 ),
-              );
-            },
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.error,
+                    ),
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    child: const Text('Delete'),
+                  ),
+                ],
+              ),
+            ),
             onDismissed: (_) {
               context
                   .read<ConversationsBloc>()
                   .add(DeleteConversation(conversation.id));
             },
-            child: _ConversationTile(
-              conversation: conversation,
-              isExpanded: isExpanded,
-              messages: widget.messagesCache[conversation.id],
-              onTap: () => _toggleExpanded(conversation.id),
-            ),
+            child: _ConversationTile(conversation: conversation),
           );
         },
       ),
@@ -307,137 +276,114 @@ class _ConversationsListState extends State<_ConversationsList> {
 
 class _ConversationTile extends StatelessWidget {
   final Conversation conversation;
-  final bool isExpanded;
-  final List<Message>? messages;
-  final VoidCallback onTap;
 
-  const _ConversationTile({
-    required this.conversation,
-    required this.isExpanded,
-    required this.messages,
-    required this.onTap,
-  });
+  const _ConversationTile({required this.conversation});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final isOngoing = conversation.endedAt == null;
     final duration = conversation.duration;
-    final durationText = duration != null ? _formatDuration(duration) : 'Ongoing';
+
+    // Build subtitle: preview text + message count
+    final preview = conversation.preview;
+    final count = conversation.messageCount;
+    final countLabel = '$count msg${count == 1 ? '' : 's'}';
+    final subtitleText = (preview != null && preview.isNotEmpty)
+        ? '$preview · $countLabel'
+        : countLabel;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Column(
-        children: [
-          ListTile(
-            onTap: onTap,
-            leading: Icon(
-              conversation.endedAt != null
-                  ? Icons.chat_bubble_outline
-                  : Icons.chat_bubble,
-              color: theme.colorScheme.primary,
-            ),
-            title: Text(
-              _formatDate(conversation.startedAt),
-              style: theme.textTheme.titleSmall,
-            ),
-            subtitle: Text('Duration: $durationText'),
-            trailing: Icon(
-              isExpanded ? Icons.expand_less : Icons.expand_more,
+      clipBehavior: Clip.antiAlias,
+      child: ListTile(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => BlocProvider.value(
+              value: context.read<ConversationsBloc>(),
+              child: ConversationDetailPage(conversation: conversation),
             ),
           ),
-          if (isExpanded) _buildMessages(context),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMessages(BuildContext context) {
-    final msgs = messages;
-    if (msgs == null) {
-      return const Padding(
-        padding: EdgeInsets.all(16),
-        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-      );
-    }
-    if (msgs.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(16),
-        child: Text('No messages.'),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Column(
-        children: [
-          const Divider(height: 1),
-          const SizedBox(height: 8),
-          ...msgs.map((msg) => _MessageBubble(message: msg)),
-        ],
-      ),
-    );
-  }
-
-  String _formatDuration(Duration d) {
-    if (d.inHours > 0) {
-      final mins = d.inMinutes % 60;
-      return '${d.inHours}h ${mins}m';
-    }
-    if (d.inMinutes > 0) {
-      final secs = d.inSeconds % 60;
-      return '${d.inMinutes}m ${secs}s';
-    }
-    return '${d.inSeconds}s';
-  }
-
-  String _formatDate(DateTime date) {
-    final d = date.toLocal();
-    final months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-    ];
-    return '${d.day} ${months[d.month - 1]} ${d.year}, '
-        '${d.hour.toString().padLeft(2, '0')}:'
-        '${d.minute.toString().padLeft(2, '0')}';
-  }
-}
-
-class _MessageBubble extends StatelessWidget {
-  final Message message;
-  const _MessageBubble({required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isUser = message.isUser;
-
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.7,
         ),
-        decoration: BoxDecoration(
-          color: isUser
-              ? theme.colorScheme.primaryContainer
-              : theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
+        leading: CircleAvatar(
+          backgroundColor:
+              isOngoing ? colors.primaryContainer : colors.surfaceContainerHigh,
+          child: Icon(
+            isOngoing ? Icons.chat_bubble : Icons.chat_bubble_outline,
+            size: 18,
+            color: isOngoing ? colors.primary : colors.onSurfaceVariant,
+          ),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        title: Text(
+          _formatDate(conversation.startedAt),
+          style: theme.textTheme.bodyMedium
+              ?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          subtitleText,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: colors.onSurfaceVariant),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              isUser ? 'You' : 'Aksa',
-              style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 2),
-            Text(message.content),
+            if (isOngoing)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: colors.primaryContainer,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  'Live',
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(color: colors.primary),
+                ),
+              )
+            else if (duration != null)
+              Text(
+                _formatDuration(duration),
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: colors.onSurfaceVariant),
+              ),
+            const SizedBox(width: 4),
+            Icon(Icons.chevron_right_rounded, color: colors.outlineVariant),
           ],
         ),
       ),
     );
+  }
+
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final d = date.toLocal();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final dateOnly = DateTime(d.year, d.month, d.day);
+    final timeStr =
+        '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
+    if (dateOnly == today) return 'Today at $timeStr';
+    if (dateOnly == yesterday) return 'Yesterday at $timeStr';
+
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    if (d.year == now.year) {
+      return '${months[d.month - 1]} ${d.day} at $timeStr';
+    }
+    return '${d.day} ${months[d.month - 1]} ${d.year}';
+  }
+
+  String _formatDuration(Duration d) {
+    if (d.inHours > 0) return '${d.inHours}h ${d.inMinutes % 60}m';
+    if (d.inMinutes > 0) return '${d.inMinutes}m';
+    return '${d.inSeconds}s';
   }
 }
 

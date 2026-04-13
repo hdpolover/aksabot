@@ -1281,13 +1281,20 @@ export class AudioGateway
           isFinal: false,
         });
 
-        // Send face expression when emotion changes between sentences
+        // Send face expression when emotion changes between sentences.
+        // withSound:false — TTS audio follows immediately, no emotion clip needed.
         if (event.emotion && event.emotion !== lastEmotion) {
           const expr = emotionToExpression[event.emotion] ?? 'speaking';
           this.sendToDevice(deviceId, 'face:expression', {
             expression: expr,
+            withSound: false,
           });
           lastEmotion = event.emotion;
+        }
+
+        // Send SFX event before TTS frames so the clip plays first.
+        if (event.sfx) {
+          this.sendToDevice(deviceId, 'audio:sfx', { clip: event.sfx });
         }
       } else if (event.type === 'audio') {
         if (!started) {
