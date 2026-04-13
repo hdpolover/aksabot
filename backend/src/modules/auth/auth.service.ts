@@ -13,6 +13,7 @@ import { randomBytes, randomInt } from 'crypto';
 import { User } from '../../core/database/entities';
 import { Device } from '../../core/database/entities';
 import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto } from './dto';
+import { EmailService } from '../../core/email/email.service';
 
 export interface TokenPair {
   accessToken: string;
@@ -32,6 +33,7 @@ export class AuthService {
     private readonly devicesRepo: Repository<Device>,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly email: EmailService,
   ) {}
 
   async register(dto: RegisterDto): Promise<AuthResponse> {
@@ -125,8 +127,7 @@ export class AuthService {
     user.resetCodeExpiresAt = expiresAt;
     await this.usersRepo.save(user);
 
-    // TODO: send code via email. For now, log to console for development.
-    console.log(`[ForgotPassword] Reset code for ${dto.email}: ${code} (expires ${expiresAt.toISOString()})`);
+    await this.email.sendPasswordReset(dto.email, code, expiresAt);
 
     return { message: genericMessage };
   }

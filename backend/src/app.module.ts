@@ -18,6 +18,7 @@ import { GatewayModule } from './modules/gateway/gateway.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { MemoriesModule } from './modules/memories/memories.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
+import { EmailModule } from './core/email/email.module';
 
 @Module({
   controllers: [HealthController],
@@ -26,6 +27,7 @@ import { SchedulerModule } from './modules/scheduler/scheduler.module';
     ScheduleModule.forRoot(),
     CacheModule,
     DatabaseModule,
+    EmailModule,
     AuthModule,
     DevicesModule,
     AiModule,

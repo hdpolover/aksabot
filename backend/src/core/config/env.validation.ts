@@ -54,6 +54,27 @@ export class EnvironmentVariables {
   @IsString()
   @IsOptional()
   GOOGLE_APPLICATION_CREDENTIALS?: string;
+
+  // SMTP (optional — falls back to console.log if not configured)
+  @IsString()
+  @IsOptional()
+  SMTP_HOST?: string;
+
+  @IsNumber()
+  @IsOptional()
+  SMTP_PORT?: number;
+
+  @IsString()
+  @IsOptional()
+  SMTP_USER?: string;
+
+  @IsString()
+  @IsOptional()
+  SMTP_PASS?: string;
+
+  @IsString()
+  @IsOptional()
+  SMTP_FROM?: string;
 }
 
 export function validate(config: Record<string, unknown>) {

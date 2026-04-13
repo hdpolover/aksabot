@@ -376,6 +376,39 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
     );
   }
 
+  Future<void> _performFactoryReset(BuildContext context) async {
+    // Show loading indicator
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Factory resetting device…'),
+        duration: Duration(seconds: 3),
+      ),
+    );
+
+    final result = await _devicesRepo.factoryReset(widget.deviceId);
+    if (!context.mounted) return;
+
+    result.fold(
+      (failure) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Factory reset failed: ${failure.message}')),
+        );
+      },
+      (_) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        // Navigate back to device list — device no longer exists
+        Navigator.of(context).popUntil((route) => route.isFirst);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Device factory reset. Re-provision it from the app.'),
+          ),
+        );
+      },
+    );
+  }
+
   void _confirmFactoryReset(BuildContext context) {
     showDialog(
       context: context,
@@ -394,13 +427,9 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Factory reset not yet implemented'),
-                ),
-              );
+              await _performFactoryReset(context);
             },
             child: const Text('Reset'),
           ),

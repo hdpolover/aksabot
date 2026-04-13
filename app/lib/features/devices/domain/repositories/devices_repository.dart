@@ -18,6 +18,7 @@ abstract class DevicesRepository {
     int awayDurationSeconds = 0,
   });
   Future<Either<Failure, void>> deleteDevice(String id);
+  Future<Either<Failure, void>> factoryReset(String id);
   Future<Either<Failure, Map<String, dynamic>>> getStats(String id);
   Future<Either<Failure, bool>> pushVoicePreviewToDevice(
     String id, {

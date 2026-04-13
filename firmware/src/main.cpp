@@ -573,6 +573,18 @@ static void onWsJson(const char* event, const char* data) {
             vTaskDelete(nullptr);
         }, "departure_anim", 2048, nullptr, 1, nullptr);
     }
+    // ── Factory reset from app ────────────────────────────
+    else if (strcmp(event, "control:factory_reset") == 0) {
+        Serial.println("[Main] control:factory_reset received — erasing NVS and rebooting");
+        // Show visual feedback before wiping state
+        power_manager::recordInteraction();
+        face::setExpression(face::Expression::SHRUG, 200);
+        // Brief pause for display to update and serial flush
+        vTaskDelay(pdMS_TO_TICKS(800));
+        // Erase all NVS keys — device will start fresh on next boot
+        nvs_store::eraseAll();
+        ESP.restart();
+    }
     // ── Remote re-provisioning request ───────────────────
     else if (strcmp(event, "device:provision") == 0) {
         Serial.println("[Main] device:provision received — rebooting to setup mode");

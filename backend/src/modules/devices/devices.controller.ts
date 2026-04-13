@@ -174,6 +174,23 @@ export class DevicesController {
     this.gateway.sendToDevice(id, 'device:provision', {});
   }
 
+  /** Factory reset: send WS event so the device erases NVS and reboots,
+   *  then delete the device record from the backend.
+   *  Fire-and-forget for the WS send (device may be offline). */
+  @Post(':id/factory-reset')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async factoryReset(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    await this.devicesService.findById(id, user.userId);
+    // Tell device to erase NVS + restart (best-effort; may be offline)
+    this.gateway.sendToDevice(id, 'control:factory_reset', {});
+    // Give the WS event a brief window to reach the device before we revoke its token
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await this.devicesService.remove(id, user.userId);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(

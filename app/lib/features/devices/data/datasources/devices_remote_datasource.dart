@@ -73,6 +73,10 @@ class DevicesRemoteDatasource {
     await _client.delete('/devices/$id');
   }
 
+  Future<void> factoryReset(String id) async {
+    await _client.post('/devices/$id/factory-reset', data: {});
+  }
+
   Future<Map<String, dynamic>> getStats(String id) async {
     final data = await _client.get('/devices/$id/stats');
     return data as Map<String, dynamic>;

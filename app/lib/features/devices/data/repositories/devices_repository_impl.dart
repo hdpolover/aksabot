@@ -102,6 +102,16 @@ class DevicesRepositoryImpl implements DevicesRepository {
   }
 
   @override
+  Future<Either<Failure, void>> factoryReset(String id) async {
+    try {
+      await _datasource.factoryReset(id);
+      return const Right(null);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
+
+  @override
   Future<Either<Failure, Map<String, dynamic>>> getStats(String id) async {
     try {
       final stats = await _datasource.getStats(id);
