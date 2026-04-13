@@ -199,9 +199,9 @@ class BrightnessCallback : public NimBLECharacteristicCallbacks {
 
 // ── Presence scan callbacks ─────────────────────────────
 //
-// The phone advertises every ~100ms. Over a 5-second scan window that's ~50
-// onResult callbacks. Feeding the state machine on every callback causes
-// rapid flapping. Instead:
+// The phone advertises every ~250ms (Android balanced) or ~100ms (iOS).
+// Over a 5-second scan window that's 20-50 onResult callbacks. Feeding the
+// state machine on every callback causes rapid flapping. Instead:
 //   onResult  — accumulate RSSI readings for this cycle (no state change)
 //   onScanEnd — feed ONE averaged reading to the state machine, then restart
 //
@@ -210,6 +210,7 @@ class BrightnessCallback : public NimBLECharacteristicCallbacks {
 static volatile bool    presenceFoundThisCycle  = false;
 static volatile int32_t presenceCycleRssiSum    = 0;
 static volatile int16_t presenceCycleRssiCount  = 0;
+static volatile int16_t presenceCycleTotalSeen  = 0;  // all BLE devices, for diagnostics
 // Set by onScanEnd (NimBLE host task context).
 // Consumed by tickPresenceScan (main loop context).
 // Never call scan->start() from within onScanEnd — it deadlocks the nimble_host
@@ -228,21 +229,46 @@ static bool presenceScanActive = false;
 static bool presenceScanPaused = false;
 
 static void resetCycleCounters() {
-    presenceFoundThisCycle = false;
-    presenceCycleRssiSum   = 0;
-    presenceCycleRssiCount = 0;
+    presenceFoundThisCycle  = false;
+    presenceCycleRssiSum    = 0;
+    presenceCycleRssiCount  = 0;
+    presenceCycleTotalSeen  = 0;
 }
 
 class PresenceScanCallbacks : public NimBLEScanCallbacks {
     // Called for every BLE advertisement received during the scan window.
     // Only accumulate RSSI — never touch the state machine or call scan->start().
     void onResult(const NimBLEAdvertisedDevice* device) override {
+        presenceCycleTotalSeen++;
+
+        bool isPresenceDevice = false;
+
+        // Primary check: service UUID (works on iOS and some Android builds)
         if (device->isAdvertisingService(NimBLEUUID(UUID_PRESENCE_SVC))) {
+            isPresenceDevice = true;
+        }
+
+        // Fallback: manufacturer data (manufacturer ID 0xFFFF + magic 0xAB 0xCF).
+        // Android's flutter_ble_peripheral often omits the service UUID from the
+        // advertisement payload. Manufacturer data is always present and reliable
+        // across all Android OEMs and SDK versions.
+        if (!isPresenceDevice && device->haveManufacturerData()) {
+            const std::string& mfr = device->getManufacturerData();
+            // BLE manufacturer data layout: [ID_LO, ID_HI, data...]
+            // ID 0xFFFF = little-endian bytes 0xFF 0xFF, magic = 0xAB 0xCF
+            if (mfr.size() >= 4 &&
+                (uint8_t)mfr[0] == 0xFF && (uint8_t)mfr[1] == 0xFF &&
+                (uint8_t)mfr[2] == 0xAB && (uint8_t)mfr[3] == 0xCF) {
+                isPresenceDevice = true;
+            }
+        }
+
+        if (isPresenceDevice) {
             int8_t rssi = device->getRSSI();
             presenceCycleRssiSum   += rssi;
             presenceCycleRssiCount += 1;
             if (!presenceFoundThisCycle) {
-                Serial.printf("[BLE] Presence UUID found, RSSI=%d\n", rssi);
+                Serial.printf("[BLE] Presence device found, RSSI=%d\n", rssi);
             }
             presenceFoundThisCycle  = true;
         }
@@ -452,13 +478,15 @@ static PresenceScanCallbacks presenceScanCb;
 
 static void configureAndStartScan() {
     NimBLEScan* pScan = NimBLEDevice::getScan();
-    // Passive scan, ~25% duty cycle: 80/20 = 25% air time.
-    // iOS background advertising can be 2-10s between packets. 12.5% duty caused
-    // missed detections on ~50% of scan cycles. 25% duty significantly improves
-    // reliability without saturating the shared WiFi/BLE radio.
-    pScan->setActiveScan(false);
+    // Active scan, ~37.5% duty cycle: 80/30 = 37.5% air time.
+    // Active scanning sends scan requests and receives scan responses, which is
+    // necessary for Android — connectable advertisements put service UUIDs in
+    // the scan response (not the primary advertisement packet).
+    // iOS background advertising: iOS sends unsolicited scan responses even in
+    // background mode, so active scanning is also beneficial for iOS.
+    pScan->setActiveScan(true);
     pScan->setInterval(80);    //  80 * 0.625ms =  50ms scan interval
-    pScan->setWindow(20);      //  20 * 0.625ms = 12.5ms active window  → 25%
+    pScan->setWindow(30);      //  30 * 0.625ms = 18.75ms active window → 37.5%
     pScan->setMaxResults(0);   // Don't buffer results in heap — use callbacks only
     resetCycleCounters();
     uint32_t scanSec = presence_detector::getRecommendedScanIntervalMs() / 1000;
@@ -521,19 +549,29 @@ void ble_manager::tickPresenceScan(uint32_t nowMs) {
         if (pendingScanGeneration != presenceScanGeneration) {
             // Stale result — just let the watchdog below restart if needed.
         } else {
+            // Always log cycle summary — helps diagnose why phone isn't detected.
             if (presenceFoundThisCycle && presenceCycleRssiCount > 0) {
                 // Phone seen this cycle — feed the averaged RSSI into the state machine.
                 // This also updates lastScanHitMs, which resets the missing-timeout clock.
                 int8_t avgRssi = (int8_t)(presenceCycleRssiSum / presenceCycleRssiCount);
-                Serial.printf("[BLE] Presence cycle avg RSSI=%d (%d readings)\n",
-                              avgRssi, (int)presenceCycleRssiCount);
+                Serial.printf("[BLE] Presence cycle: %d seen, PHONE FOUND rssi=%d\n",
+                              (int)presenceCycleTotalSeen, avgRssi);
                 presence_detector::feedRssi(avgRssi);
+            } else {
+                // Print current state so it's clear what the detector thinks right now.
+                PresenceState st = presence_detector::getState();
+                const char* stStr =
+                    st == PresenceState::PRESENT  ? "PRESENT"  :
+                    st == PresenceState::LEAVING  ? "LEAVING"  :
+                    st == PresenceState::AWAY     ? "AWAY"     : "UNKNOWN";
+                Serial.printf("[BLE] Presence cycle: %d seen, phone NOT found — state=%s\n",
+                              (int)presenceCycleTotalSeen, stStr);
             }
             // Phone not seen this cycle — do nothing here. Departure is handled by a
             // time-based timeout in presence_detector::tick(): if lastScanHitMs hasn't
             // been updated for missingTimeoutSec seconds, tick() starts LEAVING.
-            // Per-cycle miss counts are unreliable because iOS background advertising
-            // can pause for 10-20 seconds even when the user is at their desk.
+            // Per-cycle miss counts are unreliable because iOS/Android background
+            // advertising can pause for several seconds even when user is at desk.
 
             resetCycleCounters();
             configureAndStartScan();

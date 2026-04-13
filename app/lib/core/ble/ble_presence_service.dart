@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -53,16 +54,32 @@ class BlePresenceService {
       return false;
     }
 
+    // Manufacturer data is the most reliable presence identifier across all
+    // Android OEMs and SDK versions. service UUID parsing is inconsistent —
+    // Android may omit it from the advertisement payload depending on the
+    // flutter_ble_peripheral version, OEM BLE stack, or connectable mode.
+    // Manufacturer ID 0xFFFF (unassigned) + magic bytes 0xAB 0xCF uniquely
+    // identify this app. The ESP32 checks for this in addition to service UUID.
     final advertiseData = AdvertiseData(
       serviceUuid: '0000ffe4-0000-1000-8000-00805f9b34fb',
       includeDeviceName: false,
+      manufacturerId: 0xFFFF,
+      manufacturerData: Uint8List.fromList([0xAB, 0xCF]),
     );
 
     final settings = AdvertiseSettings(
-      advertiseMode: AdvertiseMode.advertiseModeLowPower,
-      connectable: false,
+      // Balanced mode: ~250ms advertising interval.
+      // Low-power mode uses ~1000ms which combined with short scan windows
+      // causes missed detections. Balanced gives reliable detection while
+      // still being power-efficient for background operation.
+      advertiseMode: AdvertiseMode.advertiseModeBalanced,
+      // Connectable: true ensures Android includes the service UUID in the
+      // scan response packet. The ESP32 uses active scanning which sends
+      // scan requests to receive these scan responses — passive scanning
+      // with non-connectable ads is unreliable across Android OEMs.
+      connectable: true,
       timeout: 0, // Advertise indefinitely
-      txPowerLevel: AdvertiseTxPower.advertiseTxPowerLow,
+      txPowerLevel: AdvertiseTxPower.advertiseTxPowerMedium,
     );
 
     try {
