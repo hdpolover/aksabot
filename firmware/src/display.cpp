@@ -984,15 +984,16 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     }
 
     // ── BLE presence indicator (next to connection dot) ──
-    // Blue filled dot = phone present, dim hollow dot = away/unknown
-    {
+    // Only shown when presence scanning is enabled.
+    // Bright blue = phone present, dim blue = scanning/away.
+    if (status.blePresenceEnabled) {
         uint16_t btCol = status.blePresent
-            ? rgb(80, 140, 255)                            // blue — present
-            : rgb(60, 60, 80);                             // dim — away
-        s.fillSmoothCircle(20, 8, 3, btCol);
-        // Small "B" diacritic: two tiny bumps on the right side
-        s.fillSmoothCircle(23, 6, 1, btCol);
-        s.fillSmoothCircle(23, 10, 1, btCol);
+            ? rgb(80, 160, 255)   // bright blue — phone detected
+            : rgb(40, 60, 120);   // dim blue — scanning, not yet detected
+        s.fillSmoothCircle(20, 8, 4, btCol);
+        // Mini "B" diacritic marks so it reads as BT, not just a dot
+        s.fillSmoothCircle(24, 5, 1, btCol);
+        s.fillSmoothCircle(24, 11, 1, btCol);
     }
 
     // ── Status icon (bottom) — small icon instead of text label ──

@@ -241,26 +241,6 @@ class PresenceScanCallbacks : public NimBLEScanCallbacks {
     void onResult(const NimBLEAdvertisedDevice* device) override {
         presenceCycleTotalSeen++;
 
-        // Debug: dump every device seen so we can verify what the phone advertises.
-        // Logs address, RSSI, service UUID presence, and raw manufacturer data bytes.
-        {
-            bool hasSvc = device->isAdvertisingService(NimBLEUUID(UUID_PRESENCE_SVC));
-            if (device->haveManufacturerData()) {
-                const std::string& m = device->getManufacturerData();
-                // Print up to 6 bytes of manufacturer data as hex
-                int printLen = m.size() < 6 ? m.size() : 6;
-                char hex[20] = {};
-                for (int i = 0; i < printLen; i++) {
-                    snprintf(hex + i * 3, 4, "%02X ", (uint8_t)m[i]);
-                }
-                Serial.printf("[BLE] Device rssi=%d svcMatch=%d mfrLen=%d mfr=[%s]\n",
-                              device->getRSSI(), hasSvc, (int)m.size(), hex);
-            } else {
-                Serial.printf("[BLE] Device rssi=%d svcMatch=%d noMfr\n",
-                              device->getRSSI(), hasSvc);
-            }
-        }
-
         bool isPresenceDevice = false;
 
         // Primary check: service UUID (works on iOS and some Android builds)
@@ -569,23 +549,24 @@ void ble_manager::tickPresenceScan(uint32_t nowMs) {
         if (pendingScanGeneration != presenceScanGeneration) {
             // Stale result — just let the watchdog below restart if needed.
         } else {
-            // Always log cycle summary — helps diagnose why phone isn't detected.
             if (presenceFoundThisCycle && presenceCycleRssiCount > 0) {
                 // Phone seen this cycle — feed the averaged RSSI into the state machine.
-                // This also updates lastScanHitMs, which resets the missing-timeout clock.
                 int8_t avgRssi = (int8_t)(presenceCycleRssiSum / presenceCycleRssiCount);
-                Serial.printf("[BLE] Presence cycle: %d seen, PHONE FOUND rssi=%d\n",
-                              (int)presenceCycleTotalSeen, avgRssi);
+                Serial.printf("[BLE] Presence: PHONE FOUND rssi=%d\n", avgRssi);
                 presence_detector::feedRssi(avgRssi);
             } else {
-                // Print current state so it's clear what the detector thinks right now.
-                PresenceState st = presence_detector::getState();
-                const char* stStr =
-                    st == PresenceState::PRESENT  ? "PRESENT"  :
-                    st == PresenceState::LEAVING  ? "LEAVING"  :
-                    st == PresenceState::AWAY     ? "AWAY"     : "UNKNOWN";
-                Serial.printf("[BLE] Presence cycle: %d seen, phone NOT found — state=%s\n",
-                              (int)presenceCycleTotalSeen, stStr);
+                // Rate-limit "not found" logs to once per minute so they don't flood
+                // the serial monitor during normal away periods.
+                static uint32_t lastNotFoundLogMs = 0;
+                if (nowMs - lastNotFoundLogMs >= 60000) {
+                    lastNotFoundLogMs = nowMs;
+                    PresenceState st = presence_detector::getState();
+                    const char* stStr =
+                        st == PresenceState::PRESENT  ? "PRESENT"  :
+                        st == PresenceState::LEAVING  ? "LEAVING"  :
+                        st == PresenceState::AWAY     ? "AWAY"     : "UNKNOWN";
+                    Serial.printf("[BLE] Presence scanning — phone not detected (state=%s)\n", stStr);
+                }
             }
             // Phone not seen this cycle — do nothing here. Departure is handled by a
             // time-based timeout in presence_detector::tick(): if lastScanHitMs hasn't

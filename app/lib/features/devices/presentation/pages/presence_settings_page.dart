@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart'; // PeripheralState
 
 import '../../../../core/ble/ble_presence_service.dart';
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
@@ -53,6 +54,16 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
       });
     } catch (_) {
       // BLE peripheral stream unavailable on this device — ignore.
+    }
+  }
+
+  Future<void> _refreshAdvertisingState() async {
+    final isNowAdvertising = await _presence.checkAdvertisingState();
+    if (mounted) setState(() {});
+    // If saved as enabled but not actually advertising, try to restart.
+    if (_enabled && !isNowAdvertising) {
+      await _presence.startAdvertising();
+      if (mounted) setState(() {});
     }
   }
 
@@ -224,31 +235,24 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
             const SizedBox(height: 16),
           ],
 
+          // ── Live advertising status ──────────────────────────────────
+          _PresenceStatusCard(
+            enabled: _enabled,
+            isAdvertising: _presence.isAdvertising,
+            lastError: _presence.lastError,
+            onRefresh: _refreshAdvertisingState,
+          ),
+          const SizedBox(height: 16),
+
           // Enable toggle
           Card(
             clipBehavior: Clip.antiAlias,
             child: SwitchListTile(
               secondary: Icon(Icons.bluetooth_searching, color: colors.primary),
               title: const Text('Enable presence'),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'When your phone is nearby, Aksa wakes up and greets you. '
-                    'When you leave, Aksa goes to sleep.',
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _enabled && _presence.isAdvertising
-                        ? 'Advertising...'
-                        : 'Not advertising',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: _enabled
-                          ? Theme.of(context).extension<AppColors>()!.success
-                          : colors.outline,
-                    ),
-                  ),
-                ],
+              subtitle: const Text(
+                'When your phone is nearby, Aksa wakes up and greets you. '
+                'When you leave, Aksa goes to sleep.',
               ),
               value: _enabled,
               onChanged: _isSupported ? _togglePresence : null,
@@ -385,6 +389,103 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Live advertising status card
+// ---------------------------------------------------------------------------
+
+class _PresenceStatusCard extends StatelessWidget {
+  final bool enabled;
+  final bool isAdvertising;
+  final String? lastError;
+  final VoidCallback onRefresh;
+
+  const _PresenceStatusCard({
+    required this.enabled,
+    required this.isAdvertising,
+    required this.lastError,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final ac = theme.extension<AppColors>()!;
+
+    final Color bgColor;
+    final Color iconColor;
+    final IconData icon;
+    final String title;
+    final String subtitle;
+
+    if (!enabled) {
+      bgColor = cs.surfaceContainerHigh;
+      iconColor = cs.onSurfaceVariant;
+      icon = Icons.sensors_off_rounded;
+      title = 'Presence detection is off';
+      subtitle = 'Enable the toggle below to start broadcasting.';
+    } else if (isAdvertising) {
+      bgColor = ac.successContainer;
+      iconColor = ac.success;
+      icon = Icons.sensors_rounded;
+      title = 'Phone is broadcasting';
+      subtitle = 'Your device can detect you nearby.';
+    } else {
+      bgColor = cs.errorContainer;
+      iconColor = cs.onErrorContainer;
+      icon = Icons.sensors_off_rounded;
+      title = 'Not broadcasting';
+      subtitle = lastError ?? 'Check that Bluetooth is enabled and permissions are granted.';
+    }
+
+    return Card(
+      color: bgColor,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppConstants.spacingLg,
+          vertical: AppConstants.spacingMd,
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: iconColor, size: AppConstants.iconLg),
+            const SizedBox(width: AppConstants.spacingMd),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: enabled ? iconColor : cs.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: enabled
+                          ? (isAdvertising ? ac.success : cs.onErrorContainer)
+                          : cs.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (enabled && !isAdvertising)
+              IconButton(
+                icon: const Icon(Icons.refresh_rounded),
+                color: cs.onErrorContainer,
+                tooltip: 'Retry',
+                onPressed: onRefresh,
+              ),
+          ],
+        ),
       ),
     );
   }

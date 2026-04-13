@@ -74,16 +74,12 @@ class DeviceTile extends StatelessWidget {
                     child: Icon(icon, color: iconColor, size: AppConstants.iconLg),
                   ),
                   const Spacer(),
-                  if (bleAdvertising != null) ...
+                  if (bleAdvertising == true) ...
                     [
                       Icon(
-                        bleAdvertising!
-                            ? Icons.bluetooth_connected
-                            : Icons.bluetooth_disabled,
+                        Icons.sensors_rounded,
                         size: 13,
-                        color: bleAdvertising!
-                            ? colors.primary
-                            : colors.onSurfaceVariant.withValues(alpha: 0.45),
+                        color: colors.primary,
                       ),
                       const SizedBox(width: 4),
                     ],

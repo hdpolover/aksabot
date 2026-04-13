@@ -54,6 +54,10 @@ void showConnectionFailed(const char* reason);
 /// Show "Ready!" and transition hint.
 void showReady();
 
+/// Show "Entering Setup Mode" screen when the app requests remote re-provisioning.
+/// Device will reboot in ~1.5s; this screen stays up until the restart.
+void showRebootingForSetup();
+
 /// Show "Hold screen for BIOS..." with a 2-second countdown bar.
 /// Returns true if the user held the screen during the countdown (enter BIOS).
 /// Returns false if the countdown expired without a hold (continue boot).

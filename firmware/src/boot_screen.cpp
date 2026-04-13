@@ -330,6 +330,30 @@ void boot_screen::showReady() {
     delay(1500);
 }
 
+void boot_screen::showRebootingForSetup() {
+    clearScreen();
+
+    // Sync / refresh icon — two arcs forming a circular arrow
+    int iconCY = 80;
+    int r = 22;
+    // Arc: top-left quadrant
+    for (int a = 120; a <= 360; a += 3) {
+        float rad = a * 3.14159f / 180.0f;
+        int x = CX + (int)(r * cosf(rad));
+        int y = iconCY + (int)(r * sinf(rad));
+        tft.drawPixel(x, y, CYAN);
+        tft.drawPixel(x + 1, y, CYAN);
+        tft.drawPixel(x, y + 1, CYAN);
+    }
+    // Arrowhead at the end of the arc (pointing clockwise)
+    tft.drawLine(CX + r - 2, iconCY + 8, CX + r + 7, iconCY,     CYAN);
+    tft.drawLine(CX + r - 2, iconCY + 8, CX + r - 2, iconCY + 16, CYAN);
+
+    drawCentered("Entering Setup Mode", 118, WHITE, 1.0);
+    drawSmall("Requested from the app.", 148, DIM);
+    drawSmall("Rebooting in a moment...", 168, DIM);
+}
+
 bool boot_screen::showBiosCountdown() {
     // Draw the countdown UI
     clearScreen();

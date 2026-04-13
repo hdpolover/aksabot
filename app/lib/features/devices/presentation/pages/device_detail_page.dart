@@ -827,13 +827,13 @@ class _ReconnectSheetState extends State<_ReconnectSheet> {
         Text(
           'Signaling device...',
           textAlign: TextAlign.center,
-          style: theme.textTheme.titleMedium,
+          style: theme.textTheme.titleLarge,
         ),
         const SizedBox(height: AppConstants.spacingSm),
         Text(
           'Sending setup command to your device.',
           textAlign: TextAlign.center,
-          style: theme.textTheme.bodySmall?.copyWith(
+          style: theme.textTheme.bodyMedium?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
@@ -855,20 +855,20 @@ class _ReconnectSheetState extends State<_ReconnectSheet> {
       children: [
         Center(
           child: Container(
-            width: 64,
-            height: 64,
+            width: 80,
+            height: 80,
             decoration: BoxDecoration(
               color: ac.successContainer,
-              borderRadius: BorderRadius.circular(AppConstants.radiusXl),
+              shape: BoxShape.circle,
             ),
-            child: Icon(Icons.check_rounded, color: ac.success, size: 32),
+            child: Icon(Icons.check_rounded, color: ac.success, size: 40),
           ),
         ),
         const SizedBox(height: AppConstants.spacingXxl),
         Text(
           'Command sent',
           textAlign: TextAlign.center,
-          style: theme.textTheme.titleLarge,
+          style: theme.textTheme.headlineSmall,
         ),
         const SizedBox(height: AppConstants.spacingSm),
         Text(

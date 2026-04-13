@@ -130,6 +130,7 @@ static void updateStatusBar() {
     sb.pomodoroActive = false;
     sb.blePresent = (appState.presenceState == PresenceState::PRESENT ||
                      appState.presenceState == PresenceState::LEAVING);
+    sb.blePresenceEnabled = nvs_store::getPresenceEnabled();
     // Stall detection: speaking/thinking but no data flowing for 3+ seconds
     sb.connectionStalled = false;
     if (appState.botState == BotState::SPEAKING && playbackActive && !playbackDone) {
@@ -520,11 +521,10 @@ static void onWsJson(const char* event, const char* data) {
         // Persist the flag so the next boot skips the credentials check and
         // runs the full BLE provisioning flow instead.
         nvs_store::setForceProvision(true);
-        // Wake display and show a clear message before the reboot.
+        // Show a clear, centered message on the ESP32 screen before reboot.
         power_manager::recordInteraction();
-        face::setExpression(face::Expression::SLEEPING, 300);
-        display::setMode(display::Mode::STATUS);
-        // Brief pause so the display update renders before restart.
+        boot_screen::showRebootingForSetup();
+        // Brief pause so the user can read the screen before restart.
         vTaskDelay(pdMS_TO_TICKS(1500));
         esp_restart();
     }

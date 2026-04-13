@@ -272,9 +272,17 @@ class _DeviceListState extends State<_DeviceList> {
           itemCount: widget.devices.length,
           itemBuilder: (context, index) {
             final device = widget.devices[index];
+            String subtitle;
+            if (!device.isOnline) {
+              subtitle = 'Offline';
+            } else if (_isAdvertising) {
+              subtitle = 'Online · Presence on';
+            } else {
+              subtitle = 'Online';
+            }
             return DeviceTile(
               name: device.name,
-              subtitle: device.isOnline ? 'Online' : 'Offline',
+              subtitle: subtitle,
               isOnline: device.isOnline,
               bleAdvertising: _isAdvertising,
               onTap: () => widget.onNavigate(context, '/devices/${device.id}'),
