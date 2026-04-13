@@ -15,9 +15,14 @@ describe('PromptService', () => {
       expect(result).toContain('gen-z energy');
     });
 
-    it('includes auto-detect language hint', () => {
+    it('defaults to English when no language is specified', () => {
       const result = service.buildSystemPrompt([]);
-      expect(result).toContain('Respond in whatever language the user speaks');
+      expect(result).toContain('Respond in English.');
+    });
+
+    it('uses Bahasa Indonesia instruction when language is id', () => {
+      const result = service.buildSystemPrompt([], { language: 'id' });
+      expect(result).toContain('Respond in Bahasa Indonesia.');
     });
 
     it('includes memory entries', () => {

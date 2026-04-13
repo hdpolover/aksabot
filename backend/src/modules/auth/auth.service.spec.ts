@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
+import { EmailService } from '../../core/email/email.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -39,11 +40,16 @@ describe('AuthService', () => {
       get: jest.fn().mockReturnValue('30d'),
     } as unknown as ConfigService;
 
+    const emailService = {
+      sendPasswordReset: jest.fn().mockResolvedValue(undefined),
+    } as unknown as EmailService;
+
     service = new AuthService(
       usersRepo as any,
       devicesRepo as any,
       jwtService as JwtService,
       configService,
+      emailService,
     );
   });
 

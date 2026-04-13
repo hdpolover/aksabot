@@ -135,7 +135,8 @@ describe('AiService', () => {
       // 2 sentences = 2 TTS calls + 2 codec encode calls
       expect(mockTts.synthesize).toHaveBeenCalledTimes(2);
       expect(mockCodec.encode).toHaveBeenCalledTimes(2);
-      expect(mockTts.synthesize).toHaveBeenCalledWith('Hello.', { language: undefined });
+      // synthesize(text, voiceOptions, signal) — signal is undefined when no AbortController used
+      expect(mockTts.synthesize).toHaveBeenCalledWith('Hello.', {}, undefined);
     });
 
     it('passes history and system prompt to LLM', async () => {

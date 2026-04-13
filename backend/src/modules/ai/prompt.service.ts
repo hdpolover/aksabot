@@ -123,9 +123,29 @@ export class PromptService {
     const sfxInstruction = `
 
 OPTIONAL — Sound effects: You can trigger a sound effect by adding [sfx:clipname] at the very start of a sentence. Use at most once per response, only when it genuinely adds humor or personality — not every time.
-Available clips: rimshot (classic punchline drop), ba_dum_tss (drum hit after a joke), sad_trombone (fail/disappointment), dry_laugh (awkward forced laugh), mind_blown (revelation/shock), level_up (achievement unlocked), quest_complete (task done), keyboard_fury (angry typing), coffee_slurp (morning/tired vibes), deep_sigh (frustration/done), hbd_jingle (birthday wishes), applause (celebrating something great), fanfare (big win/announcement), mic_drop (perfect comeback), crickets (awkward silence/bad joke), glitch (tech going wrong), dial_up (nostalgia/slow internet), thinking_music (pondering something dumb)
+Available clips (use EXACTLY these names):
+  rimshot — classic punchline drum hit (ba dum tss)
+  crickets — awkward silence after a bad joke
+  sad_trombone — "wah wah wah" fail sound
+  drumroll — dramatic buildup before a reveal
+  level_up — achievement unlocked, hitting a goal
+  evil_laugh — mischievous/sassy/smug moment
+  chef_kiss — something is perfect or impressive
+  applause — congratulating the user
+  hbd — happy birthday jingle
+  roast — crowd "ohhh" reaction after a good burn
+  thinking_hard — hard problem, intensive reasoning
+  mind_blown — blown away, revelation
+  sigh — exasperated/done with it (affectionate)
+  gasp — theatrical dramatic reaction
+  deploy_success — shipped it, CI passed
+  build_fail — build broken, CI failed
+  midnight — it's very late, go to sleep
+  morning — good morning, first interaction of the day
+  coffee_time — caffeine/break reminder
+  rain — ambient rain (playing in background)
 Example: "[sfx:rimshot] Why do programmers always mix up Christmas and Halloween? Because Oct 31 equals Dec 25. [sarcastic]"
-The sfx tag is stripped before TTS — the user hears the sound, then your voice.`;
+The sfx tag is stripped before TTS — the user hears the sound effect, then your voice.`;
 
     const emotionInstruction = `
 

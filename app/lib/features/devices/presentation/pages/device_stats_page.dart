@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/di/injection.dart';
 import '../../../../core/network/api_client.dart';
@@ -398,8 +399,8 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
       },
       (_) {
         ScaffoldMessenger.of(context).clearSnackBars();
-        // Navigate back to device list — device no longer exists
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        // Navigate back to home — device no longer exists
+        context.go('/home');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Device factory reset. Re-provision it from the app.'),
