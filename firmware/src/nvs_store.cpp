@@ -18,6 +18,8 @@ static const char* K_BRIGHTNESS   = "brightness";
 static const char* K_PRES_ENABLED = "pres_en";
 static const char* K_PRES_RSSI    = "pres_rssi";
 static const char* K_PRES_GRACE   = "pres_grace";
+static const char* K_FACE_STYLE   = "face_style";
+static const char* K_IDLE_DISP    = "idle_disp";
 static const char* K_SETUP_DONE   = "setup_done";
 
 // ── Helpers ────────────────────────────────────────────
@@ -159,6 +161,36 @@ uint8_t nvs_store::getPresenceGracePeriodSec() {
 bool nvs_store::setPresenceGracePeriodSec(uint8_t seconds) {
     if (!initialized) return false;
     return prefs.putUChar(K_PRES_GRACE, seconds) > 0;
+}
+
+// ── Face style ─────────────────────────────────────────
+
+uint8_t nvs_store::getFaceStyle() {
+    if (!initialized) return 1;  // default: NOVA
+    return prefs.getUChar(K_FACE_STYLE, 1);
+}
+
+bool nvs_store::setFaceStyle(uint8_t styleId) {
+    if (!initialized) return false;
+    return prefs.putUChar(K_FACE_STYLE, styleId) > 0;
+}
+
+// ── Idle display mode ──────────────────────────────────
+
+bool nvs_store::getIdleDisplayMode(char* buf, size_t bufLen) {
+    if (!initialized) {
+        strncpy(buf, "face", bufLen - 1);
+        buf[bufLen - 1] = '\0';
+        return true;
+    }
+    String val = prefs.getString(K_IDLE_DISP, "face");
+    strncpy(buf, val.c_str(), bufLen - 1);
+    buf[bufLen - 1] = '\0';
+    return true;
+}
+
+bool nvs_store::setIdleDisplayMode(const char* mode) {
+    return setString(K_IDLE_DISP, mode);
 }
 
 // ── Setup state ────────────────────────────────────────

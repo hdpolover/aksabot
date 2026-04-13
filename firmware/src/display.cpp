@@ -1,5 +1,6 @@
 #include "display.h"
 #include "face.h"
+#include "face_style.h"
 #include "config.h"
 #include "lgfx_config.h"
 #include <Arduino.h>
@@ -61,10 +62,10 @@ static const int CY = LCD_HEIGHT / 2 - 20;
 static const int EYE_SPACE = 48;
 static const int MOUTH_Y   = CY + 70;
 
-// ── Face style toggle ─────────────────────────────────
-// Set to true to use v2 rounded-rectangle eye style for IDLE.
-// Set to false to restore the original circle-eye style.
-static bool g_idleStyleV2 = true;
+// ── Active face style ─────────────────────────────────
+// Points to one of the built-in presets (ORBIT or NOVA).
+// Changed at runtime via display::setFaceStyle() — loaded from NVS on boot.
+static const face_style::FaceStyleDef* g_faceStyle = &face_style::NOVA;
 
 // ── Rich color system (from face-animations firmware) ─────
 
@@ -613,62 +614,69 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
         drawEyeOpen(s, rightEyeX, eyeY, rightEye, 1.0f, fs.driftX, fs.driftY);
         drawEyeX(s, leftEyeX,  eyeY, 20, pal.accent);
         drawEyeX(s, rightEyeX, eyeY, 20, pal.accent);
-    } else if (g_idleStyleV2 && (fs.expression == face::Expression::IDLE  ||
-                                  fs.expression == face::Expression::HAPPY ||
-                                  fs.expression == face::Expression::SPEAKING)) {
-        // ── V2 style: expression-aware rounded-rectangle eyes ──────
-        if (fs.expression == face::Expression::IDLE) {
-            // Idle: flat rect, whole eye drifts with gaze
-            drawEyeV2(s, leftEyeX,  eyeY, leftScale,  fs.driftX, fs.driftY);
-            drawEyeV2(s, rightEyeX, eyeY, rightScale, fs.driftX, fs.driftY);
-        } else if (fs.expression == face::Expression::HAPPY) {
-            // Happy: bottom lid rises with talking amplitude — squints as grin opens.
-            // Resting squint is 0.15 (smiley eyes even when quiet).
-            float squint = 0.15f + fs.mouthAmp * 0.65f;
-            if (squint > 0.75f) squint = 0.75f;
-            drawEyeV2(s, leftEyeX,  eyeY, leftScale,  0, 0, squint, 72, 38);
-            drawEyeV2(s, rightEyeX, eyeY, rightScale, 0, 0, squint, 72, 38);
-        } else if (fs.expression == face::Expression::SPEAKING) {
-            // Speaking: eyes focused forward (damped drift), widen on loud amplitude,
-            // subtle squint on peaks — like engaged animated talking.
-            // Eye scale widens when loud (existing audio-reactive leftEyeScale already
-            // applied via leftScale), so we just pass through.
-            float squint = fs.mouthAmp * 0.30f;  // gentle squint only at loud amplitude
-            // Dampen drift to 25% — mostly locked forward but not totally frozen
-            float dx = fs.driftX * 0.25f;
-            float dy = fs.driftY * 0.25f;
-            drawEyeV2(s, leftEyeX,  eyeY, leftScale,  dx, dy, squint);
-            drawEyeV2(s, rightEyeX, eyeY, rightScale, dx, dy, squint);
-        }
     } else {
-        // Left eye
-        if (leftScale < 0.05f) {
-            bool curveUp = (fs.expression == face::Expression::HAPPY ||
-                           fs.expression == face::Expression::ENCOURAGING);
-            drawEyeClosed(s, leftEyeX, eyeY, leftEye.r, curveUp);
+        const face_style::ExprEyeStyle& es = g_faceStyle->eyes[exprIdx];
+
+        if (es.useRoundRect) {
+            // ── NOVA: data-driven rounded-rectangle eyes ─────────────────
+            float squint = es.squintBase + fs.mouthAmp * es.squintAmpScale;
+            if (es.squintMax > 0.0f && squint > es.squintMax) squint = es.squintMax;
+            float dx = fs.driftX * es.driftDamp;
+            float dy = fs.driftY * es.driftDamp;
+
+            // DISTURBED: asymmetric eye sizes (wide left, squinted right)
+            int lw = es.eyeW, lh = es.eyeH;
+            int rw = es.eyeW, rh = es.eyeH;
+            if (fs.expression == face::Expression::DISTURBED) {
+                lw = (int)(lw * 1.20f); lh = (int)(lh * 1.20f);
+                rw = (int)(rw * 0.80f); rh = (int)(rh * 0.80f);
+            }
+            drawEyeV2(s, leftEyeX,  eyeY, leftScale,  dx, dy, squint, lw, lh);
+            drawEyeV2(s, rightEyeX, eyeY, rightScale, dx, dy, squint, rw, rh);
+
+            if (es.hasBrows || drawPeakBrows) {
+                int br = es.eyeH / 2;
+                if (fs.expression == face::Expression::ANGRY) {
+                    // V-shape angry brows
+                    int lby = eyeY - br - 6;
+                    int rby = eyeY - br - 6;
+                    thickBezier(s, leftEyeX  - 14, lby - 6, leftEyeX  + 2, lby + 3, leftEyeX  + 14, lby + 8, 2, pal.accent, 16);
+                    thickBezier(s, rightEyeX - 14, rby + 8, rightEyeX - 2, rby + 3, rightEyeX + 14, rby - 6, 2, pal.accent, 16);
+                } else {
+                    bool raised = (fs.expression == face::Expression::HAPPY ||
+                                   fs.expression == face::Expression::SURPRISED) || drawPeakBrows;
+                    drawBrow(s, leftEyeX,  eyeY, br, pal.accent, raised);
+                    drawBrow(s, rightEyeX, eyeY, br, pal.accent, raised);
+                }
+            }
         } else {
-            drawEyeOpen(s, leftEyeX, eyeY, leftEye, leftScale, fs.driftX, fs.driftY);
-        }
-        // Right eye
-        if (rightScale < 0.05f) {
-            bool curveUp = (fs.expression == face::Expression::HAPPY ||
-                           fs.expression == face::Expression::ENCOURAGING);
-            drawEyeClosed(s, rightEyeX, eyeY, rightEye.r, curveUp);
-        } else {
-            drawEyeOpen(s, rightEyeX, eyeY, rightEye, rightScale, fs.driftX, fs.driftY);
-        }
-        if (eye.hasBrows || drawPeakBrows) {
-            if (fs.expression == face::Expression::ANGRY) {
-                // V-shape angry brows — inner corners angled down toward nose
-                int lby = eyeY - leftEye.r - 6;
-                int rby = eyeY - rightEye.r - 6;
-                thickBezier(s, leftEyeX  - 14, lby - 6, leftEyeX  + 2, lby + 3, leftEyeX  + 14, lby + 8, 2, pal.accent, 16);
-                thickBezier(s, rightEyeX - 14, rby + 8, rightEyeX - 2, rby + 3, rightEyeX + 14, rby - 6, 2, pal.accent, 16);
+            // ── ORBIT: classic circle eyes ────────────────────────────────
+            if (leftScale < 0.05f) {
+                bool curveUp = (fs.expression == face::Expression::HAPPY ||
+                               fs.expression == face::Expression::ENCOURAGING);
+                drawEyeClosed(s, leftEyeX, eyeY, leftEye.r, curveUp);
             } else {
-                bool raised = (fs.expression == face::Expression::HAPPY ||
-                               fs.expression == face::Expression::SURPRISED) || drawPeakBrows;
-                drawBrow(s, leftEyeX,  eyeY, leftEye.r, pal.accent, raised);
-                drawBrow(s, rightEyeX, eyeY, rightEye.r, pal.accent, raised);
+                drawEyeOpen(s, leftEyeX, eyeY, leftEye, leftScale, fs.driftX, fs.driftY);
+            }
+            if (rightScale < 0.05f) {
+                bool curveUp = (fs.expression == face::Expression::HAPPY ||
+                               fs.expression == face::Expression::ENCOURAGING);
+                drawEyeClosed(s, rightEyeX, eyeY, rightEye.r, curveUp);
+            } else {
+                drawEyeOpen(s, rightEyeX, eyeY, rightEye, rightScale, fs.driftX, fs.driftY);
+            }
+            if (es.hasBrows || drawPeakBrows) {
+                if (fs.expression == face::Expression::ANGRY) {
+                    int lby = eyeY - leftEye.r - 6;
+                    int rby = eyeY - rightEye.r - 6;
+                    thickBezier(s, leftEyeX  - 14, lby - 6, leftEyeX  + 2, lby + 3, leftEyeX  + 14, lby + 8, 2, pal.accent, 16);
+                    thickBezier(s, rightEyeX - 14, rby + 8, rightEyeX - 2, rby + 3, rightEyeX + 14, rby - 6, 2, pal.accent, 16);
+                } else {
+                    bool raised = (fs.expression == face::Expression::HAPPY ||
+                                   fs.expression == face::Expression::SURPRISED) || drawPeakBrows;
+                    drawBrow(s, leftEyeX,  eyeY, leftEye.r, pal.accent, raised);
+                    drawBrow(s, rightEyeX, eyeY, rightEye.r, pal.accent, raised);
+                }
             }
         }
     }
@@ -1101,6 +1109,15 @@ void renderGlance(const display::GlanceData& data) {
 }  // namespace display_hw
 
 // ── Public API ─────────────────────────────────────────
+
+void display::setFaceStyle(uint8_t styleId) {
+    g_faceStyle = face_style::fromId(styleId);
+    Serial.printf("[Display] Face style: %s\n", g_faceStyle->name);
+}
+
+uint8_t display::getFaceStyleId() {
+    return static_cast<uint8_t>(g_faceStyle->id);
+}
 
 void display::init() {
     display_hw::init();

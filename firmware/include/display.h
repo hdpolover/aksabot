@@ -129,4 +129,12 @@ void showGlance();
 /// Check if context data is available for glance display.
 bool hasContextData();
 
+/// Set the active face style by ID (0=ORBIT, 1=NOVA).
+/// Takes effect immediately on the next rendered frame.
+/// Call nvs_store::setFaceStyle() separately to persist across reboots.
+void setFaceStyle(uint8_t styleId);
+
+/// Returns the current face style ID.
+uint8_t getFaceStyleId();
+
 }  // namespace display

@@ -16,6 +16,7 @@
 #include "resilience_audio.h"
 #include "display.h"
 #include "face.h"
+#include "face_style.h"
 #include "touch.h"
 #include "vad.h"
 #include "ota_update.h"
@@ -464,6 +465,23 @@ static void onWsJson(const char* event, const char* data) {
                     face::setIdleInterval(8000, 12000);   // 8-20s (default)
                 }
                 Serial.printf("[Main] Config: idle animation speed=%s\n", speed);
+            }
+            // Idle display mode — what the screen shows at rest ("face", "clock", "status")
+            if (!doc["idle_display_mode"].isNull()) {
+                const char* mode = doc["idle_display_mode"] | "face";
+                if (strcmp(mode, "clock") == 0)       display::setMode(display::Mode::CLOCK);
+                else if (strcmp(mode, "status") == 0) display::setMode(display::Mode::STATUS);
+                else                                  display::setMode(display::Mode::FACE);
+                nvs_store::setIdleDisplayMode(mode);
+                Serial.printf("[Main] Config: idle_display_mode=%s\n", mode);
+            }
+            // Face style — "orbit" (circle eyes) or "nova" (rounded rect eyes)
+            if (!doc["face_style"].isNull()) {
+                const char* styleName = doc["face_style"] | "nova";
+                const face_style::FaceStyleDef* style = face_style::fromName(styleName);
+                display::setFaceStyle(static_cast<uint8_t>(style->id));
+                nvs_store::setFaceStyle(static_cast<uint8_t>(style->id));
+                Serial.printf("[Main] Config: face_style=%s\n", styleName);
             }
             // Show transcript overlay
             if (!doc["display_transcript"].isNull()) {
@@ -1087,6 +1105,15 @@ void setup() {
 
     // ── 3. Display init + splash ───────────────────────────
     display::init();
+    display::setFaceStyle(nvs_store::getFaceStyle());  // restore face style from NVS
+    {
+        // Restore idle display mode from NVS
+        char idleMode[16];
+        nvs_store::getIdleDisplayMode(idleMode, sizeof(idleMode));
+        if (strcmp(idleMode, "clock") == 0)       display::setMode(display::Mode::CLOCK);
+        else if (strcmp(idleMode, "status") == 0) display::setMode(display::Mode::STATUS);
+        // default: FACE (already set by display::init())
+    }
     boot_screen::init();
 
     // Show splash and poll BOOT button (GPIO 0) during the splash delay.

@@ -52,6 +52,19 @@ bool setPresenceRssiThreshold(int8_t rssi);
 uint8_t getPresenceGracePeriodSec();   // default 45
 bool setPresenceGracePeriodSec(uint8_t seconds);
 
+// ── Face style ────────────────────────────────────────
+
+/// Returns the stored face style ID (0=ORBIT, 1=NOVA). Default: 1 (NOVA).
+uint8_t getFaceStyle();
+bool setFaceStyle(uint8_t styleId);
+
+// ── Idle display mode ─────────────────────────────────
+
+/// Returns the stored idle display mode as a string ("face", "clock", "status").
+/// Default: "face".
+bool getIdleDisplayMode(char* buf, size_t bufLen);
+bool setIdleDisplayMode(const char* mode);
+
 // ── Setup state ───────────────────────────────────────
 
 /// Returns true if this device has never completed first-time setup.

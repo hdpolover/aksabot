@@ -66,6 +66,14 @@ export class UpdateSettingsDto {
   @IsOptional()
   idle_animation_speed?: string;
 
+  @IsString()
+  @IsOptional()
+  face_style?: string;
+
+  @IsString()
+  @IsOptional()
+  idle_display_mode?: string;
+
   @IsNumber()
   @Min(100)
   @Max(500)
