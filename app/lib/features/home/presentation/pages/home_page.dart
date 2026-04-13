@@ -226,15 +226,29 @@ class _DeviceList extends StatefulWidget {
 
 class _DeviceListState extends State<_DeviceList> {
   late final BlePresenceService _presence;
+  Timer? _presenceRefreshTimer;
 
   @override
   void initState() {
     super.initState();
     _presence = sl<BlePresenceService>();
+    // BlePresenceService has no streams — poll presence state every 3s so the
+    // icon and subtitle stay in sync without waiting for a BLoC rebuild.
+    _presenceRefreshTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) { if (mounted) setState(() {}); },
+    );
+  }
+
+  @override
+  void dispose() {
+    _presenceRefreshTimer?.cancel();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('Devices')),
       floatingActionButton: FloatingActionButton(
@@ -257,6 +271,10 @@ class _DeviceListState extends State<_DeviceList> {
           itemBuilder: (context, index) {
             final device = widget.devices[index];
             final presenceOn = _presence.isScanning || _presence.isPresent;
+            // Green when confirmed present, primary-blue when only scanning
+            final presenceColor = _presence.isPresent
+                ? colors.tertiary
+                : colors.primary;
             String subtitle;
             if (!device.isOnline) {
               subtitle = 'Offline';
@@ -272,6 +290,7 @@ class _DeviceListState extends State<_DeviceList> {
               subtitle: subtitle,
               isOnline: device.isOnline,
               bleAdvertising: presenceOn,
+              presenceColor: presenceColor,
               onTap: () => widget.onNavigate(context, '/devices/${device.id}'),
             );
           },

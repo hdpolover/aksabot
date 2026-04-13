@@ -507,14 +507,15 @@ static void onWsJson(const char* event, const char* data) {
     // ── Presence events (sent BY backend, triggered by app BLE scan) ──
     else if (strcmp(event, "presence:arrived") == 0) {
         appState.presenceState = PresenceState::PRESENT;
+        updateStatusBar();  // Switch dot from blinking to solid
         power_manager::recordInteraction();
         Serial.println("[Presence] User arrived (app-driven)");
-        // Departure animation task
         face::setExpression(face::Expression::HAPPY, 200);
         scheduleFaceRevert(3000);
     }
     else if (strcmp(event, "presence:departed") == 0) {
         appState.presenceState = PresenceState::AWAY;
+        updateStatusBar();  // Switch dot back to blinking
         Serial.println("[Presence] User departed (app-driven)");
         // Run departure animation in a one-shot task
         xTaskCreate([](void*) {

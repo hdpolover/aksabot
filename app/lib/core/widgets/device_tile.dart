@@ -15,8 +15,11 @@ class DeviceTile extends StatelessWidget {
   final IconData icon;
   final bool isOnline;
   /// When non-null, shows a BLE presence badge next to the status dot.
-  /// true = advertising (phone visible to device), false = not advertising.
+  /// true = presence active (scanning or detected), false = not active.
   final bool? bleAdvertising;
+  /// Color for the presence icon. Defaults to primary. Pass a success color
+  /// when presence is confirmed to distinguish detected vs scanning-only.
+  final Color? presenceColor;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
 
@@ -27,6 +30,7 @@ class DeviceTile extends StatelessWidget {
     this.icon = Icons.smart_toy_outlined,
     this.isOnline = false,
     this.bleAdvertising,
+    this.presenceColor,
     this.onTap,
     this.onLongPress,
   });
@@ -79,7 +83,7 @@ class DeviceTile extends StatelessWidget {
                       Icon(
                         Icons.sensors_rounded,
                         size: 13,
-                        color: colors.primary,
+                        color: presenceColor ?? colors.primary,
                       ),
                       const SizedBox(width: 4),
                     ],

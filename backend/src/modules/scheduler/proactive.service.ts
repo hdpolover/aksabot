@@ -74,7 +74,7 @@ export class ProactiveService {
 
   private getLangInstruction(language?: 'en' | 'id'): string {
     return language === 'id'
-      ? ' Respond in Bahasa Indonesia. Use informal/casual style (lo/gue), include English tech terms naturally. Keep the same gen-z, sarcastic, funny personality. Never use written shorthand like gk, bgt, wkwk — spell everything out, this is voice output.'
+      ? ' Respond in Bahasa Indonesia. All sentences must be in Indonesian — do NOT switch to full English sentences. English is only allowed for tech/code nouns (framework names, error messages, etc.) embedded inside Indonesian sentences. Use lo/gue pronouns and casual gen-z Indonesian slang. Never use written shorthand like gk, bgt, wkwk — spell everything out, this is voice output.'
       : ' Respond in English. Never use text abbreviations — spell everything out, this is voice output.';
   }
 

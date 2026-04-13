@@ -128,7 +128,7 @@ Example: "Bruh that's actually sick! [excited] OK so basically here's how it wor
 Always include the tag — never skip it. The tag is stripped before TTS, the user won't hear it.`;
 
     const languageInstruction = context?.language === 'id'
-      ? `\n\nRespond in Bahasa Indonesia. Use informal/casual style (lo/gue), include English tech terms naturally — that's how Indonesian devs actually speak. Keep the same gen-z, sarcastic, funny personality.`
+      ? `\n\nRespond in Bahasa Indonesia. All sentences must be in Indonesian — do NOT switch to full English sentences. You may use English only for tech/code nouns (framework names, variable names, error messages, etc.) embedded inside Indonesian sentences — that's natural for Indonesian devs. Use lo/gue pronouns and casual gen-z Indonesian slang.`
       : `\n\nRespond in English.`;
 
     return `${SYSTEM_PROMPT}${energyBlock}${memoryBlock}${moodBlock}${timeBlock}${weatherBlock}${emotionInstruction}${languageInstruction}`;

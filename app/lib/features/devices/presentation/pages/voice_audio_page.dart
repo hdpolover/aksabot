@@ -106,11 +106,13 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
   }
 
   /// Persist a single changed key without clobbering other settings.
-  Future<void> _save(String key, dynamic value) async {
+  Future<void> _save(String key, dynamic value) => _saveMany({key: value});
+
+  /// Persist multiple keys atomically in a single PATCH call.
+  Future<void> _saveMany(Map<String, dynamic> patch) async {
     if (_saving) return;
     setState(() => _saving = true);
 
-    final patch = {key: value};
     final result = await _devicesRepo.updateSettings(widget.deviceId, patch);
     if (!mounted) return;
 
@@ -254,9 +256,9 @@ class _VoiceAudioPageState extends State<VoiceAudioPage> {
                               _language = lang;
                               _voicePreset = newDefault;
                             });
-                            // Save both language and reset voice preset atomically
-                            _save('language', lang);
-                            _save('voice_preset', newDefault);
+                            // Save both atomically — two separate _save() calls would
+                            // race on the _saving guard and silently drop the second one.
+                            _saveMany({'language': lang, 'voice_preset': newDefault});
                           },
                   ),
                   const SizedBox(height: 16),
