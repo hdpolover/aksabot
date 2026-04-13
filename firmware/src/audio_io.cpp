@@ -74,13 +74,13 @@ void audio_io::init() {
         return;
     }
 
-    // Set volume from NVS (default 80%) + 42dB mic gain.
+    // Set volume from NVS + 42dB mic gain.
     // Raised from 24dB: higher gain gives ~8x more headroom between voice
     // and the wake word detector's noise floor threshold. Voice peaks at ~3%
     // of full scale at 42dB so there is no clipping risk on a MEMS mic.
     uint8_t vol = nvs_store::getVolume();
+    setVolume(vol);  // applies perceptual curve + hardware range mapping
     es8311_handle_t es_handle = es8311_create(I2C_NUM_0, ES8311_ADDRESS_0);
-    es8311_voice_volume_set(es_handle, vol, NULL);
     es8311_microphone_gain_set(es_handle, ES8311_MIC_GAIN_42DB);
 
     Serial.printf("[Audio] ES8311 codec ready (vol=%d%%, mic=42dB)\n", vol);
@@ -162,14 +162,21 @@ void audio_io::flushSpeaker() {
 void audio_io::setVolume(uint8_t percent) {
     if (percent > 100) percent = 100;
 
-    // Apply perceptual curve — ES8311 DAC volume is dB-scale (logarithmic),
-    // so a linear slider feels very quiet at low values.
-    // Remap so 50% slider ≈ 50% perceived loudness.
-    // Using power curve: mapped = (percent/100)^0.5 * 100
-    // This maps: 0→0, 25→50, 50→71, 75→87, 100→100
-    float normalized = (float)percent / 100.0f;
-    float curved = sqrtf(normalized);
-    uint8_t mapped = (uint8_t)(curved * 100.0f);
+    uint8_t mapped;
+    if (percent == 0) {
+        mapped = 0;
+    } else {
+        // ES8311 DAC_VOL (reg 0x32) maps 0-100% → register 0-255, with ~0.5dB/step.
+        // Hardware testing shows the comfortable audible range is ES8311 vol 65-82%:
+        //   < 65% = inaudible in a normal room
+        //   > 82% = uncomfortably loud / distorted
+        // Map app 1-100% to this band with a sqrt curve for perceptual linearity.
+        // Result: 10%→69, 25%→73, 50%→77, 70%→79, 100%→82
+        const float HW_BASE  = 65.0f;  // minimum audible floor
+        const float HW_RANGE = 17.0f;  // usable range above floor (65+17=82 max)
+        float t = sqrtf((float)percent / 100.0f);
+        mapped = (uint8_t)(HW_BASE + t * HW_RANGE);
+    }
 
     es8311_handle_t handle = es8311_create(I2C_NUM_0, ES8311_ADDRESS_0);
     es8311_voice_volume_set(handle, mapped, NULL);

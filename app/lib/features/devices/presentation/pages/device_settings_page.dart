@@ -26,7 +26,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
   String? _error;
   Device? _device;
 
-  double _volume = 70;
+  double _volume = 50;
   double _brightness = 70;
   bool _showTranscript = false;
   String _idleTimeout = '30';
@@ -59,7 +59,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
         final minutes = timeoutSec != null ? (timeoutSec ~/ 60) : 30;
         setState(() {
           _device = device;
-          _volume = vol ?? 70;
+          _volume = vol ?? 50;
           _brightness = br ?? 70;
           _showTranscript = tr ?? false;
           _idleTimeout =
