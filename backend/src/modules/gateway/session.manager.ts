@@ -19,6 +19,8 @@ export interface DeviceSession {
   intercomReply: boolean;
   /** Accumulated raw Opus frames from the device during an intercom reply. */
   intercomFrames: Buffer[];
+  /** Battery level reported by the device. 0-100 = percentage, 255 = USB powered, undefined = unknown. */
+  batteryPercent?: number;
 }
 
 @Injectable()

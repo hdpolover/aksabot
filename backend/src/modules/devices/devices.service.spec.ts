@@ -25,7 +25,8 @@ describe('DevicesService', () => {
     };
 
     const emptyRepo = {} as any;
-    service = new DevicesService(repo as any, emptyRepo, emptyRepo, emptyRepo, emptyRepo);
+    const mockSessionManager = { get: jest.fn().mockReturnValue(undefined) } as any;
+    service = new DevicesService(repo as any, emptyRepo, emptyRepo, emptyRepo, emptyRepo, mockSessionManager);
   });
 
   describe('create', () => {

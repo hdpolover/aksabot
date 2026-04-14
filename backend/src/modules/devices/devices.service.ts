@@ -15,6 +15,7 @@ import {
 } from '../../core/database/entities';
 import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
+import { SessionManager } from '../gateway/session.manager';
 
 @Injectable()
 export class DevicesService {
@@ -29,6 +30,7 @@ export class DevicesService {
     private readonly memoriesRepo: Repository<Memory>,
     @InjectRepository(ResponsePool)
     private readonly poolRepo: Repository<ResponsePool>,
+    private readonly sessionManager: SessionManager,
   ) {}
 
   async create(
@@ -130,6 +132,7 @@ export class DevicesService {
       totalConversations,
       totalMemories,
       poolSize: poolCount,
+      batteryPercent: this.sessionManager.get(id)?.batteryPercent ?? null,
     };
   }
 
