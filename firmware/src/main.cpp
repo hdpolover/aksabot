@@ -2038,16 +2038,16 @@ void loop() {
                 }
             } else if (appState.wifiConnected && !appState.wsConnected && prevWs) {
                 // WS dropped but WiFi still up → confused face (+ disconnected clip if not spamming)
+                // No scheduleFaceRevert — reconnect cycler below takes ownership of expressions.
                 face::setExpression(face::Expression::CONFUSED, 200);
-                scheduleFaceRevert(3000);
                 if (audioAllowed) {
                     ui_audio::play(ui_audio::Clip::SERVER_DISCONNECTED);
                     lastConnAudioMs = now;
                 }
             } else if (appState.wifiConnected && !appState.wsConnected && !prevWifi) {
                 // WiFi just recovered but WS not yet → confused (connecting...) — no audio
+                // No scheduleFaceRevert — reconnect cycler below takes ownership of expressions.
                 face::setExpression(face::Expression::CONFUSED, 200);
-                scheduleFaceRevert(3000);
             }
         }
 
@@ -2106,6 +2106,53 @@ void loop() {
         prevWs = appState.wsConnected;
         updateStatusBar();
         status_led::syncToState();
+    }
+
+    // ── Reconnect emotion cycle ─────────────────────────────────────────────
+    // While WS is down but WiFi is up, cycle through frustrated expressions
+    // every 4s so the bot looks appropriately annoyed during reconnection.
+    // The connectivity block above already shows CONFUSED as the first expression;
+    // the cycler advances from there and resets the moment WS comes back up.
+    {
+        static const face::Expression RECONNECT_POOL[] = {
+            face::Expression::CONFUSED,
+            face::Expression::ANGRY,
+            face::Expression::DISTURBED,
+            face::Expression::SHRUG,
+            face::Expression::SHOCKED,
+        };
+        static const uint8_t RECONNECT_POOL_LEN =
+            sizeof(RECONNECT_POOL) / sizeof(RECONNECT_POOL[0]);
+        static const uint32_t RECONNECT_EMOTE_INTERVAL_MS = 4000;
+
+        static uint32_t lastReconnectEmoteMs = 0;
+        static uint8_t  reconnectEmoteIdx    = 0;
+
+        const bool reconnecting = !appState.wsConnected && appState.wifiConnected &&
+                                  (appState.botState == BotState::IDLE ||
+                                   appState.botState == BotState::OFFLINE);
+
+        if (reconnecting) {
+            // Cancel any pending face revert so it can't flash IDLE over the
+            // frustrated expression while we're still waiting for the server.
+            faceRevertPending = false;
+
+            if (lastReconnectEmoteMs == 0) {
+                // Connectivity block already set CONFUSED — start timer now so
+                // the first advance fires one interval later.
+                lastReconnectEmoteMs = now;
+                reconnectEmoteIdx    = 0;
+            } else if (now - lastReconnectEmoteMs >= RECONNECT_EMOTE_INTERVAL_MS) {
+                reconnectEmoteIdx = (reconnectEmoteIdx + 1) % RECONNECT_POOL_LEN;
+                face::setExpression(RECONNECT_POOL[reconnectEmoteIdx], 200);
+                lastReconnectEmoteMs = now;
+                Serial.printf("[Main] Reconnect emote: %d\n", (int)RECONNECT_POOL[reconnectEmoteIdx]);
+            }
+        } else {
+            // WS reconnected (or WiFi dropped) — reset so next disconnect starts fresh.
+            lastReconnectEmoteMs = 0;
+            reconnectEmoteIdx    = 0;
+        }
     }
 
 #if HANDS_FREE_ENABLED
