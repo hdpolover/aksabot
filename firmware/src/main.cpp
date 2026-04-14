@@ -182,9 +182,9 @@ static const char* downloadImage(const char* url) {
         return nullptr;
     }
 
-    int contentLen = http.getSize();
-    if (contentLen <= 0 || contentLen > 512 * 1024) {
-        Serial.printf("[ImgDL] Bad content-length: %d\n", contentLen);
+    int contentLen = http.getSize(); // -1 if server uses chunked encoding
+    if (contentLen > 512 * 1024) {
+        Serial.printf("[ImgDL] Content-Length too large: %d\n", contentLen);
         http.end();
         return nullptr;
     }
@@ -202,19 +202,33 @@ static const char* downloadImage(const char* url) {
     WiFiClient* stream = http.getStreamPtr();
     uint8_t buf[2048];
     int totalRead = 0;
-    while (http.connected() && totalRead < contentLen) {
+    const int maxBytes = 512 * 1024; // hard cap regardless of Content-Length
+    // Stream until connection closes (handles both Content-Length and chunked)
+    while (http.connected() && (contentLen < 0 || totalRead < contentLen)) {
         int avail = stream->available();
         if (avail == 0) { vTaskDelay(pdMS_TO_TICKS(5)); continue; }
         int toRead = min(avail, (int)sizeof(buf));
         int n = stream->readBytes(buf, toRead);
         f.write(buf, n);
         totalRead += n;
+        if (totalRead >= maxBytes) {
+            Serial.printf("[ImgDL] Exceeded %d byte cap, aborting\n", maxBytes);
+            f.close();
+            http.end();
+            SD_MMC.remove(savedPath);
+            return nullptr;
+        }
     }
     f.close();
     http.end();
 
-    if (totalRead < contentLen) {
+    if (contentLen > 0 && totalRead < contentLen) {
         Serial.printf("[ImgDL] Incomplete: %d/%d bytes\n", totalRead, contentLen);
+        SD_MMC.remove(savedPath);
+        return nullptr;
+    }
+    if (totalRead == 0) {
+        Serial.println("[ImgDL] Empty response body");
         SD_MMC.remove(savedPath);
         return nullptr;
     }

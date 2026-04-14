@@ -21,7 +21,7 @@ import type { Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
-import { existsSync, createReadStream, mkdirSync, unlink } from 'fs';
+import { existsSync, createReadStream, mkdirSync, unlink, statSync } from 'fs';
 import { randomUUID } from 'crypto';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -308,7 +308,9 @@ export class DevicesController {
       '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
       '.png': 'image/png', '.bmp': 'image/bmp',
     };
+    const { size } = statSync(filePath);
     res.setHeader('Content-Type', mimeMap[ext] ?? 'application/octet-stream');
+    res.setHeader('Content-Length', size);
     res.setHeader('Cache-Control', 'no-store'); // don't cache expiring files
     createReadStream(filePath).pipe(res);
   }
