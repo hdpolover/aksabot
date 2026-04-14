@@ -1942,6 +1942,38 @@ void loop() {
         }
     }
 
+    // Low-battery LED override and critical power saving
+    {
+        static bool criticalDimApplied = false;
+
+        if (!battery::isUsbPowered()) {
+            // LED: orange fast-blink when low
+            if (battery::isLow()) {
+                status_led::showLowBattery();
+            }
+
+            // Power saving: dim display aggressively when critical
+            if (battery::isCritical() && !criticalDimApplied) {
+                criticalDimApplied = true;
+                power_manager::Config cfg = {};
+                cfg.activeBrightness = 30;
+                cfg.dimBrightness    = 10;
+                cfg.dimTimeoutSec    = 15;
+                cfg.sleepTimeoutSec  = 60;
+                power_manager::updateConfig(cfg);
+                Serial.println("[Battery] Critical — power saving active");
+            }
+        } else {
+            // Plugged in — restore normal LED and power config
+            status_led::syncToState();
+            if (criticalDimApplied) {
+                criticalDimApplied = false;
+                power_manager::updateConfig(power_manager::Config{});
+                Serial.println("[Battery] Charging — power saving restored");
+            }
+        }
+    }
+
     // Explicit WiFi reconnect with backoff — fallback for when setAutoReconnect
     // silently stops retrying (router restart, driver exhaustion, etc.)
     wifi_manager::tick();
