@@ -21,8 +21,8 @@ const VOICE_PRESETS_ID: Record<string, string> = {
 
 const DEFAULT_VOICE_EN = VOICE_PRESETS_EN.ziggy;
 const DEFAULT_VOICE_ID_LANG = VOICE_PRESETS_ID.maskito;
-const DEFAULT_SPEED = 0.7;
-const DEFAULT_STABILITY = 0.6;
+const DEFAULT_SPEED = 0.9;
+const DEFAULT_STABILITY = 0.35;
 
 @Injectable()
 export class ElevenLabsTtsProvider implements ITtsProvider {
@@ -61,11 +61,11 @@ export class ElevenLabsTtsProvider implements ITtsProvider {
         },
         body: JSON.stringify({
           text,
-          model_id: 'eleven_turbo_v2_5',
+          model_id: 'eleven_multilingual_v2',
           voice_settings: {
             stability,
-            similarity_boost: 0.75,
-            style: 0.3,
+            similarity_boost: 0.80,
+            style: 0,
             use_speaker_boost: false,
           },
           speed,
