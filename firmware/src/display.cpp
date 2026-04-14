@@ -1258,14 +1258,15 @@ void renderReminder(const display::ReminderData& data) {
     s.setTextColor(COL_WARM);
     s.drawString("!", CX, 40);
 
-    // Reminder text — word-wrap at size 1, centered
-    s.setTextSize(1);
+    // Reminder text — word-wrap, centered. textSize 2 for large quips.
+    const uint8_t sz    = (data.textSize >= 2) ? 2 : 1;
+    const int     lineH = (sz == 2) ? 22 : 18;
+    s.setTextSize(sz);
     s.setTextColor(COL_FACE);
     s.setTextDatum(lgfx::top_center);
 
     const int maxW = LCD_WIDTH - 20;  // 10px margin each side
-    const int lineH = 18;
-    int y = 80;
+    int y = (sz == 2) ? 70 : 80;
 
     // Simple word-wrap
     char buf[256];

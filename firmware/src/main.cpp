@@ -2013,6 +2013,25 @@ void loop() {
         updateStatusBar();
     }
 
+    // ── Stall visual feedback ────────────────────────────────────────────────
+    // When audio frames stop arriving mid-speech (blinking orange dot), switch
+    // to CONFUSED face so there's more than just the status dot to indicate
+    // something's wrong. Restored to SPEAKING when frames resume.
+    {
+        static bool prevStalled = false;
+        const bool isStalled = appState.botState == BotState::SPEAKING &&
+                               playbackActive && !playbackDone &&
+                               (now - lastFrameReceivedMs) > 3000;
+
+        if (isStalled && !prevStalled) {
+            face::setExpression(face::Expression::CONFUSED, 300);
+            Serial.println("[Main] Playback stalled — switching to CONFUSED face");
+        } else if (!isStalled && prevStalled) {
+            syncFaceToState();  // frames resumed — restore SPEAKING expression
+        }
+        prevStalled = isStalled;
+    }
+
     // Throttle status bar updates — only refresh when connectivity actually changes
     static bool prevWifi = false;
     static bool prevWs = false;
@@ -2110,9 +2129,15 @@ void loop() {
 
     // ── Reconnect emotion cycle ─────────────────────────────────────────────
     // While WS is down but WiFi is up, cycle through frustrated expressions
-    // every 4s so the bot looks appropriately annoyed during reconnection.
-    // The connectivity block above already shows CONFUSED as the first expression;
-    // the cycler advances from there and resets the moment WS comes back up.
+    // every 4s. After each full expression cycle, show a sarcastic one-liner
+    // on screen for 4s before looping back to CONFUSED.
+    //
+    // Sequence: CONFUSED → ANGRY → DISTURBED → SHRUG → SHOCKED → [text 4s]
+    //           → CONFUSED → ...
+    //
+    // Each expression has a paired SFX clip (from /audio/sfx/ on SD).
+    // SFX is capped at RECONNECT_SFX_MAX_PLAYS per disconnect so it stays subtle.
+    // sfx_audio::play() silently skips if the SD file is missing.
     {
         static const face::Expression RECONNECT_POOL[] = {
             face::Expression::CONFUSED,
@@ -2121,37 +2146,142 @@ void loop() {
             face::Expression::SHRUG,
             face::Expression::SHOCKED,
         };
-        static const uint8_t RECONNECT_POOL_LEN =
-            sizeof(RECONNECT_POOL) / sizeof(RECONNECT_POOL[0]);
-        static const uint32_t RECONNECT_EMOTE_INTERVAL_MS = 4000;
+        // Paired SFX clip name, or nullptr for silent expressions.
+        static const char* RECONNECT_SFX[] = {
+            "sad_trombone",  // CONFUSED — wah-wah fail
+            "build_fail",    // ANGRY    — connection is "broken"
+            nullptr,         // DISTURBED — eerie silence fits better
+            "crickets",      // SHRUG    — awkward dead air
+            "gasp",          // SHOCKED  — theatrical outrage
+        };
+        // Sarcastic/philosophical one-liners shown between expression cycles.
+        // Aksa's gen-z personality shining through a bad connection.
+        static const char* RECONNECT_QUIPS[] = {
+            "the server and i are on a break.",
+            "have you tried yelling at the router?",
+            "404: motivation not found.",
+            "my packets ghosted me apparently.",
+            "wifi said talk to the firewall.",
+            "this is fine. everything is fine.",
+            "maybe we never were truly connected.",
+            "the backend said no. didn't elaborate.",
+            "brb negotiating with the universe.",
+            "spiritually connected. technically not.",
+            "server said left on read. peak.",
+            "connection lost. aesthetic gained.",
+            "the cloud is just someone else's problem.",
+            "bytes are just abstract concepts now.",
+            "have you considered carrier pigeons?",
+            "the internet: not always a vibe.",
+            "waiting. as is tradition.",
+            "we don't talk about the timeout.",
+            "packet loss is my love language.",
+        };
 
-        static uint32_t lastReconnectEmoteMs = 0;
-        static uint8_t  reconnectEmoteIdx    = 0;
+        static const uint8_t  RECONNECT_POOL_LEN        = sizeof(RECONNECT_POOL)  / sizeof(RECONNECT_POOL[0]);
+        static const uint8_t  RECONNECT_QUIP_COUNT       = sizeof(RECONNECT_QUIPS) / sizeof(RECONNECT_QUIPS[0]);
+        static const uint32_t RECONNECT_EMOTE_INTERVAL_MS = 4000;
+        static const uint32_t RECONNECT_TEXT_DURATION_MS  = 10000;
+        static const uint8_t  RECONNECT_SFX_MAX_PLAYS     = 2;
+
+        static uint32_t lastReconnectEmoteMs   = 0;
+        static uint32_t reconnectTextShownAtMs = 0;
+        static uint8_t  reconnectEmoteIdx      = 0;
+        static uint8_t  reconnectSfxPlays      = 0;
+        static bool     reconnectShowingText   = false;
+        static uint8_t  lastQuipIdx            = 255;  // sentinel — no last quip
 
         const bool reconnecting = !appState.wsConnected && appState.wifiConnected &&
                                   (appState.botState == BotState::IDLE ||
                                    appState.botState == BotState::OFFLINE);
 
         if (reconnecting) {
-            // Cancel any pending face revert so it can't flash IDLE over the
-            // frustrated expression while we're still waiting for the server.
-            faceRevertPending = false;
-
             if (lastReconnectEmoteMs == 0) {
-                // Connectivity block already set CONFUSED — start timer now so
-                // the first advance fires one interval later.
-                lastReconnectEmoteMs = now;
-                reconnectEmoteIdx    = 0;
-            } else if (now - lastReconnectEmoteMs >= RECONNECT_EMOTE_INTERVAL_MS) {
-                reconnectEmoteIdx = (reconnectEmoteIdx + 1) % RECONNECT_POOL_LEN;
-                face::setExpression(RECONNECT_POOL[reconnectEmoteIdx], 200);
-                lastReconnectEmoteMs = now;
-                Serial.printf("[Main] Reconnect emote: %d\n", (int)RECONNECT_POOL[reconnectEmoteIdx]);
+                // First tick of disconnect — switch to FACE mode so expressions
+                // are actually visible (home mode might be CLOCK or STATUS).
+                // showReminder() will save previousMode=FACE and auto-return to
+                // FACE after each quip, keeping the whole cycle on the face screen.
+                display::setMode(display::Mode::FACE);
+
+                // Connectivity block already set CONFUSED — start timer so the
+                // first advance fires one interval later.
+                lastReconnectEmoteMs   = now;
+                reconnectTextShownAtMs = 0;
+                reconnectEmoteIdx      = 0;
+                reconnectSfxPlays      = 0;
+                reconnectShowingText   = false;
+                lastQuipIdx            = 255;
+            } else {
+                // Is the text screen still actively showing?
+                bool textActive = reconnectShowingText &&
+                                  (now - reconnectTextShownAtMs < RECONNECT_TEXT_DURATION_MS);
+
+                // Only suppress face reverts while a cycler expression is the
+                // active override — not on every tick. This lets touch-tap face
+                // reverts fire normally between expression advances.
+                if (textActive || now - lastReconnectEmoteMs < RECONNECT_EMOTE_INTERVAL_MS) {
+                    faceRevertPending = false;
+                }
+
+                if (!textActive && now - lastReconnectEmoteMs >= RECONNECT_EMOTE_INTERVAL_MS) {
+                    if (reconnectShowingText) {
+                        // Text screen just finished — wrap back to CONFUSED.
+                        reconnectShowingText = false;
+                        reconnectEmoteIdx    = 0;
+                        face::setExpression(face::Expression::CONFUSED, 200);
+                        faceRevertPending    = false;  // cycler owns this expression
+                        Serial.println("[Main] Reconnect text done — back to CONFUSED");
+                    } else {
+                        uint8_t nextIdx = (reconnectEmoteIdx + 1) % RECONNECT_POOL_LEN;
+
+                        if (nextIdx == 0) {
+                            // Completed a full cycle — show a sarcastic quip before looping.
+                            uint8_t pick;
+                            do {
+                                pick = esp_random() % RECONNECT_QUIP_COUNT;
+                            } while (pick == lastQuipIdx && RECONNECT_QUIP_COUNT > 1);
+                            lastQuipIdx = pick;
+
+                            display::ReminderData rd = {};
+                            strncpy(rd.text, RECONNECT_QUIPS[pick], sizeof(rd.text) - 1);
+                            rd.durationMs = RECONNECT_TEXT_DURATION_MS;
+                            rd.textSize   = 2;  // larger font for reconnect quips
+                            display::showReminder(rd);
+
+                            reconnectShowingText   = true;
+                            reconnectTextShownAtMs = now;
+                            faceRevertPending      = false;
+                            Serial.printf("[Main] Reconnect quip: \"%s\"\n", RECONNECT_QUIPS[pick]);
+                        } else {
+                            // Advance to the next frustrated expression.
+                            reconnectEmoteIdx = nextIdx;
+                            face::setExpression(RECONNECT_POOL[reconnectEmoteIdx], 200);
+                            faceRevertPending = false;  // cycler owns this expression
+                            Serial.printf("[Main] Reconnect emote: %d (sfx %d/%d)\n",
+                                          (int)RECONNECT_POOL[reconnectEmoteIdx],
+                                          reconnectSfxPlays, RECONNECT_SFX_MAX_PLAYS);
+
+                            const char* clip = RECONNECT_SFX[reconnectEmoteIdx];
+                            if (clip && reconnectSfxPlays < RECONNECT_SFX_MAX_PLAYS) {
+                                sfx_audio::play(clip);
+                                reconnectSfxPlays++;
+                            }
+                        }
+                    }
+                    lastReconnectEmoteMs = now;
+                }
             }
         } else {
-            // WS reconnected (or WiFi dropped) — reset so next disconnect starts fresh.
-            lastReconnectEmoteMs = 0;
-            reconnectEmoteIdx    = 0;
+            // WS reconnected (or WiFi dropped) — restore home mode and reset.
+            if (lastReconnectEmoteMs != 0) {
+                display::setMode(display::getHomeMode());
+            }
+            lastReconnectEmoteMs   = 0;
+            reconnectTextShownAtMs = 0;
+            reconnectEmoteIdx      = 0;
+            reconnectSfxPlays      = 0;
+            reconnectShowingText   = false;
+            lastQuipIdx            = 255;
         }
     }
 

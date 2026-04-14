@@ -50,6 +50,7 @@ struct ReminderData {
     char text[64];
     char icon[16];              // Icon name hint for renderer
     uint16_t durationMs;        // Auto-dismiss after this
+    uint8_t textSize;           // Font size multiplier (0 or 1 = default, 2 = large)
 };
 
 /// Countdown display data.
