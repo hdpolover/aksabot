@@ -1,4 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { FirmwareModule } from '../firmware/firmware.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   Conversation,
@@ -21,6 +22,7 @@ import { VoiceCommandService } from './voice-command.service';
     AiModule,
     MemoriesModule,
     forwardRef(() => SchedulerModule),
+    forwardRef(() => FirmwareModule),
   ],
   providers: [AudioGateway, SessionManager, ConversationPersistence, VoiceCommandService],
   exports: [AudioGateway, SessionManager],

@@ -26,6 +26,10 @@ import '../../features/scheduler/data/datasources/scheduler_remote_datasource.da
 import '../../features/scheduler/data/repositories/scheduler_repository_impl.dart';
 import '../../features/scheduler/domain/repositories/scheduler_repository.dart';
 import '../../features/scheduler/presentation/bloc/scheduler_bloc.dart';
+import '../../features/firmware/data/datasources/firmware_remote_datasource.dart';
+import '../../features/firmware/data/repositories/firmware_repository_impl.dart';
+import '../../features/firmware/domain/repositories/firmware_repository.dart';
+import '../../features/firmware/presentation/bloc/firmware_bloc.dart';
 
 final sl = GetIt.instance;
 
@@ -83,4 +87,13 @@ Future<void> initDependencies() async {
     () => SchedulerRepositoryImpl(sl()),
   );
   sl.registerFactory(() => SchedulerBloc(sl()));
+
+  // Firmware
+  sl.registerLazySingleton<FirmwareRemoteDatasource>(
+    () => FirmwareRemoteDatasource(sl()),
+  );
+  sl.registerLazySingleton<FirmwareRepository>(
+    () => FirmwareRepositoryImpl(sl()),
+  );
+  sl.registerFactory(() => FirmwareBloc(sl()));
 }

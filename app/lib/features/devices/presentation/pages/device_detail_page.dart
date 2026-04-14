@@ -252,6 +252,12 @@ class DeviceDashboardBody extends StatelessWidget {
               label: 'Stats & Diagnostics',
               route: '/devices/$id/stats',
             ),
+            _SettingsRowData(
+              icon: Icons.system_update_rounded,
+              label: 'Firmware Update',
+              route: '/devices/$id/firmware',
+              extra: device.firmwareVersion,
+            ),
           ],
         ),
         const SizedBox(height: AppConstants.spacingMd),
@@ -737,11 +743,13 @@ class _SettingsRowData {
   final IconData icon;
   final String label;
   final String route;
+  final Object? extra;
 
   const _SettingsRowData({
     required this.icon,
     required this.label,
     required this.route,
+    this.extra,
   });
 }
 
@@ -787,7 +795,7 @@ class _SettingsRowTile extends StatelessWidget {
     return Material(
       color: cs.surfaceContainerHigh,
       child: InkWell(
-        onTap: () => context.push(data.route),
+        onTap: () => context.push(data.route, extra: data.extra),
         child: Padding(
           padding: const EdgeInsets.symmetric(
             horizontal: AppConstants.spacingLg,

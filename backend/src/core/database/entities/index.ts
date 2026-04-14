@@ -5,3 +5,4 @@ export { Message } from './message.entity';
 export { Memory } from './memory.entity';
 export { ResponsePool } from './response-pool.entity';
 export { MoodEntry } from './mood-entry.entity';
+export { FirmwareRelease } from './firmware-release.entity';

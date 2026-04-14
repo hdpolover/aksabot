@@ -5,15 +5,14 @@
 /// OTA firmware update logic.
 ///
 /// Downloads a firmware binary to SD card, verifies its SHA-256 checksum,
-/// and stages it for flashing. The actual flash operation (esp_ota_begin)
-/// is hardware-dependent and marked as TODO.
+/// and flashes it to the inactive OTA partition.
 ///
 /// Flow:
 ///   1. Backend sends ota:start event with {url, sha256, version}
-///   2. Firmware downloads to /ota/firmware.bin
+///   2. Firmware downloads to /ota/firmware.bin (sends ota:progress events)
 ///   3. SHA-256 verification against expected hash
-///   4. Flash from SD to OTA partition (TODO — needs hardware)
-///   5. Report status back to backend
+///   4. Flash from SD to OTA partition (esp_ota_begin/write/end)
+///   5. Set boot partition + esp_restart()
 namespace ota_update {
 
 /// OTA state.
@@ -30,10 +29,16 @@ enum class State : uint8_t {
 /// Initialize OTA subsystem.
 void init();
 
-/// Start an OTA update. Downloads from `url` and verifies against `expectedSha256`.
-/// Non-blocking — check getState() for progress.
+/// Called periodically during download/verify with the current progress (0-100)
+/// and a phase label ("downloading" or "verified").
+typedef void (*ProgressCallback)(uint8_t percent, const char* phase);
+
+/// Start an OTA update. Downloads from `url`, verifies SHA-256, then flashes.
+/// Blocks the calling task for the entire duration — call from a dedicated task.
+/// `progressCb` is called every ~5% during download and after verification.
 /// Returns false if already in progress or SD not mounted.
-bool start(const char* url, const char* expectedSha256, const char* version);
+bool start(const char* url, const char* expectedSha256, const char* version,
+           ProgressCallback progressCb = nullptr);
 
 /// Get current OTA state.
 State getState();

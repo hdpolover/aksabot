@@ -68,7 +68,8 @@ void ota_update::init() {
     }
 }
 
-bool ota_update::start(const char* url, const char* expectedSha256, const char* version) {
+bool ota_update::start(const char* url, const char* expectedSha256, const char* version,
+                       ProgressCallback progressCb) {
     if (state == State::DOWNLOADING || state == State::FLASHING) {
         return false;  // Already in progress
     }
@@ -122,6 +123,7 @@ bool ota_update::start(const char* url, const char* expectedSha256, const char* 
     WiFiClient* httpStream = http.getStreamPtr();
     uint8_t buf[DOWNLOAD_BUF_SIZE];
     int totalRead = 0;
+    uint8_t lastReportedPct = 255;  // Force first callback at 0%
 
     while (http.connected() && totalRead < contentLength) {
         size_t available = httpStream->available();
@@ -136,6 +138,12 @@ bool ota_update::start(const char* url, const char* expectedSha256, const char* 
         totalRead += bytesRead;
 
         progress = (uint8_t)((totalRead * 100L) / contentLength);
+
+        // Report every 5% to avoid flooding the WS connection
+        if (progressCb && (progress / 5) != (lastReportedPct / 5)) {
+            progressCb(progress, "downloading");
+            lastReportedPct = progress;
+        }
     }
 
     outFile.close();
@@ -174,6 +182,7 @@ bool ota_update::start(const char* url, const char* expectedSha256, const char* 
     Serial.printf("[OTA] Verified: %s\n", computedHash);
     state = State::READY;
     progress = 100;
+    if (progressCb) progressCb(100, "verified");
     return true;
 }
 

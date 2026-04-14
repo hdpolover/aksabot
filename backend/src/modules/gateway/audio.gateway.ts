@@ -20,6 +20,7 @@ import { SessionManager } from './session.manager';
 import { ConversationPersistence } from './conversation.persistence';
 import type { SttResult } from '../ai/interfaces';
 import { REDIS_CLIENT } from '../../core/cache/redis.provider';
+import { FirmwareService } from '../firmware/firmware.service';
 
 interface WsMessage {
   event: string;
@@ -57,6 +58,8 @@ export class AudioGateway
     private readonly sessions: SessionManager,
     private readonly persistence: ConversationPersistence,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    @Inject(forwardRef(() => FirmwareService))
+    private readonly firmwareService: FirmwareService,
   ) {}
 
   onModuleInit() {
@@ -689,6 +692,16 @@ export class AudioGateway
         case 'reconnect:back':
           this.onReconnectBack(deviceId).catch((err) =>
             this.logger.error(`onReconnectBack error: ${err.message}`),
+          );
+          break;
+        case 'ota:progress':
+          this.firmwareService.onOtaProgress(deviceId, msg.data ?? {}).catch((err) =>
+            this.logger.error(`onOtaProgress error: ${err.message}`),
+          );
+          break;
+        case 'ota:complete':
+          this.firmwareService.onOtaComplete(deviceId, msg.data ?? {}).catch((err) =>
+            this.logger.error(`onOtaComplete error: ${err.message}`),
           );
           break;
         // Server-to-device events that the simulator may echo back — safe to ignore

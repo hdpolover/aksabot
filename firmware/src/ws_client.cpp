@@ -7,6 +7,29 @@
 #include <Arduino.h>
 #include <freertos/semphr.h>
 #include <freertos/queue.h>
+#include <mbedtls/platform.h>
+#include <esp_heap_caps.h>
+
+// ── mbedTLS PSRAM allocator ─────────────────────────────
+// The pre-built Arduino ESP32 libmbedtls.a has 16KB I/O buffers baked in.
+// sdkconfig.defaults cannot change them (pre-compiled). With ~48KB free heap
+// and fragmentation, a single calloc for the SSL context (~40KB total) fails.
+//
+// Fix: override mbedtls_calloc/free at runtime. Allocations ≥4KB go to PSRAM
+// (8MB free), so the large SSL buffers never touch fragmented internal SRAM.
+static void* mbedtls_psram_calloc(size_t count, size_t size) {
+    size_t total = count * size;
+    if (total >= 4096) {
+        void* p = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (p) return p;
+        // PSRAM failed — fall through to internal heap (last resort)
+    }
+    return heap_caps_calloc(count, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
+static void mbedtls_psram_free(void* ptr) {
+    heap_caps_free(ptr);
+}
 
 using namespace websockets;
 
@@ -141,6 +164,11 @@ void ws_client::init(JsonCallback onJson, BinaryCallback onBinary) {
     jsonCb = onJson;
     binaryCb = onBinary;
 
+    // Redirect mbedTLS heap to PSRAM before any SSL context is created.
+    // Must be called before the first connect() — cannot be changed mid-session.
+    mbedtls_platform_set_calloc_free(mbedtls_psram_calloc, mbedtls_psram_free);
+    Serial.println("[WS] mbedTLS allocator → PSRAM (large allocs ≥4KB)");
+
     wsMutex = xSemaphoreCreateMutex();
     frameQueue = xQueueCreate(WS_FRAME_QUEUE_SIZE, sizeof(WsFrame));
 
@@ -206,9 +234,11 @@ void ws_client::poll() {
     // Auto-reconnect
     if (shouldReconnect && !appState.wsConnected && appState.wifiConnected && everAttempted) {
         if ((now - lastConnectAttemptMs) >= reconnectDelay) {
-            // Skip reconnect if heap is too low for SSL (~45KB needed)
+            // Skip reconnect if heap is too low for SSL.
+            // sdkconfig.defaults sets SSL buffers to 4KB each (~12KB total needed).
+            // 20KB threshold gives comfortable headroom without false-blocking.
             uint32_t freeHeap = ESP.getFreeHeap();
-            if (freeHeap < 50000) {
+            if (freeHeap < 20000) {
                 Serial.printf("[WS] Skipping reconnect — low heap (%u bytes)\n", freeHeap);
                 lastConnectAttemptMs = now;  // don't spam
                 xSemaphoreGive(wsMutex);

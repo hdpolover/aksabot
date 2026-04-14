@@ -8,6 +8,8 @@ import {
   Message,
   Memory,
   ResponsePool,
+  MoodEntry,
+  FirmwareRelease,
 } from './entities';
 // Migrations imported for migrationsRun (disabled — using synchronize for now)
 // import { Init1775743820807 } from './migrations/1775743820807-Init';
@@ -23,7 +25,7 @@ import {
         username: config.get('DB_USER', 'aksabot'),
         password: config.get('DB_PASSWORD'),
         database: config.get('DB_NAME', 'aksabot'),
-        entities: [User, Device, Conversation, Message, Memory, ResponsePool],
+        entities: [User, Device, Conversation, Message, Memory, ResponsePool, MoodEntry, FirmwareRelease],
         synchronize: true,
       }),
     }),

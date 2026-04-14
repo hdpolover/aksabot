@@ -1,0 +1,115 @@
+name: Build & Release Firmware
+
+# Trigger on version tags (e.g. git tag v1.2.0 && git push --tags)
+# Also runnable manually from the GitHub Actions tab.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version string (e.g. 1.2.0) — used when not running from a tag'
+        required: true
+        default: '0.0.0-dev'
+
+jobs:
+  build:
+    name: Build firmware (ESP32-S3)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Cache the PlatformIO toolchain — saves ~3 min on subsequent runs
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            firmware/.pio
+          key: ${{ runner.os }}-pio-${{ hashFiles('firmware/platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      # credentials.h is git-ignored — create a stub so the build succeeds.
+      # Real credentials are flashed via BLE provisioning at runtime.
+      - name: Create credentials stub
+        run: |
+          cat > firmware/include/credentials.h << 'EOF'
+          #pragma once
+          // Stub for CI — credentials are set via BLE provisioning at runtime
+          #define WIFI_SSID     "ci-stub"
+          #define WIFI_PASSWORD "ci-stub"
+          #define BACKEND_URL   "ws://ci-stub:4280/ws"
+          #define DEVICE_TOKEN  "ci-stub"
+          EOF
+
+      - name: Build firmware
+        working-directory: firmware
+        run: pio run -e esp32s3
+
+      # Derive version: use the git tag (strip leading "v"), or the manual input
+      - name: Derive version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag_name=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # Rename the binary to include the version so it's clear what was downloaded
+      - name: Rename binary
+        run: |
+          cp firmware/.pio/build/esp32s3/firmware.bin \
+             firmware/.pio/build/esp32s3/aksabot-firmware-${{ steps.version.outputs.version }}.bin
+
+      # ── GitHub Release ────────────────────────────────────────────────────
+      # Creates a release and attaches the .bin. Only runs when triggered by a tag.
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag_name }}
+          name: Aksabot Firmware ${{ steps.version.outputs.tag_name }}
+          body: |
+            ## Aksabot ESP32-S3 Firmware ${{ steps.version.outputs.tag_name }}
+
+            ### Installing via OTA
+            1. Upload the `.bin` to your backend:
+               ```bash
+               curl -X POST $BACKEND_URL/firmware \
+                 -H "Authorization: Bearer <your-jwt>" \
+                 -F "file=@aksabot-firmware-${{ steps.version.outputs.version }}.bin" \
+                 -F "version=${{ steps.version.outputs.version }}" \
+                 -F "changelog=See release notes"
+               ```
+            2. Open the Aksabot app → device → Firmware Update → Update Now.
+
+            ### Installing via USB (first flash)
+            ```bash
+            esptool.py --chip esp32s3 write_flash 0x0 aksabot-firmware-${{ steps.version.outputs.version }}.bin
+            ```
+          files: firmware/.pio/build/esp32s3/aksabot-firmware-${{ steps.version.outputs.version }}.bin
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+
+      # ── Auto-upload to backend ────────────────────────────────────────────
+      # Uncomment this step when you want CI to push the release directly to
+      # your backend. Add BACKEND_URL and BACKEND_JWT to GitHub repository secrets.
+      #
+      # - name: Upload firmware to Aksabot backend
+      #   if: startsWith(github.ref, 'refs/tags/')
+      #   run: |
+      #     curl --fail-with-body -X POST "${{ secrets.BACKEND_URL }}/firmware" \
+      #       -H "Authorization: Bearer ${{ secrets.BACKEND_JWT }}" \
+      #       -F "file=@firmware/.pio/build/esp32s3/aksabot-firmware-${{ steps.version.outputs.version }}.bin" \
+      #       -F "version=${{ steps.version.outputs.version }}" \
+      #       -F "changelog=Automated release from CI — see GitHub release for details"

@@ -417,7 +417,32 @@ static void onWsJson(const char* event, const char* data) {
             const char* sha256 = doc["sha256"] | "";
             const char* version = doc["version"] | "unknown";
             if (strlen(url) > 0 && strlen(sha256) > 0) {
-                ota_update::start(url, sha256, version);
+                // Progress callback — sends ota:progress every ~5% so the app
+                // can show a real progress bar via backend polling.
+                auto progressCb = [](uint8_t pct, const char* phase) {
+                    char buf[80];
+                    snprintf(buf, sizeof(buf), "{\"percent\":%d,\"phase\":\"%s\"}", pct, phase);
+                    ws_client::sendEvent("ota:progress", buf);
+                };
+
+                bool ok = ota_update::start(url, sha256, version, progressCb);
+
+                if (ok) {
+                    // Download + SHA-256 verified — switch to flashing phase
+                    ws_client::sendEvent("ota:progress", "{\"percent\":100,\"phase\":\"flashing\"}");
+                    // apply() flashes the partition and calls esp_restart() on success.
+                    // If it returns, something went wrong.
+                    ota_update::apply();
+                    // Unreachable on success — only reached on apply failure
+                    char errBuf[96];
+                    snprintf(errBuf, sizeof(errBuf), "{\"success\":false,\"error\":\"%s\"}", ota_update::getError());
+                    ws_client::sendEvent("ota:complete", errBuf);
+                } else {
+                    char errBuf[96];
+                    snprintf(errBuf, sizeof(errBuf), "{\"success\":false,\"error\":\"%s\"}", ota_update::getError());
+                    ws_client::sendEvent("ota:complete", errBuf);
+                    status_led::set(255, 0, 0, status_led::Pattern::FAST_BLINK);
+                }
             }
         }
     }

@@ -174,6 +174,7 @@ List<RouteBase> _deviceSubRoutes() {
       path: 'firmware',
       builder: (context, state) => FirmwareUpdatePage(
         deviceId: state.pathParameters['deviceId']!,
+        currentVersion: state.extra as String?,
       ),
     ),
     GoRoute(

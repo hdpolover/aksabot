@@ -1,0 +1,25 @@
+# ESP-IDF Kconfig overrides for Aksabot firmware
+# Applied by pioarduino during CMake configure step.
+#
+# Problem: MBEDTLS_ERR_SSL_ALLOC_FAILED (-32512) on every WSS connect attempt.
+# Root cause: ESP32-S3 internal SRAM is fragmented after 25 modules init.
+# Default mbedTLS buffers need ~40KB contiguous DRAM; only ~52KB free (fragmented).
+#
+# Fix 1 — Reduce SSL buffer sizes (most impactful).
+# Default is 16384 each (TLS max record size). WebSocket frames are <1KB;
+# 4096 is more than sufficient and cuts the contiguous-heap requirement from ~40KB to ~12KB.
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=4096
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
+
+# Fix 2 — Route mbedTLS allocations to PSRAM.
+# ESP32-S3 has 8MB PSRAM free; SSL context (~4-8KB) fits there with no fragmentation risk.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# Fix 3 — Allow large heap allocations to spill into PSRAM automatically.
+# Allocations ≤16KB stay in internal SRAM (safe for DMA, ISR, stack allocations).
+# Anything larger (e.g. SSL context overflow) goes to PSRAM automatically.
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+
+# Fix 4 — Allow WiFi stack and LwIP to use PSRAM, freeing ~30KB of internal heap.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
