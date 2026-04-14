@@ -142,7 +142,7 @@ static uint16_t blendRGB565(uint16_t fg, uint16_t bg, uint8_t alpha) {
 
 // Shared arena bounds (screen minus a small margin)
 static constexpr int ARENA_X0 = 15, ARENA_X1 = 225;
-static constexpr int ARENA_Y0 = 210, ARENA_Y1 = 305;
+static constexpr int ARENA_Y0 = 20, ARENA_Y1 = 309;
 
 enum class CatBehavior : uint8_t { WALK, SIT, LOOK_UP, PAW_UP, CHASE };
 

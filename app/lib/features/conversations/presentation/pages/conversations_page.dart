@@ -191,7 +191,7 @@ class _ConversationCard extends StatelessWidget {
                     if (conversation.preview != null) ...[
                       const SizedBox(height: 4),
                       Text(
-                        conversation.preview!,
+                        conversation.preview!.replaceAll(RegExp(r'\[[^\]]*\]'), '').trim(),
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: colors.onSurfaceVariant,
                         ),

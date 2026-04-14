@@ -167,7 +167,7 @@ class _MessageBubble extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              message.content,
+              message.content.replaceAll(RegExp(r'\[[^\]]*\]'), '').trim(),
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: isUser
                     ? colors.onPrimaryContainer
