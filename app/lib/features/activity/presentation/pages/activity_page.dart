@@ -8,13 +8,12 @@ import '../../../devices/domain/entities/device_entity.dart';
 import '../../../devices/domain/repositories/devices_repository.dart';
 import '../../../memories/domain/entities/memory_entity.dart';
 import '../../../memories/presentation/bloc/memories_bloc.dart';
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../../../core/widgets/empty_state.dart';
 
-/// Activity tab with segmented toggle between Conversations and Memories.
-///
-/// Shows a device picker when the user has multiple devices.
+/// Activity tab — segmented Conversations / Memories view with device picker.
 class ActivityPage extends StatefulWidget {
   const ActivityPage({super.key});
 
@@ -38,13 +37,11 @@ class _ActivityPageState extends State<ActivityPage> {
     final result = await sl<DevicesRepository>().getDevices();
     result.fold(
       (_) => setState(() => _resolving = false),
-      (devices) {
-        setState(() {
-          _devices = devices;
-          _selectedDevice = devices.isNotEmpty ? devices.first : null;
-          _resolving = false;
-        });
-      },
+      (devices) => setState(() {
+        _devices = devices;
+        _selectedDevice = devices.isNotEmpty ? devices.first : null;
+        _resolving = false;
+      }),
     );
   }
 
@@ -55,36 +52,27 @@ class _ActivityPageState extends State<ActivityPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Activity'),
-        actions: [
-          if (_devices.length > 1)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _selectedDevice?.id,
-                  icon: Icon(Icons.smart_toy_outlined, color: colors.onSurface),
-                  items: _devices.map((d) {
-                    return DropdownMenuItem(
-                      value: d.id,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.smart_toy_outlined, size: 16, color: colors.primary),
-                          const SizedBox(width: 8),
-                          Text(d.name),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (deviceId) {
-                    if (deviceId == null) return;
-                    final device = _devices.firstWhere((d) => d.id == deviceId);
-                    setState(() => _selectedDevice = device);
-                  },
-                ),
+        title: _selectedDevice == null
+            ? const Text('Activity')
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Activity'),
+                  Text(
+                    _selectedDevice!.name,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
-            ),
+        actions: [
+          if (_devices.length > 1) _DevicePicker(
+            devices: _devices,
+            selected: _selectedDevice,
+            onChanged: (d) => setState(() => _selectedDevice = d),
+          ),
         ],
       ),
       body: _buildBody(theme),
@@ -92,9 +80,7 @@ class _ActivityPageState extends State<ActivityPage> {
   }
 
   Widget _buildBody(ThemeData theme) {
-    if (_resolving) {
-      return const AppLoadingIndicator();
-    }
+    if (_resolving) return const AppLoadingIndicator();
 
     if (_selectedDevice == null) {
       return const EmptyState(
@@ -107,7 +93,10 @@ class _ActivityPageState extends State<ActivityPage> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.fromLTRB(
+            AppConstants.spacingLg, AppConstants.spacingSm,
+            AppConstants.spacingLg, AppConstants.spacingXs,
+          ),
           child: SegmentedButton<int>(
             segments: const [
               ButtonSegment(
@@ -118,13 +107,11 @@ class _ActivityPageState extends State<ActivityPage> {
               ButtonSegment(
                 value: 1,
                 label: Text('Memories'),
-                icon: Icon(Icons.psychology),
+                icon: Icon(Icons.psychology_outlined),
               ),
             ],
             selected: {_selectedSegment},
-            onSelectionChanged: (selection) {
-              setState(() => _selectedSegment = selection.first);
-            },
+            onSelectionChanged: (s) => setState(() => _selectedSegment = s.first),
             style: SegmentedButton.styleFrom(
               selectedForegroundColor: theme.colorScheme.onPrimary,
               selectedBackgroundColor: theme.colorScheme.primary,
@@ -148,7 +135,79 @@ class _ActivityPageState extends State<ActivityPage> {
 }
 
 // ---------------------------------------------------------------------------
-// Conversations view (uses ConversationsBloc)
+// Device picker (multi-device)
+// ---------------------------------------------------------------------------
+
+class _DevicePicker extends StatelessWidget {
+  final List<Device> devices;
+  final Device? selected;
+  final ValueChanged<Device> onChanged;
+
+  const _DevicePicker({
+    required this.devices,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.only(right: AppConstants.spacingSm),
+      child: PopupMenuButton<String>(
+        tooltip: 'Switch device',
+        initialValue: selected?.id,
+        onSelected: (id) => onChanged(devices.firstWhere((d) => d.id == id)),
+        itemBuilder: (_) => devices.map((d) {
+          final isSelected = d.id == selected?.id;
+          return PopupMenuItem<String>(
+            value: d.id,
+            child: Row(
+              children: [
+                Icon(
+                  d.isOnline ? Icons.smart_toy : Icons.smart_toy_outlined,
+                  size: AppConstants.iconSm,
+                  color: d.isOnline ? colors.primary : colors.outline,
+                ),
+                const SizedBox(width: AppConstants.spacingSm),
+                Text(
+                  d.name,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: isSelected ? FontWeight.bold : null,
+                    color: isSelected ? colors.primary : null,
+                  ),
+                ),
+                if (isSelected) ...[
+                  const Spacer(),
+                  Icon(Icons.check, size: AppConstants.iconSm, color: colors.primary),
+                ],
+              ],
+            ),
+          );
+        }).toList(),
+        child: Chip(
+          avatar: Icon(
+            Icons.smart_toy_outlined,
+            size: AppConstants.iconSm,
+            color: colors.onSecondaryContainer,
+          ),
+          label: Text(
+            selected?.name ?? '',
+            style: theme.textTheme.labelMedium,
+          ),
+          side: BorderSide.none,
+          backgroundColor: colors.secondaryContainer,
+          padding: EdgeInsets.zero,
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Conversations view
 // ---------------------------------------------------------------------------
 
 class _ConversationsView extends StatelessWidget {
@@ -158,44 +217,118 @@ class _ConversationsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
+    final colors = Theme.of(context).colorScheme;
 
     return BlocProvider(
       create: (_) => sl<ConversationsBloc>()..add(LoadConversations(deviceId)),
       child: BlocBuilder<ConversationsBloc, ConversationsState>(
         builder: (context, state) {
-          if (state is ConversationsLoading) {
-            return const AppLoadingIndicator();
-          }
+          if (state is ConversationsLoading) return const AppLoadingIndicator();
+
           if (state is ConversationsError) {
             return Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(state.message, style: TextStyle(color: colors.error)),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppConstants.spacingLg),
                   FilledButton.tonal(
-                    onPressed: () => context.read<ConversationsBloc>().add(LoadConversations(deviceId)),
+                    onPressed: () => context
+                        .read<ConversationsBloc>()
+                        .add(LoadConversations(deviceId)),
                     child: const Text('Retry'),
                   ),
                 ],
               ),
             );
           }
+
           if (state is ConversationsLoaded) {
-            if (state.conversations.isEmpty) {
+            // Filter handshake-only sessions (< 30s), same as conversations_page.dart
+            final real = state.conversations.where((c) {
+              if (c.endedAt == null) return true;
+              return c.duration!.inSeconds >= 30;
+            }).toList();
+
+            if (real.isEmpty) {
               return const EmptyState(
                 icon: Icons.chat_bubble_outline,
                 title: 'No conversations',
                 subtitle: 'Start talking to Aksa and your conversations will appear here.',
               );
             }
-            return _ConversationsList(
-              conversations: state.conversations,
-              deviceId: deviceId,
+
+            return RefreshIndicator(
+              onRefresh: () async =>
+                  context.read<ConversationsBloc>().add(LoadConversations(deviceId)),
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppConstants.spacingLg,
+                  vertical: AppConstants.spacingSm,
+                ),
+                itemCount: real.length,
+                itemBuilder: (context, index) {
+                  final conv = real[index];
+                  return Dismissible(
+                    key: ValueKey(conv.id),
+                    direction: DismissDirection.endToStart,
+                    background: Container(
+                      margin: const EdgeInsets.only(bottom: AppConstants.spacingSm),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.error,
+                        borderRadius:
+                            BorderRadius.circular(AppConstants.radiusMd),
+                      ),
+                      alignment: Alignment.centerRight,
+                      padding: const EdgeInsets.only(right: AppConstants.spacingXl),
+                      child: Icon(
+                        Icons.delete_outline,
+                        color: Theme.of(context).colorScheme.onError,
+                      ),
+                    ),
+                    confirmDismiss: (_) => showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Delete conversation?'),
+                        content: const Text(
+                          'This will permanently remove the conversation and all its messages.',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(ctx).pop(false),
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor:
+                                  Theme.of(context).colorScheme.error,
+                            ),
+                            onPressed: () => Navigator.of(ctx).pop(true),
+                            child: const Text('Delete'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    onDismissed: (_) => context
+                        .read<ConversationsBloc>()
+                        .add(DeleteConversation(conv.id)),
+                    child: _ConversationCard(
+                      conversation: conv,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => BlocProvider.value(
+                            value: context.read<ConversationsBloc>(),
+                            child: ConversationDetailPage(conversation: conv),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
             );
           }
+
           return const SizedBox.shrink();
         },
       ),
@@ -203,81 +336,12 @@ class _ConversationsView extends StatelessWidget {
   }
 }
 
-class _ConversationsList extends StatelessWidget {
-  final List<Conversation> conversations;
-  final String deviceId;
-
-  const _ConversationsList({
-    required this.conversations,
-    required this.deviceId,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return RefreshIndicator(
-      onRefresh: () async {
-        context.read<ConversationsBloc>().add(LoadConversations(deviceId));
-      },
-      child: ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: conversations.length,
-        itemBuilder: (context, index) {
-          final conversation = conversations[index];
-          return Dismissible(
-            key: ValueKey(conversation.id),
-            direction: DismissDirection.endToStart,
-            background: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.error,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              alignment: Alignment.centerRight,
-              padding: const EdgeInsets.only(right: 20),
-              child: Icon(
-                Icons.delete_outline,
-                color: Theme.of(context).colorScheme.onError,
-              ),
-            ),
-            confirmDismiss: (_) => showDialog<bool>(
-              context: context,
-              builder: (dialogContext) => AlertDialog(
-                title: const Text('Delete conversation?'),
-                content: const Text(
-                  'This will permanently remove the conversation and all its messages.',
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(false),
-                    child: const Text('Cancel'),
-                  ),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.error,
-                    ),
-                    onPressed: () => Navigator.of(dialogContext).pop(true),
-                    child: const Text('Delete'),
-                  ),
-                ],
-              ),
-            ),
-            onDismissed: (_) {
-              context
-                  .read<ConversationsBloc>()
-                  .add(DeleteConversation(conversation.id));
-            },
-            child: _ConversationTile(conversation: conversation),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _ConversationTile extends StatelessWidget {
+/// Conversation card — matches the design in conversations_page.dart.
+class _ConversationCard extends StatelessWidget {
   final Conversation conversation;
+  final VoidCallback onTap;
 
-  const _ConversationTile({required this.conversation});
+  const _ConversationCard({required this.conversation, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -286,73 +350,101 @@ class _ConversationTile extends StatelessWidget {
     final isOngoing = conversation.endedAt == null;
     final duration = conversation.duration;
 
-    // Build subtitle: preview text + message count
-    final preview = conversation.preview;
-    final count = conversation.messageCount;
-    final countLabel = '$count msg${count == 1 ? '' : 's'}';
-    final subtitleText = (preview != null && preview.isNotEmpty)
-        ? '$preview · $countLabel'
-        : countLabel;
-
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      clipBehavior: Clip.antiAlias,
-      child: ListTile(
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => BlocProvider.value(
-              value: context.read<ConversationsBloc>(),
-              child: ConversationDetailPage(conversation: conversation),
-            ),
-          ),
-        ),
-        leading: CircleAvatar(
-          backgroundColor:
-              isOngoing ? colors.primaryContainer : colors.surfaceContainerHigh,
-          child: Icon(
-            isOngoing ? Icons.chat_bubble : Icons.chat_bubble_outline,
-            size: 18,
-            color: isOngoing ? colors.primary : colors.onSurfaceVariant,
-          ),
-        ),
-        title: Text(
-          _formatDate(conversation.startedAt),
-          style: theme.textTheme.bodyMedium
-              ?.copyWith(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          subtitleText,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodySmall
-              ?.copyWith(color: colors.onSurfaceVariant),
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (isOngoing)
+      margin: const EdgeInsets.only(bottom: AppConstants.spacingSm),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+        child: Padding(
+          padding: const EdgeInsets.all(AppConstants.spacingLg),
+          child: Row(
+            children: [
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
-                  color: colors.primaryContainer,
-                  borderRadius: BorderRadius.circular(4),
+                  color: isOngoing
+                      ? colors.primaryContainer
+                      : colors.surfaceContainerHighest,
+                  borderRadius:
+                      BorderRadius.circular(AppConstants.radiusMd),
                 ),
-                child: Text(
-                  'Live',
-                  style: theme.textTheme.labelSmall
-                      ?.copyWith(color: colors.primary),
+                child: Icon(
+                  isOngoing ? Icons.chat_bubble : Icons.chat_bubble_outline,
+                  size: AppConstants.iconMd,
+                  color: isOngoing
+                      ? colors.onPrimaryContainer
+                      : colors.onSurfaceVariant,
                 ),
-              )
-            else if (duration != null)
-              Text(
-                _formatDuration(duration),
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: colors.onSurfaceVariant),
               ),
-            const SizedBox(width: 4),
-            Icon(Icons.chevron_right_rounded, color: colors.outlineVariant),
-          ],
+              const SizedBox(width: AppConstants.radiusMd),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _formatDate(conversation.startedAt),
+                            style: theme.textTheme.titleSmall,
+                          ),
+                        ),
+                        if (isOngoing)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppConstants.spacingXs,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: colors.primaryContainer,
+                              borderRadius: BorderRadius.circular(
+                                  AppConstants.radiusSm),
+                            ),
+                            child: Text(
+                              'Live',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: colors.primary,
+                              ),
+                            ),
+                          )
+                        else if (duration != null)
+                          Text(
+                            _formatDuration(duration),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: colors.onSurfaceVariant,
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (conversation.preview != null &&
+                        conversation.preview!.isNotEmpty) ...[
+                      const SizedBox(height: AppConstants.spacingXs),
+                      Text(
+                        conversation.preview!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    if (conversation.messageCount > 0) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '${conversation.messageCount} '
+                        '${conversation.messageCount == 1 ? 'message' : 'messages'}',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colors.outline,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: colors.onSurfaceVariant),
+            ],
+          ),
         ),
       ),
     );
@@ -374,9 +466,7 @@ class _ConversationTile extends StatelessWidget {
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
-    if (d.year == now.year) {
-      return '${months[d.month - 1]} ${d.day} at $timeStr';
-    }
+    if (d.year == now.year) return '${months[d.month - 1]} ${d.day} at $timeStr';
     return '${d.day} ${months[d.month - 1]} ${d.year}';
   }
 
@@ -388,7 +478,7 @@ class _ConversationTile extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Memories view (uses MemoriesBloc)
+// Memories view
 // ---------------------------------------------------------------------------
 
 class _MemoriesView extends StatelessWidget {
@@ -425,22 +515,22 @@ class _MemoriesViewBody extends StatelessWidget {
               ? 'Scan failed'
               : extracted == 0
                   ? 'No new memories found'
-                  : 'Extracted $extracted new ${extracted == 1 ? 'memory' : 'memories'}';
+                  : 'Extracted $extracted new '
+                      '${extracted == 1 ? 'memory' : 'memories'}';
           ScaffoldMessenger.of(context)
               .showSnackBar(SnackBar(content: Text(msg)));
         }
       },
       builder: (context, state) {
-        if (state is MemoriesLoading) {
-          return const AppLoadingIndicator();
-        }
+        if (state is MemoriesLoading) return const AppLoadingIndicator();
+
         if (state is MemoriesError) {
           return Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(state.message, style: TextStyle(color: colors.error)),
-                const SizedBox(height: 16),
+                const SizedBox(height: AppConstants.spacingLg),
                 FilledButton.tonal(
                   onPressed: () =>
                       context.read<MemoriesBloc>().add(LoadMemories(deviceId)),
@@ -450,18 +540,27 @@ class _MemoriesViewBody extends StatelessWidget {
             ),
           );
         }
+
         if (state is MemoriesLoaded) {
-          final scanning = state.scanning;
           return Column(
             children: [
               // Scan action bar
               Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: const EdgeInsets.fromLTRB(
+                  AppConstants.spacingLg, AppConstants.spacingXs,
+                  AppConstants.spacingLg, 0,
+                ),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    if (scanning)
+                    Text(
+                      '${state.memories.length} '
+                      '${state.memories.length == 1 ? 'memory' : 'memories'}',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                    ),
+                    if (state.scanning)
                       const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -470,7 +569,7 @@ class _MemoriesViewBody extends StatelessWidget {
                             height: 14,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           ),
-                          SizedBox(width: 8),
+                          SizedBox(width: AppConstants.spacingSm),
                           Text('Scanning...'),
                         ],
                       )
@@ -479,8 +578,8 @@ class _MemoriesViewBody extends StatelessWidget {
                         onPressed: () => context
                             .read<MemoriesBloc>()
                             .add(ScanMemories(deviceId)),
-                        icon: const Icon(Icons.manage_search_rounded, size: 18),
-                        label: const Text('Scan for memories'),
+                        icon: const Icon(Icons.manage_search_rounded, size: 16),
+                        label: const Text('Scan'),
                       ),
                   ],
                 ),
@@ -489,7 +588,7 @@ class _MemoriesViewBody extends StatelessWidget {
                 const Expanded(
                   child: EmptyState(
                     icon: Icons.psychology_outlined,
-                    title: 'No memories',
+                    title: 'No memories yet',
                     subtitle:
                         'Aksa will remember things about you as you chat.',
                   ),
@@ -505,6 +604,7 @@ class _MemoriesViewBody extends StatelessWidget {
             ],
           );
         }
+
         return const SizedBox.shrink();
       },
     );
@@ -526,8 +626,8 @@ class _MemoriesContent extends StatelessWidget {
 
   Map<String, List<Memory>> get _grouped {
     final map = <String, List<Memory>>{};
-    for (final memory in memories) {
-      map.putIfAbsent(memory.category, () => []).add(memory);
+    for (final m in memories) {
+      map.putIfAbsent(m.category, () => []).add(m);
     }
     return map;
   }
@@ -536,53 +636,68 @@ class _MemoriesContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final grouped = _grouped;
     final sortedCategories = grouped.keys.toList()..sort();
+    final categories = _categories.toList()..sort();
 
-    return RefreshIndicator(
-      onRefresh: () async {
-        context.read<MemoriesBloc>().add(LoadMemories(deviceId, category: selectedCategory));
-      },
-      child: Column(
-        children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                FilterChip(
-                  label: const Text('All'),
-                  selected: selectedCategory == null,
-                  onSelected: (_) => context.read<MemoriesBloc>().add(LoadMemories(deviceId)),
-                ),
-                const SizedBox(width: 8),
-                ..._categories.map((cat) => Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: FilterChip(
-                        label: Text(cat),
-                        selected: selectedCategory == cat,
-                        onSelected: (_) {
-                          final newCat = selectedCategory == cat ? null : cat;
-                          context.read<MemoriesBloc>().add(LoadMemories(deviceId, category: newCat));
-                        },
-                      ),
-                    )),
-              ],
-            ),
+    return Column(
+      children: [
+        // Category filter chips — outside RefreshIndicator (not scrollable itself)
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppConstants.spacingLg,
+            vertical: AppConstants.spacingSm,
           ),
-          Expanded(
+          child: Row(
+            children: [
+              FilterChip(
+                label: const Text('All'),
+                selected: selectedCategory == null,
+                onSelected: (_) =>
+                    context.read<MemoriesBloc>().add(LoadMemories(deviceId)),
+              ),
+              ...categories.map(
+                (cat) => Padding(
+                  padding:
+                      const EdgeInsets.only(left: AppConstants.spacingSm),
+                  child: FilterChip(
+                    label: Text(cat),
+                    selected: selectedCategory == cat,
+                    onSelected: (_) {
+                      final next = selectedCategory == cat ? null : cat;
+                      context
+                          .read<MemoriesBloc>()
+                          .add(LoadMemories(deviceId, category: next));
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Memories list — RefreshIndicator wraps only the scrollable ListView
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () async => context
+                .read<MemoriesBloc>()
+                .add(LoadMemories(deviceId, category: selectedCategory)),
             child: ListView.builder(
+              padding: const EdgeInsets.only(
+                bottom: AppConstants.spacingXxxl,
+              ),
               itemCount: sortedCategories.length,
               itemBuilder: (context, index) {
                 final category = sortedCategories[index];
-                final items = grouped[category]!;
                 return _CategorySection(
                   category: category,
-                  memories: items,
+                  memories: grouped[category]!,
+                  deviceId: deviceId,
                 );
               },
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -590,10 +705,12 @@ class _MemoriesContent extends StatelessWidget {
 class _CategorySection extends StatelessWidget {
   final String category;
   final List<Memory> memories;
+  final String deviceId;
 
   const _CategorySection({
     required this.category,
     required this.memories,
+    required this.deviceId,
   });
 
   @override
@@ -604,53 +721,225 @@ class _CategorySection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          padding: const EdgeInsets.fromLTRB(
+            AppConstants.spacingLg,
+            AppConstants.spacingLg,
+            AppConstants.spacingLg,
+            AppConstants.spacingXs,
+          ),
           child: Text(
             category,
-            style: theme.textTheme.titleSmall?.copyWith(
+            style: theme.textTheme.labelLarge?.copyWith(
               color: theme.colorScheme.primary,
-              fontWeight: FontWeight.bold,
             ),
           ),
         ),
         ...memories.map(
-          (memory) => Dismissible(
-            key: ValueKey(memory.id),
-            direction: DismissDirection.endToStart,
-            background: Container(
-              alignment: Alignment.centerRight,
-              padding: const EdgeInsets.only(right: 16),
-              color: theme.colorScheme.error,
-              child: Icon(Icons.delete, color: theme.colorScheme.onError),
+          (memory) => _DismissibleMemory(memory: memory),
+        ),
+      ],
+    );
+  }
+}
+
+class _DismissibleMemory extends StatelessWidget {
+  final Memory memory;
+
+  const _DismissibleMemory({required this.memory});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Dismissible(
+      key: ValueKey(memory.id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        margin: const EdgeInsets.symmetric(
+          horizontal: AppConstants.spacingLg,
+          vertical: AppConstants.spacingXs,
+        ),
+        decoration: BoxDecoration(
+          color: colors.error,
+          borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+        ),
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: AppConstants.spacingXl),
+        child: Icon(Icons.delete_outline, color: colors.onError),
+      ),
+      confirmDismiss: (_) => showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Delete memory?'),
+          content: Text(
+            memory.fact,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
             ),
-            confirmDismiss: (_) => showDialog<bool>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: const Text('Delete memory?'),
-                content: Text(memory.fact),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Cancel'),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: colors.error),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      ),
+      onDismissed: (_) =>
+          context.read<MemoriesBloc>().add(DeleteMemory(memory.id)),
+      child: _MemoryCard(memory: memory),
+    );
+  }
+}
+
+/// Memory card with confidence indicator and edit action.
+class _MemoryCard extends StatelessWidget {
+  final Memory memory;
+
+  const _MemoryCard({required this.memory});
+
+  Color _confidenceColor(double confidence, ColorScheme colors) {
+    if (confidence >= 0.7) return colors.primary;
+    if (confidence >= 0.4) return colors.tertiary;
+    return colors.error;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final pct = (memory.confidence * 100).round();
+    final confColor = _confidenceColor(memory.confidence, colors);
+    final date = memory.createdAt.toLocal();
+
+    return Card(
+      margin: const EdgeInsets.symmetric(
+        horizontal: AppConstants.spacingLg,
+        vertical: AppConstants.spacingXs,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppConstants.spacingLg,
+          AppConstants.radiusMd,
+          AppConstants.spacingSm,
+          AppConstants.radiusMd,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Fact text
+                  Text(
+                    memory.fact,
+                    style: theme.textTheme.bodyMedium,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    child: const Text('Delete'),
+                  const SizedBox(height: AppConstants.spacingSm),
+                  // Confidence bar
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius:
+                              BorderRadius.circular(AppConstants.radiusFull),
+                          child: LinearProgressIndicator(
+                            value: memory.confidence,
+                            backgroundColor:
+                                colors.surfaceContainerHighest,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(confColor),
+                            minHeight: 4,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: AppConstants.spacingSm),
+                      Text(
+                        '$pct%',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: confColor,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppConstants.spacingXs),
+                  // Created date
+                  Text(
+                    _formatDate(date),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: colors.outline,
+                    ),
                   ),
                 ],
               ),
             ),
-            onDismissed: (_) =>
-                context.read<MemoriesBloc>().add(DeleteMemory(memory.id)),
-            child: ListTile(
-              title: Text(memory.fact),
-              subtitle: Text(
-                'Confidence: ${(memory.confidence * 100).toStringAsFixed(0)}%',
-              ),
+            // Edit button
+            IconButton(
+              onPressed: () => _showEditDialog(context),
+              icon: const Icon(Icons.edit_outlined),
+              iconSize: AppConstants.iconMd,
+              color: colors.onSurfaceVariant,
+              tooltip: 'Edit memory',
+              visualDensity: VisualDensity.compact,
             ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
+  }
+
+  Future<void> _showEditDialog(BuildContext context) async {
+    final bloc = context.read<MemoriesBloc>();
+    final controller = TextEditingController(text: memory.fact);
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit memory'),
+        content: TextField(
+          controller: controller,
+          maxLines: 4,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Memory fact',
+            border: OutlineInputBorder(),
+          ),
+          textCapitalization: TextCapitalization.sentences,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    controller.dispose();
+
+    if (result != null && result.isNotEmpty && result != memory.fact) {
+      bloc.add(UpdateMemory(memory.id, fact: result));
+    }
+  }
+
+  String _formatDate(DateTime d) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${d.day} ${months[d.month - 1]} ${d.year}';
   }
 }

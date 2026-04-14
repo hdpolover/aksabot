@@ -806,8 +806,9 @@ static void onTouchEvent(touch::Event event) {
             if (appState.botState == BotState::INTERCOM) {
                 face::setExpression(face::Expression::LISTENING, 100);
                 appState.listenTrigger = ListenTrigger::INTERCOM_REPLY;
-                appState.botState      = BotState::LISTENING;
+                // Play chime BEFORE setting LISTENING — ogg_player::playFile() blocks on LISTENING.
                 ui_audio::play(ui_audio::Clip::HOLD_START);
+                appState.botState = BotState::LISTENING;
                 if (appState.wsConnected) {
                     ws_client::sendEvent("intercom:reply:start");
                 }

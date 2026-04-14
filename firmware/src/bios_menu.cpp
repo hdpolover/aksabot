@@ -17,14 +17,17 @@
 
 extern LGFX tft;
 
-// ── Colors ────────────────────────────────────────────────
+// ── Color palette ─────────────────────────────────────────
 static const uint16_t BG     = TFT_BLACK;
 static const uint16_t WHITE  = TFT_WHITE;
-static const uint16_t CYAN   = TFT_WHITE;
+static const uint16_t CYAN   = 0x07FF;   // bright cyan accent (was TFT_WHITE — fixed)
 static const uint16_t GREEN  = 0x07E0;
 static const uint16_t RED    = TFT_RED;
 static const uint16_t YELLOW = TFT_YELLOW;
-static const uint16_t DIM    = 0x8C71;
+static const uint16_t DIM    = 0x8C71;   // medium grey
+static const uint16_t DIMMER = 0x2104;   // dark grey for separators
+static const uint16_t HILITE = 0x0A2A;   // dark teal for selection bg
+static const uint16_t HDR_BG = 0x0010;   // dark navy for header bar
 
 static const int CX = LCD_WIDTH / 2;
 
@@ -48,12 +51,21 @@ static uint16_t wifiColor(int rssi) {
 
 static void cls() { tft.fillScreen(BG); }
 
-static void drawCentered(const char* text, int y, uint16_t color, float size = 1.0) {
-    tft.setTextColor(color);
+/// Dark navy header bar with cyan title (left), optional sub-label (right), cyan underline.
+static void drawHeader(const char* title, const char* sub = nullptr) {
+    tft.fillRect(0, 0, LCD_WIDTH, 26, HDR_BG);
     tft.setFont(&fonts::FreeSans9pt7b);
-    tft.setTextSize(size);
-    tft.setTextDatum(lgfx::top_center);
-    tft.drawString(text, CX, y);
+    tft.setTextSize(1);
+    tft.setTextColor(CYAN);
+    tft.setTextDatum(lgfx::top_left);
+    tft.drawString(title, 10, 6);
+    if (sub) {
+        tft.setFont(&fonts::Font2);
+        tft.setTextColor(DIM);
+        tft.setTextDatum(lgfx::top_right);
+        tft.drawString(sub, LCD_WIDTH - 10, 9);
+    }
+    tft.drawFastHLine(0, 26, LCD_WIDTH, CYAN);
 }
 
 static void drawSmall(const char* text, int y, uint16_t color) {
@@ -80,11 +92,21 @@ static void drawRight(const char* text, int x, int y, uint16_t color) {
     tft.drawString(text, x, y);
 }
 
-/// Draw a tappable "Back" bar at the bottom. Returns its Y position for hit testing.
+/// 5×5 solid status indicator dot.
+static void drawDot(int x, int y, uint16_t color) {
+    tft.fillRect(x, y, 5, 5, color);
+}
+
+/// Styled Back button at bottom. Returns its Y for hit testing.
 static int drawBackBar() {
     const int y = 290;
-    tft.drawFastHLine(10, y - 2, LCD_WIDTH - 20, DIM);
-    drawSmall("< Back", y + 4, DIM);
+    tft.fillRect(8, y, LCD_WIDTH - 16, 22, HILITE);
+    tft.drawRect(8, y, LCD_WIDTH - 16, 22, DIM);
+    tft.setTextColor(DIM);
+    tft.setFont(&fonts::Font2);
+    tft.setTextSize(1);
+    tft.setTextDatum(lgfx::top_center);
+    tft.drawString("< Back", CX, y + 5);
     return y;
 }
 
@@ -110,23 +132,19 @@ static int waitTapY() {
 
         if (tft.getTouch(&tp, 1) > 0) {
             int tapY = (LCD_HEIGHT - 1) - tp.y;
-
             while (tft.getTouch(&tp, 1) > 0) delay(15);
             delay(50);
-
             if (tapY >= 0) {
                 ui_audio::play(ui_audio::Clip::TAP);
                 return tapY;
             }
         }
-
         delay(20);
     }
 }
 
-/// Wait for tap on the Back bar (or anywhere, really). Returns when tapped.
 static void waitForBack() {
-    waitTapY();  // any tap or BOOT dismisses
+    waitTapY();
 }
 
 // ── List menu helper ──────────────────────────────────────
@@ -141,14 +159,14 @@ struct MenuDef {
 
 static void drawList(const MenuDef& m) {
     cls();
-    drawCentered(m.title, 4, CYAN);
-    tft.drawFastHLine(10, 26, LCD_WIDTH - 20, DIM);
-
+    drawHeader(m.title);
     for (int i = 0; i < m.count; i++) {
         int y = m.top + i * m.itemH;
-        tft.drawFastHLine(10, y + m.itemH - 1, LCD_WIDTH - 20, 0x2104);
-        drawLeft(m.items[i], 16, y + 5, WHITE);
+        tft.drawFastHLine(0, y, LCD_WIDTH, DIMMER);
+        drawLeft(m.items[i], 20, y + 7, WHITE);
+        drawRight(">", LCD_WIDTH - 10, y + 7, DIMMER);
     }
+    tft.drawFastHLine(0, m.top + m.count * m.itemH, LCD_WIDTH, DIMMER);
 }
 
 static int menuLoop(const MenuDef& m) {
@@ -161,54 +179,66 @@ static int menuLoop(const MenuDef& m) {
         if (idx < 0 || idx >= m.count) continue;
 
         int fy = m.top + idx * m.itemH;
-        tft.fillRect(8, fy, LCD_WIDTH - 16, m.itemH - 1, 0x0A2A);
-        drawLeft(m.items[idx], 16, fy + 5, CYAN);
-        delay(100);
+        // Highlight: dark teal bg + 3px cyan left accent bar
+        tft.fillRect(0, fy + 1, LCD_WIDTH, m.itemH - 2, HILITE);
+        tft.fillRect(0, fy + 1, 3, m.itemH - 2, CYAN);
+        drawLeft(m.items[idx], 20, fy + 7, CYAN);
+        delay(120);
 
         return idx;
     }
 }
 
-// ── Sub-screen: Wi-Fi (scan + setup combined) ────────────
+// ── Sub-screen: Wi-Fi ────────────────────────────────────
 
 static bool wifiScreen() {
     bool setupRequested = false;
 
     for (;;) {
         cls();
-        drawCentered("Wi-Fi", 4, CYAN);
-        tft.drawFastHLine(10, 26, LCD_WIDTH - 20, DIM);
+        drawHeader("Wi-Fi");
 
         int y = 32;
         if (WiFi.isConnected()) {
             int rssi = WiFi.RSSI();
-            char statusStr[40];
-            snprintf(statusStr, sizeof(statusStr), "%s  %s (%d)",
-                     WiFi.SSID().c_str(), wifiLabel(rssi), rssi);
-            drawLeft("Connected", 12, y, GREEN);
+            uint16_t rc = wifiColor(rssi);
+
+            // SSID prominently
+            drawLeft(WiFi.SSID().c_str(), 12, y, WHITE);
             y += 16;
-            drawLeft(statusStr, 12, y, wifiColor(rssi));
+
+            // Signal dot + label
+            drawDot(12, y + 4, rc);
+            char sigStr[32];
+            snprintf(sigStr, sizeof(sigStr), "%s  %d dBm", wifiLabel(rssi), rssi);
+            drawLeft(sigStr, 22, y, rc);
             y += 16;
-            char ipStr[24];
-            snprintf(ipStr, sizeof(ipStr), "IP: %s", WiFi.localIP().toString().c_str());
+
+            // IP address
+            char ipStr[28];
+            snprintf(ipStr, sizeof(ipStr), "IP  %s", WiFi.localIP().toString().c_str());
             drawLeft(ipStr, 12, y, DIM);
             y += 20;
         } else {
-            drawLeft("Not connected", 12, y, RED);
+            drawDot(12, y + 4, RED);
+            drawLeft("Not connected", 22, y, RED);
             y += 20;
         }
 
-        tft.drawFastHLine(10, y, LCD_WIDTH - 20, DIM);
-        y += 6;
+        tft.drawFastHLine(0, y + 2, LCD_WIDTH, DIMMER);
+        y += 8;
 
         const char* items[] = { "Scan Networks", "Change Network", "Back" };
         const int itemH = 28;
         const int menuTop = y;
 
         for (int i = 0; i < 3; i++) {
-            tft.drawFastHLine(10, menuTop + i * itemH + itemH - 1, LCD_WIDTH - 20, 0x2104);
-            drawLeft(items[i], 16, menuTop + i * itemH + 5, WHITE);
+            int iy = menuTop + i * itemH;
+            tft.drawFastHLine(0, iy, LCD_WIDTH, DIMMER);
+            drawLeft(items[i], 20, iy + 7, WHITE);
+            if (i < 2) drawRight(">", LCD_WIDTH - 10, iy + 7, DIMMER);
         }
+        tft.drawFastHLine(0, menuTop + 3 * itemH, LCD_WIDTH, DIMMER);
 
         int tapY = waitTapY();
         if (tapY < 0) break;
@@ -217,64 +247,71 @@ static bool wifiScreen() {
         if (idx == 0) {
             // Scan
             cls();
-            drawSmall("Scanning...", 140, WHITE);
+            drawHeader("Networks", "Scanning...");
+            drawSmall("Searching for networks", 140, DIM);
+            drawSmall("Please wait...", 158, DIMMER);
+
             WiFi.mode(WIFI_STA);
             int n = WiFi.scanNetworks();
 
-            cls();
-            drawCentered("Networks", 4, CYAN);
-            tft.drawFastHLine(10, 26, LCD_WIDTH - 20, DIM);
-
             if (n <= 0) {
-                drawSmall("No networks found", 140, RED);
+                cls();
+                drawHeader("Networks");
+                drawSmall("No networks found", 140, DIM);
                 drawBackBar();
                 waitForBack();
                 WiFi.scanDelete();
                 continue;
             }
 
+            char hdrStr[12];
+            snprintf(hdrStr, sizeof(hdrStr), "%d found", n);
+
             int page = 0;
             const int perPage = 9;
             int totalPages = (n + perPage - 1) / perPage;
 
             auto drawPage = [&]() {
-                tft.fillRect(0, 28, LCD_WIDTH, 255, BG);
-                char hdr[32];
-                snprintf(hdr, sizeof(hdr), "%d found", n);
-                drawSmall(hdr, 28, DIM);
+                cls();
+                drawHeader("Networks", hdrStr);
 
                 int start = page * perPage;
                 int end2 = start + perPage;
                 if (end2 > n) end2 = n;
 
                 for (int i = start; i < end2; i++) {
-                    int ly = 46 + (i - start) * 22;
+                    int ly = 32 + (i - start) * 22;
                     int r = WiFi.RSSI(i);
                     int bars = (r > -50) ? 4 : (r > -60) ? 3 : (r > -70) ? 2 : 1;
 
+                    // Taller, more visible signal bars
                     for (int b = 0; b < 4; b++) {
-                        int bx = LCD_WIDTH - 32 + b * 6;
-                        int bh = 3 + b * 3;
-                        tft.fillRect(bx, ly + 14 - bh, 4, bh, (b < bars) ? GREEN : 0x4208);
+                        int bx = LCD_WIDTH - 34 + b * 7;
+                        int bh = 4 + b * 4;  // 4, 8, 12, 16 px
+                        tft.fillRect(bx, ly + 16 - bh, 5, bh, (b < bars) ? GREEN : DIMMER);
                     }
 
-                    char ssidStr[22];
+                    // Lock icon
+                    if (WiFi.encryptionType(i) != WIFI_AUTH_OPEN)
+                        drawLeft("*", 8, ly, YELLOW);
+
+                    // SSID
+                    char ssidStr[20];
                     String ssid = WiFi.SSID(i);
-                    if (ssid.length() > 18) {
-                        snprintf(ssidStr, sizeof(ssidStr), "%.15s...", ssid.c_str());
+                    if (ssid.length() > 15) {
+                        snprintf(ssidStr, sizeof(ssidStr), "%.12s...", ssid.c_str());
                     } else {
                         strncpy(ssidStr, ssid.c_str(), sizeof(ssidStr) - 1);
                         ssidStr[sizeof(ssidStr) - 1] = '\0';
                     }
-                    if (WiFi.encryptionType(i) != WIFI_AUTH_OPEN)
-                        drawLeft("*", 8, ly, YELLOW);
-                    drawLeft(ssidStr, 16, ly, WHITE);
+                    drawLeft(ssidStr, 18, ly, WHITE);
+                    tft.drawFastHLine(0, ly + 20, LCD_WIDTH, DIMMER);
                 }
 
                 if (totalPages > 1) {
-                    char pg[16];
-                    snprintf(pg, sizeof(pg), "Page %d/%d  Tap:next", page + 1, totalPages);
-                    drawSmall(pg, 275, DIM);
+                    char pg[24];
+                    snprintf(pg, sizeof(pg), "Page %d/%d  tap for next", page + 1, totalPages);
+                    drawSmall(pg, 273, DIM);
                 }
                 drawBackBar();
             };
@@ -282,7 +319,7 @@ static bool wifiScreen() {
             drawPage();
             for (;;) {
                 int ty = waitTapY();
-                if (ty < 0 || ty >= 288) break;  // BOOT or Back bar
+                if (ty < 0 || ty >= 288) break;
                 page = (page + 1) % totalPages;
                 drawPage();
             }
@@ -319,9 +356,9 @@ static void hardwareTestScreen() {
         if (sel < 0 || sel == 6) return;
 
         if (sel == 0) {
-            // Speaker beep
             cls();
-            drawSmall("Playing 800Hz...", 140, WHITE);
+            drawHeader("Speaker Test");
+            drawSmall("Playing 800 Hz tone...", 140, WHITE);
             int16_t buf[320];
             for (int off = 0; off < 16000; off += 320) {
                 int n = min(320, 16000 - off);
@@ -331,16 +368,17 @@ static void hardwareTestScreen() {
                 }
                 audio_io::writeSpeaker(buf, n);
             }
-            drawSmall("Done!", 165, GREEN);
+            drawDot(CX - 18, 163, GREEN);
+            drawLeft("Done!", CX - 10, 161, GREEN);
             drawBackBar();
             waitForBack();
         }
         else if (sel == 1) {
-            // Mic level
             cls();
-            drawSmall("Mic Level", 4, CYAN);
-            const int barX = 20, barY = 130, barW = LCD_WIDTH - 40, barH = 16;
-            tft.drawRect(barX - 1, barY - 1, barW + 2, barH + 2, DIM);
+            drawHeader("Mic Level");
+            drawSmall("Speak into the microphone", 36, DIM);
+            const int barX = 20, barY = 120, barW = LCD_WIDTH - 40, barH = 20;
+            tft.drawRect(barX - 1, barY - 1, barW + 2, barH + 2, DIMMER);
             drawBackBar();
 
             lgfx::touch_point_t tp2;
@@ -359,18 +397,18 @@ static void hardwareTestScreen() {
                     if (fillW < barW) tft.fillRect(barX + fillW, barY, barW - fillW, barH, BG);
                     char db[16];
                     snprintf(db, sizeof(db), "%.0f dB", 20.0f * log10f(level + 0.0001f));
-                    tft.fillRect(CX - 30, 155, 60, 18, BG);
-                    drawSmall(db, 155, WHITE);
+                    tft.fillRect(CX - 30, 150, 60, 18, BG);
+                    drawSmall(db, 150, WHITE);
                 }
             }
             while (tft.getTouch(&tp2, 1) > 0) delay(15);
             if (bootPressed()) waitBootRelease();
         }
         else if (sel == 2) {
-            // Echo test
             cls();
-            drawSmall("Echo Test", 4, CYAN);
+            drawHeader("Echo Test");
             drawSmall("Speak — you'll hear yourself", 120, WHITE);
+            drawSmall("Tap or hold BOOT to exit", 138, DIM);
             drawBackBar();
 
             lgfx::touch_point_t tp3;
@@ -383,33 +421,30 @@ static void hardwareTestScreen() {
             if (bootPressed()) waitBootRelease();
         }
         else if (sel == 3) {
-            // Touch test — draw dots where user touches
             cls();
-            drawSmall("Touch Test", 4, CYAN);
-            drawSmall("Touch the screen — dots appear", 24, DIM);
+            drawHeader("Touch Test");
+            drawSmall("Touch the screen — dots appear", 30, DIM);
             drawBackBar();
 
             while (!bootPressed()) {
                 lgfx::touch_point_t tp4;
                 if (tft.getTouch(&tp4, 1) > 0) {
-                    // Y axis is inverted on this panel (same as waitTapY)
                     int drawY = (LCD_HEIGHT - 1) - tp4.y;
-                    // Tap on back bar area → exit
                     if (drawY >= 288) {
                         while (tft.getTouch(&tp4, 1) > 0) delay(15);
                         break;
                     }
-                    tft.fillCircle(tp4.x, drawY, 4, GREEN);
+                    tft.fillCircle(tp4.x, drawY, 5, CYAN);
                 }
                 delay(15);
             }
             if (bootPressed()) waitBootRelease();
         }
         else if (sel == 4) {
-            // LED test — cycle through colors
             cls();
-            drawSmall("LED Test", 4, CYAN);
-            drawSmall("Cycling RGB...", 140, WHITE);
+            drawHeader("LED Test");
+            drawSmall("Cycling RGB colors...", 130, DIM);
+            drawSmall("Tap to exit", 148, DIMMER);
             drawBackBar();
 
             struct { uint8_t r, g, b; const char* name; } colors[] = {
@@ -420,11 +455,11 @@ static void hardwareTestScreen() {
             lgfx::touch_point_t tp5;
             int ci = 0;
             while (tft.getTouch(&tp5, 1) == 0 && !bootPressed()) {
-                tft.fillRect(CX - 40, 190, 80, 20, BG);
-                drawSmall(colors[ci].name, 190, WHITE);
+                tft.fillRect(CX - 40, 106, 80, 18, BG);
+                drawSmall(colors[ci].name, 106, WHITE);
                 status_led::set(colors[ci].r, colors[ci].g, colors[ci].b);
                 for (int w = 0; w < 40 && tft.getTouch(&tp5, 1) == 0 && !bootPressed(); w++) {
-                    status_led::tick(millis());  // pump LED update (main loop not running)
+                    status_led::tick(millis());
                     delay(25);
                 }
                 ci = (ci + 1) % 7;
@@ -436,19 +471,22 @@ static void hardwareTestScreen() {
         else if (sel == 5) {
             // Run all checks
             cls();
-            drawCentered("All Checks", 4, CYAN);
-            tft.drawFastHLine(10, 26, LCD_WIDTH - 20, DIM);
+            drawHeader("All Checks");
 
-            int y = 36;
+            int y = 32;
             const int lineH = 22;
-            const int valX = LCD_WIDTH - 14;
+            const int valX = LCD_WIDTH - 12;
 
             auto checkLine = [&](const char* label, bool ok, const char* detail = nullptr) {
-                drawLeft(label, 14, y, WHITE);
+                // Alternating row tint
+                if (((y - 32) / lineH) % 2 == 1)
+                    tft.fillRect(0, y, LCD_WIDTH, lineH, 0x0821);
+                drawDot(10, y + 8, ok ? GREEN : RED);
+                drawLeft(label, 20, y + 4, WHITE);
                 if (detail) {
-                    drawRight(detail, valX, y, ok ? GREEN : YELLOW);
+                    drawRight(detail, valX, y + 4, ok ? GREEN : YELLOW);
                 } else {
-                    drawRight(ok ? "OK" : "FAIL", valX, y, ok ? GREEN : RED);
+                    drawRight(ok ? "OK" : "FAIL", valX, y + 4, ok ? GREEN : RED);
                 }
                 y += lineH;
             };
@@ -459,7 +497,7 @@ static void hardwareTestScreen() {
                       sd_storage::isMounted() ? "Mounted" : "Missing");
             checkLine("Audio", true, "ES8311");
             checkLine("Wi-Fi", WiFi.isConnected(),
-                      WiFi.isConnected() ? "Connected" : "No connection");
+                      WiFi.isConnected() ? "Connected" : "No conn.");
 
             char psramStr[16];
             snprintf(psramStr, sizeof(psramStr), "%uKB free",
@@ -469,26 +507,32 @@ static void hardwareTestScreen() {
             bool hasToken = nvs_store::hasDeviceToken();
             checkLine("Token", hasToken, hasToken ? "Set" : "Not set");
 
-            // Quick speaker beep
-            drawLeft("Speaker", 14, y, WHITE);
-            drawRight("Testing...", valX, y, DIM);
+            // Speaker beep
+            if (((y - 32) / lineH) % 2 == 1)
+                tft.fillRect(0, y, LCD_WIDTH, lineH, 0x0821);
+            drawLeft("Speaker", 20, y + 4, WHITE);
+            drawRight("Testing...", valX, y + 4, DIM);
             int16_t beep[320];
             for (int i = 0; i < 320; i++) {
                 float t = (float)i / 16000.0f;
                 beep[i] = (int16_t)(8000.0f * sinf(2.0f * PI * 1000.0f * t));
             }
             audio_io::writeSpeaker(beep, 320);
-            tft.fillRect(valX - 60, y, 74, lineH, BG);
-            drawRight("OK", valX, y, GREEN);
+            tft.fillRect(valX - 60, y + 4, 74, lineH - 4, BG);
+            drawDot(10, y + 8, GREEN);
+            drawRight("OK", valX, y + 4, GREEN);
             y += lineH;
 
-            // Quick LED flash
-            drawLeft("LED", 14, y, WHITE);
+            // LED flash
+            if (((y - 32) / lineH) % 2 == 1)
+                tft.fillRect(0, y, LCD_WIDTH, lineH, 0x0821);
+            drawLeft("LED", 20, y + 4, WHITE);
             status_led::set(0, 255, 0);
             for (int w = 0; w < 12; w++) { status_led::tick(millis()); delay(25); }
             status_led::syncToState();
             status_led::tick(millis());
-            drawRight("OK", valX, y, GREEN);
+            drawDot(10, y + 8, GREEN);
+            drawRight("OK", valX, y + 4, GREEN);
 
             drawBackBar();
             waitForBack();
@@ -500,16 +544,18 @@ static void hardwareTestScreen() {
 
 static void systemInfoScreen() {
     cls();
-    drawCentered("System Info", 4, CYAN);
-    tft.drawFastHLine(10, 26, LCD_WIDTH - 20, DIM);
+    drawHeader("System Info");
 
     int y = 32;
     const int lineH = 20;
+    int row = 0;
 
     auto line = [&](const char* label, const char* value) {
-        drawLeft(label, 10, y, DIM);
-        drawRight(value, LCD_WIDTH - 10, y, WHITE);
+        if (row % 2 == 1) tft.fillRect(0, y, LCD_WIDTH, lineH, 0x0821);  // subtle row tint
+        drawLeft(label, 10, y + 3, DIM);
+        drawRight(value, LCD_WIDTH - 10, y + 3, WHITE);
         y += lineH;
+        row++;
     };
 
     esp_chip_info_t chip;
@@ -552,19 +598,37 @@ static void systemInfoScreen() {
 
 static void factoryResetScreen() {
     cls();
-    drawCentered("Factory Reset?", 4, RED);
-    tft.drawFastHLine(10, 26, LCD_WIDTH - 20, DIM);
-    drawSmall("This will erase WiFi,", 30, WHITE);
-    drawSmall("device token, and all settings.", 46, WHITE);
 
-    const char* items[] = { "Yes, erase everything", "No, go back" };
-    for (int i = 0; i < 2; i++) {
-        int y = 80 + i * 32;
-        tft.drawFastHLine(10, y + 31, LCD_WIDTH - 20, 0x2104);
-        uint16_t col = (i == 0) ? RED : GREEN;
-        drawLeft(items[i], 16, y + 7, col);
-    }
+    // Red header for destructive action
+    tft.fillRect(0, 0, LCD_WIDTH, 26, 0x4000);
+    tft.setFont(&fonts::FreeSans9pt7b);
+    tft.setTextSize(1);
+    tft.setTextColor(RED);
+    tft.setTextDatum(lgfx::top_left);
+    tft.drawString("Factory Reset", 10, 6);
+    tft.drawFastHLine(0, 26, LCD_WIDTH, RED);
 
+    // Warning text
+    drawSmall("This will erase all settings,", 36, WHITE);
+    drawSmall("Wi-Fi credentials, and token.", 52, WHITE);
+    drawSmall("This cannot be undone.", 70, YELLOW);
+
+    // Confirm button — dark red bg with red border
+    tft.fillRect(10, 92, LCD_WIDTH - 20, 30, 0x2000);
+    tft.drawRect(10, 92, LCD_WIDTH - 20, 30, RED);
+    tft.setFont(&fonts::Font2);
+    tft.setTextSize(1);
+    tft.setTextColor(RED);
+    tft.setTextDatum(lgfx::top_center);
+    tft.drawString("Yes, erase everything", CX, 101);
+
+    // Cancel button — outlined green
+    tft.drawRect(10, 130, LCD_WIDTH - 20, 30, GREEN);
+    tft.setTextColor(GREEN);
+    tft.drawString("No, go back", CX, 139);
+
+    // Hit zones: idx 0 = y 80..111 (80 + 0*32), idx 1 = y 112..143 (80 + 1*32)
+    // We draw buttons at y=92 and y=130 but keep original tap zones at 80..111 and 112..143
     for (;;) {
         int tapY = waitTapY();
         if (tapY < 0) return;
@@ -572,10 +636,16 @@ static void factoryResetScreen() {
         int idx = (tapY - 80) / 32;
         if (idx == 0) {
             cls();
-            drawSmall("Erasing...", 140, RED);
+            tft.fillRect(0, 0, LCD_WIDTH, 26, 0x4000);
+            tft.setFont(&fonts::FreeSans9pt7b);
+            tft.setTextColor(RED);
+            tft.setTextDatum(lgfx::top_left);
+            tft.drawString("Factory Reset", 10, 6);
+            tft.drawFastHLine(0, 26, LCD_WIDTH, RED);
+            drawSmall("Erasing all data...", 130, RED);
             nvs_store::eraseAll();
             delay(500);
-            drawSmall("Done! Rebooting...", 165, GREEN);
+            drawSmall("Done! Rebooting...", 150, GREEN);
             delay(1000);
             ESP.restart();
         }
@@ -583,16 +653,18 @@ static void factoryResetScreen() {
     }
 }
 
-// ── Status dashboard (drawn at top of BIOS main menu) ────
+// ── Status dashboard ─────────────────────────────────────
 
 static void drawStatusDashboard() {
     int y = 30;
     const int lineH = 16;
     const int valX = LCD_WIDTH - 12;
 
-    auto statusLine = [&](const char* label, const char* value, uint16_t valColor) {
-        drawLeft(label, 12, y, DIM);
-        drawRight(value, valX, y, valColor);
+    auto statusRow = [&](const char* label, const char* value,
+                         uint16_t dotColor, uint16_t valColor) {
+        drawDot(10, y + 5, dotColor);
+        drawLeft(label, 20, y + 2, DIM);
+        drawRight(value, valX, y + 2, valColor);
         y += lineH;
     };
 
@@ -600,27 +672,24 @@ static void drawStatusDashboard() {
         int rssi = WiFi.RSSI();
         char wifiStr[24];
         snprintf(wifiStr, sizeof(wifiStr), "%s (%d)", wifiLabel(rssi), rssi);
-        statusLine("Wi-Fi", wifiStr, wifiColor(rssi));
+        uint16_t wc = wifiColor(rssi);
+        statusRow("Wi-Fi", wifiStr, wc, wc);
     } else {
-        statusLine("Wi-Fi", "Disconnected", RED);
+        statusRow("Wi-Fi", "Disconnected", RED, RED);
     }
 
     if (!WiFi.isConnected()) {
-        statusLine("Backend", "No Wi-Fi", DIM);
+        statusRow("Backend", "No Wi-Fi", DIMMER, DIM);
     } else if (!nvs_store::hasDeviceToken()) {
-        statusLine("Backend", "No token", YELLOW);
+        statusRow("Backend", "No token", YELLOW, YELLOW);
     } else {
-        // Probe TCP reachability of the backend host.
-        // This tests both DNS resolution AND network connectivity — unlike a
-        // simple "WiFi + token" check, which can pass while DNS is broken.
         char backendHost[64] = {};
         uint16_t backendPort = 443;
         char backendUrl[128] = {};
         if (nvs_store::getBackendUrl(backendUrl, sizeof(backendUrl))) {
-            // Parse host from "wss://host/path" or "https://host/path"
             const char* p = strstr(backendUrl, "://");
             if (p) {
-                p += 3;  // skip "://"
+                p += 3;
                 const char* slash = strchr(p, '/');
                 size_t len = slash ? (size_t)(slash - p) : strlen(p);
                 strncpy(backendHost, p, min(len, sizeof(backendHost) - 1));
@@ -631,23 +700,24 @@ static void drawStatusDashboard() {
         }
 
         WiFiClient probe;
-        probe.setTimeout(3000);  // 3s timeout
+        probe.setTimeout(3000);
         bool reached = probe.connect(backendHost, backendPort);
         probe.stop();
 
-        if (reached) {
-            statusLine("Backend", "Reachable", GREEN);
-        } else {
-            statusLine("Backend", "Unreachable", RED);
-        }
+        statusRow("Backend",
+                  reached ? "Reachable" : "Unreachable",
+                  reached ? GREEN : RED,
+                  reached ? GREEN : RED);
     }
 
-    statusLine("SD Card", sd_storage::isMounted() ? "Mounted" : "No card",
-               sd_storage::isMounted() ? GREEN : YELLOW);
+    statusRow("SD Card",
+              sd_storage::isMounted() ? "Mounted" : "No card",
+              sd_storage::isMounted() ? GREEN : YELLOW,
+              sd_storage::isMounted() ? GREEN : YELLOW);
 
-    statusLine("Firmware", FIRMWARE_VERSION, WHITE);
+    statusRow("Firmware", FIRMWARE_VERSION, DIMMER, WHITE);
 
-    tft.drawFastHLine(10, y + 2, LCD_WIDTH - 20, DIM);
+    tft.drawFastHLine(0, y + 2, LCD_WIDTH, DIMMER);
 }
 
 // ── Main BIOS menu ────────────────────────────────────────
@@ -669,15 +739,18 @@ bool bios_menu::show() {
 
     for (;;) {
         cls();
-        drawCentered(menu.title, 4, CYAN);
-        tft.drawFastHLine(10, 26, LCD_WIDTH - 20, DIM);
+        drawHeader("BIOS", FIRMWARE_VERSION);
         drawStatusDashboard();
 
         for (int i = 0; i < menu.count; i++) {
             int iy = menu.top + i * menu.itemH;
-            tft.drawFastHLine(10, iy + menu.itemH - 1, LCD_WIDTH - 20, 0x2104);
-            drawLeft(menu.items[i], 16, iy + 5, WHITE);
+            tft.drawFastHLine(0, iy, LCD_WIDTH, DIMMER);
+            // Tint "Factory Reset" row slightly
+            if (i == 4) tft.fillRect(0, iy + 1, LCD_WIDTH, menu.itemH - 2, 0x1800);
+            drawLeft(menu.items[i], 20, iy + 7, (i == 4) ? RED : WHITE);
+            if (i < 4) drawRight(">", LCD_WIDTH - 10, iy + 7, DIMMER);
         }
+        tft.drawFastHLine(0, menu.top + menu.count * menu.itemH, LCD_WIDTH, DIMMER);
 
         int tapY = waitTapY();
         if (tapY < 0) continue;
@@ -686,18 +759,18 @@ bool bios_menu::show() {
         if (idx < 0 || idx >= menu.count) continue;
 
         int fy = menu.top + idx * menu.itemH;
-        tft.fillRect(8, fy, LCD_WIDTH - 16, menu.itemH - 1, 0x0A2A);
-        drawLeft(menu.items[idx], 16, fy + 5, CYAN);
-        delay(100);
+        // Selection flash
+        tft.fillRect(0, fy + 1, LCD_WIDTH, menu.itemH - 2, HILITE);
+        tft.fillRect(0, fy + 1, 3, menu.itemH - 2, CYAN);
+        drawLeft(menu.items[idx], 20, fy + 7, CYAN);
+        delay(120);
 
         switch (idx) {
-            case 0: return false;                          // Continue Boot
-            case 1:                                        // Wi-Fi
-                if (wifiScreen()) return true;
-                break;
-            case 2: hardwareTestScreen(); break;           // Hardware Test
-            case 3: systemInfoScreen(); break;             // System Info
-            case 4: factoryResetScreen(); break;           // Factory Reset
+            case 0: return false;
+            case 1: if (wifiScreen()) return true; break;
+            case 2: hardwareTestScreen(); break;
+            case 3: systemInfoScreen(); break;
+            case 4: factoryResetScreen(); break;
         }
     }
 }
