@@ -345,46 +345,57 @@ All screens use a tappable "< Back" bar at the bottom instead of requiring the B
 
 ## Firmware tasks (FreeRTOS)
 
-| Task | Priority | Core | Description |
-|------|----------|------|-------------|
-| audio_capture | High | 0 | I2S mic read + Opus encode |
-| audio_playback | High | 0 | Opus decode + I2S speaker write (checks SD cache before network) |
-| websocket | Medium | 1 | WebSocket send/receive |
-| display | Medium | 1 | Face rendering and animation |
-| ble | Low | 1 | BLE GATT server + presence scanner |
-| touch | Medium | 1 | Touch input processing |
-| sd_cache | Low | 1 | Background TTS cache writes, buffer cleanup, log flush |
+| Task | Stack | Priority | Core | Description |
+|------|-------|----------|------|-------------|
+| `audioCaptureLoop` | 24KB | 5 | 0 | Mic read → Opus encode → WS send |
+| `wsLoop` | 12KB | 3 | 1 | WebSocket poll + JSON event dispatch |
+| `displayLoop` | 8KB | 3 | 1 | Face animation + display render @ 30fps |
 
-ESP32-S3 has dual cores -- audio tasks run on core 0, everything else on core 1 to avoid audio glitches. SD card writes are low priority and happen after audio playback starts, never blocking it.
+`loop()` (Core 1, Arduino main): touch polling, power management tick, LED tick, connectivity sync.
+
+ESP32-S3 has dual cores — the audio capture task runs on core 0 exclusively to avoid glitches from task preemption. WS and display share core 1.
 
 ---
 
 ## Implementation status
 
+25 source modules. All software-only work is complete. Remaining TODOs are hardware-dependent (real TFT driver, touch IC, OTA flash apply).
+
 | Module | File | Status |
 |--------|------|--------|
-| Audio I/O (I2S) | `audio_io.cpp/.h` | Complete — mic input + speaker output |
+| Audio I/O (I2S) | `audio_io.cpp/.h` | Complete — mic input + speaker output via ES8311 |
+| ES8311 codec driver | `es8311.cpp/.h` | Complete — I2C init, volume, sample rate config |
 | Opus codec | `opus_codec.cpp/.h` | Complete — encode/decode with VOIP mode |
+| VAD | `vad.cpp/.h` | Complete — RMS energy + ZCR, adaptive noise floor, 1.5s silence auto-stop |
+| Resilience audio | `resilience_audio.cpp/.h` | Complete — PSRAM-loaded fallback clips (offline, error, stt_fail, boot, thinking, sleep, wake) |
+| Emotion audio | `emotion_audio.cpp/.h` | Complete — per-emotion audio clips from SD |
+| UI audio | `ui_audio.cpp/.h` | Complete — UI sound effects from SD |
+| SFX audio | `sfx_audio.cpp/.h` | Complete — personality SFX clips (rimshot, crickets, etc.) |
+| OGG player | `ogg_player.cpp/.h` | Complete — streaming OGG/Opus playback from SD |
 | WebSocket client | `ws_client.cpp/.h` | Complete — auto-reconnect, NVS token/URL |
-| Wi-Fi manager | `wifi_manager.cpp/.h` | Complete — NVS credentials with compile-time fallback |
-| SD storage | `sd_storage.cpp/.h` | Complete — mount, directory creation, free space |
-| **NVS store** | `nvs_store.cpp/.h` | **Complete** — Wi-Fi, token, volume, brightness, presence settings |
-| **Presence detector** | `presence_detector.cpp/.h` | **Complete** — 3-state machine, RSSI rolling avg, grace period, callbacks |
-| **TTS cache** | `tts_cache.cpp/.h` | **Complete** — SHA256 lookup, manifest, LRU eviction, 100MB cap |
-| **Recording buffer** | `recording_buffer.cpp/.h` | **Complete** — SD buffering on WS drop, frame-level resend |
-| **Resilience audio** | `resilience_audio.cpp/.h` | **Complete** — PSRAM-loaded fallback clips |
-| **Face animation** | `face.cpp/.h` | **Complete** — 12 expressions, 8 idle micro-animations, per-eye scaling, pop effects, per-expression mouth shapes, backend `face:expression` WS event, presence-driven happy/sad |
-| **Display manager** | `display.cpp/.h` | **Scaffolded** — 6 modes (face/clock/pomodoro/reminder/countdown/status), auto-return, connection dot indicator, transcript overlay, PWM backlight fade. TFT rendering is stubbed in `display_hw` namespace. |
-| **Touch driver** | `touch.cpp/.h` | **Scaffolded** — event abstraction (tap/hold/release/long_press/wake), debounce, serial simulation. Hardware touch IC reading is a TODO. |
-| State machine | `state.h` | Complete — BotState + PresenceState enums |
-| Config | `config.h` | Complete — pins, Opus, timings |
-| Main loop | `main.cpp` | Complete — FreeRTOS 3-task (audio/ws/display), all modules wired, BotState→face sync, proactive event→display mode, touch→interaction |
-| **VAD** | `vad.cpp/.h` | **Complete** — RMS energy + ZCR, adaptive noise floor, auto-stop on 1.5s silence |
-| **OTA updates** | `ota_update.cpp/.h` | **Complete** — HTTP download, SHA-256 verify, staged flash (esp_ota_begin is hardware TODO) |
-| **Debug logging** | `debug_log.cpp/.h` | **Complete** — rolling file, module tags, severity levels, 1MB rotation |
-| **Power management** | `power_manager.cpp/.h` | **Complete** — ACTIVE→DIM→SLEEP state machine, idle timeouts, interaction tracking |
-| BLE GATT server | — | Not started (hardware-dependent) |
-| BLE scanner | — | Not started (presence_detector ready to receive feedRssi calls) |
+| Wi-Fi manager | `wifi_manager.cpp/.h` | Complete — NVS credentials with compile-time fallback, exponential backoff |
+| BLE manager | `ble_manager.cpp/.h` | Complete — NimBLE GATT server (4 services: 0xFFE0-FFE3) + BLE scanner for presence |
+| Presence detector | `presence_detector.cpp/.h` | Complete — 3-state machine (PRESENT/LEAVING/AWAY), RSSI rolling avg, grace period |
+| NVS store | `nvs_store.cpp/.h` | Complete — Wi-Fi, token, volume, brightness, presence settings, face style, colors |
+| SD storage | `sd_storage.cpp/.h` | Complete — SDIO 4-bit mount, directory creation, free space |
+| TTS cache | `tts_cache.cpp/.h` | Complete — SHA256 lookup, manifest, LRU eviction, 100MB cap |
+| Recording buffer | `recording_buffer.cpp/.h` | Complete — SD buffering on WS drop, frame-level resend on reconnect |
+| OTA updates | `ota_update.cpp/.h` | Complete — HTTP download, SHA-256 verify, staged flash. `esp_ota_begin/write/end` is hardware TODO. |
+| Debug logging | `debug_log.cpp/.h` | Complete — rolling file, module tags, severity levels, 1MB rotation |
+| Face animation | `face.cpp/.h` + `face_style.cpp/.h` | Complete — 13 expressions, 11 idle micro-animations, audio-reactive eyes/mouth, per-expression shapes, `face:expression` WS event |
+| Face styles | `face_orbit.cpp/.h` + `face_nova.cpp/.h` | Complete — ORBIT (circle) and NOVA (rounded rect) styles, switchable at runtime |
+| Display manager | `display.cpp/.h` | Complete — 7 modes (face/clock/pomodoro/reminder/countdown/status/glance), auto-return, connection dot, transcript overlay, PWM backlight fade. TFT rendering stubbed in `display_hw` namespace — swap for real SPI driver on hardware. |
+| Touch driver | `touch.cpp/.h` | Scaffolded — event abstraction (tap/hold/release/long_press/wake), debounce, serial simulation. Hardware FT6336G IC reading is a TODO. |
+| Power manager | `power_manager.cpp/.h` | Complete — ACTIVE→DIM→SLEEP state machine, idle timeouts, interaction tracking |
+| Status LED | `status_led.cpp/.h` | Complete — FastLED WS2812B, non-blocking animations (breathe/pulse/blink), auto-synced to BotState |
+| BIOS menu | `bios_menu.cpp/.h` | Complete — status dashboard, Wi-Fi scan/change, hardware test, system info, factory reset |
+| Boot screen | `boot_screen.cpp/.h` | Complete — splash screen, provisioning UI, BIOS entry gate |
+| Device server | `device_server.cpp/.h` | Complete — HTTP server for Flutter app token delivery (Wi-Fi manual flow) |
+| Wi-Fi provisioning | `wifi_provision.cpp/.h` | Complete — legacy AP provisioning flow |
+| Gesture | `gesture.cpp/.h` | Complete — gesture abstraction layer |
+| State machine | `state.h` | Complete — BotState + PresenceState enums, global AppState |
+| Config | `config.h` | Complete — GPIO pins, Opus config, timing constants |
+| Main loop | `main.cpp` | Complete — FreeRTOS 3-task setup, all WS event handlers, BotState sync, touch handler |
 
 ---
 

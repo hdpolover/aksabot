@@ -38,14 +38,14 @@ A physical AI desk companion powered by ESP32-S3 with voice interaction, a touch
 | Phase | Duration | Key milestone | Status | Details |
 |-------|----------|---------------|--------|---------|
 | 1. Audio pipeline + auth | Weeks 1-3 | End-to-end voice conversation with auth | **COMPLETE** | [04-audio-pipeline.md](04-audio-pipeline.md), [02-auth.md](02-auth.md) |
-| 2. Display + interaction | Weeks 4-5 | Animated face with touch-to-talk and transcript | **SCAFFOLDED** (logic done, TFT rendering stubbed, blocked on hardware) | [05-firmware.md](05-firmware.md) |
+| 2. Display + interaction | Weeks 4-5 | Animated face with touch-to-talk and transcript | **COMPLETE** (25 modules on hardware — TFT rendering stubbed pending hardware driver, touch IC pending) | [05-firmware.md](05-firmware.md) |
 | 3. Memory + personality | Weeks 6-8 | Bot remembers across sessions | **COMPLETE** | [07-memory-service.md](07-memory-service.md) |
 | 4. Flutter app | Weeks 9-11 | Mobile setup, provisioning, and management | **COMPLETE** (Phase A+B+C+D: 23 pages, 5 BLoCs, BLE, network, notifications) | [09-flutter-app.md](09-flutter-app.md) |
 | 5. Polish + reliability | Weeks 12-14 | Finished desk product | In progress (firmware resilience modules done, VAD/OTA pending) | [10-risks-and-scope.md](10-risks-and-scope.md) |
 
 Total estimated timeline: **14 weeks** for a fully functional prototype. Phases can overlap -- backend memory work (Phase 3) can start while display work (Phase 2) is in progress.
 
-**Current status (April 2026):** Backend fully implemented (7 modules, 215 unit tests + 45 E2E tests, WS rate limiting, conversation search, forgot password). Flutter app complete (24 pages, 5 BLoCs, 60 tests, BLE, network banners, notifications, forgot password). ESP32 firmware at 18 modules (4,049 lines) — all software-only features implemented including VAD, OTA verification, debug logging, power management. Only hardware-dependent items remain: TFT rendering, touch IC, BLE GATT server, BLE scanner.
+**Current status (April 2026):** Backend fully implemented (7 modules, 215 unit tests + 45 E2E tests). Flutter app complete (24 pages, 5 BLoCs, 60 tests, BLE provisioning + presence, network banners, notifications). ESP32 firmware at 25 modules running on hardware — all software-only features complete including BLE GATT provisioning, BLE presence detection, face animation (ORBIT + NOVA styles), BIOS menu, audio assets (SFX/emotion/resilience), TTS cache, recording buffer, OTA, debug logging, power management, status LED. Remaining hardware TODOs: real TFT SPI driver (display_hw stubbed), touch IC reading (FT6336G), OTA flash apply (esp_ota_begin).
 
 ---
 
@@ -67,10 +67,9 @@ Total estimated timeline: **14 weeks** for a fully functional prototype. Phases 
 | [11-future-extensions.md](11-future-extensions.md) | Post-V1 extensions — expressive servos, desk mobility, integrations, camera |
 | [12-features.md](12-features.md) | Bot capabilities — reactive features, proactive reminders, pomodoro, display modes |
 | [13-first-setup.md](13-first-setup.md) | First-time setup — backend, firmware flash, app, pairing, troubleshooting |
-| [14-remaining-features.md](14-remaining-features.md) | Remaining features buildable without hardware — roadmap and checklist |
 | [15-hardware-spec.md](15-hardware-spec.md) | ES3C28P board spec — GPIO pinout, display, touch, audio, SD, battery, dimensions |
-| [16-hardware-capabilities.md](16-hardware-capabilities.md) | Hardware capabilities inventory — what's used, planned, and untapped, with priority tiers |
+| [16-hardware-capabilities.md](16-hardware-capabilities.md) | Hardware capabilities inventory — what's active, recently completed, and untapped expansion options |
 | [17-audio-assets.md](17-audio-assets.md) | Sound effects and UI audio clips — ElevenLabs prompts, SD layout, Opus conversion |
 | [18-brand-guidelines.md](18-brand-guidelines.md) | Aksa brand guidelines — personality, voice, tone, face expressions, audio identity |
-| [19-sd-card-storage.md](19-sd-card-storage.md) | SD card storage layout — what's stored, why, sprite sheets, offline resilience, config snapshots |
-| [20-face-sprite-spec.md](20-face-sprite-spec.md) | Face sprite design brief — 40 frames across 13 expressions, visual style, canvas specs, delivery format |
+| [19-sd-card-storage.md](19-sd-card-storage.md) | SD card storage layout — audio cache, resilience clips, recording buffer, OTA staging, logs |
+| [21-case-design.md](21-case-design.md) | 3D-printed TV case design — PCB orientation, port layout, assembly, print settings |

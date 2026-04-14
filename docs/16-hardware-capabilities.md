@@ -149,10 +149,9 @@ ESP32-S3 download mode trigger (hold during power-on).
 
 ---
 
-## 2. Planned but Not Yet Built
+## 2. Recently Completed
 
-These features have design docs and/or firmware stubs, but the implementation is
-incomplete — mostly blocked on real hardware.
+These features were previously planned — all are now fully implemented across firmware, backend, and Flutter app.
 
 ### 2.1 BLE GATT Provisioning Server — DONE
 
