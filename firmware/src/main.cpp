@@ -128,7 +128,12 @@ static void syncFaceToState() {
             face::setExpression(face::Expression::SLEEPING, 500);
             break;
     }
-    status_led::syncToState();
+    // Low-battery overrides normal state LED — wins over BotState color
+    if (battery::isLow() && !battery::isUsbPowered()) {
+        status_led::showLowBattery();
+    } else {
+        status_led::syncToState();
+    }
 }
 
 static void updateStatusBar() {
@@ -1947,11 +1952,6 @@ void loop() {
         static bool criticalDimApplied = false;
 
         if (!battery::isUsbPowered()) {
-            // LED: orange fast-blink when low
-            if (battery::isLow()) {
-                status_led::showLowBattery();
-            }
-
             // Power saving: dim display aggressively when critical
             if (battery::isCritical() && !criticalDimApplied) {
                 criticalDimApplied = true;
@@ -1964,8 +1964,8 @@ void loop() {
                 Serial.println("[Battery] Critical — power saving active");
             }
         } else {
-            // Plugged in — restore normal LED and power config
-            status_led::syncToState();
+            // Plugged in — power config restored; LED will be restored by next
+            // syncFaceToState() call naturally via the guard in that function
             if (criticalDimApplied) {
                 criticalDimApplied = false;
                 power_manager::updateConfig(power_manager::Config{});
