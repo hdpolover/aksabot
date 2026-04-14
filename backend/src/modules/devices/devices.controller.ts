@@ -11,11 +11,13 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Req,
   Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
@@ -240,6 +242,7 @@ export class DevicesController {
     }),
   )
   async pushImage(
+    @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: RequestUser,
     @UploadedFile() file: Express.Multer.File,
@@ -252,7 +255,15 @@ export class DevicesController {
     }
 
     const durationMs = durationMsRaw ? parseInt(durationMsRaw, 10) : 10000;
-    const baseUrl = process.env.BACKEND_URL ?? 'http://localhost:4280';
+
+    // Derive base URL from the incoming request so it works in every environment
+    // without needing BACKEND_URL. Respects X-Forwarded-Proto/Host set by Traefik.
+    const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0].trim()
+      ?? (req.secure ? 'https' : 'http');
+    const host = (req.headers['x-forwarded-host'] as string | undefined)?.split(',')[0].trim()
+      ?? req.headers.host
+      ?? 'localhost:4280';
+    const baseUrl = `${proto}://${host}`;
     const imageUrl = `${baseUrl}/devices/${id}/device-images/${file.filename}`;
 
     // Push to device — fire and forget (device may be offline; user sees image when it reconnects)

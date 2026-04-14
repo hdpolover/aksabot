@@ -1338,15 +1338,26 @@ uint8_t display::getFaceStyleId() {
 void display::showImageFromSD(const char* path, uint16_t durationMs) {
     if (!path || !*path) return;
 
-    // Wake the display if it's sleeping
-    if (sleeping) wake();
-
-    // Determine image format from extension
+    // Determine image format from extension first — fail fast before touching display
     const char* ext = strrchr(path, '.');
     if (!ext) {
         Serial.printf("[Display] showImageFromSD: no extension in path: %s\n", path);
         return;
     }
+
+    // Switch to IMAGE mode BEFORE drawing. Both showImageFromSD (called from
+    // wsLoop) and displayLoop run on Core 1. FreeRTOS can preempt wsLoop at
+    // any 1ms tick boundary, allowing displayLoop to push a face sprite over a
+    // partially-drawn image. Setting currentMode = IMAGE first causes tick() to
+    // return early, so the TFT is ours for the duration of the draw.
+    if (durationMs > 0) {
+        setModeTemporary(Mode::IMAGE, durationMs);
+    } else {
+        setMode(Mode::IMAGE);
+    }
+
+    // Wake the display if it's sleeping (setModeTemporary already calls wake if sleeping)
+    if (sleeping) wake();
 
     // Fill screen black before drawing
     tft.fillScreen(TFT_BLACK);
@@ -1357,6 +1368,8 @@ void display::showImageFromSD(const char* path, uint16_t durationMs) {
     File imgFile = SD_MMC.open(path, FILE_READ);
     if (!imgFile) {
         Serial.printf("[Display] showImageFromSD: open failed: %s\n", path);
+        currentMode = previousMode;
+        autoReturnActive = false;
         return;
     }
     size_t fileSize = imgFile.size();
@@ -1364,6 +1377,8 @@ void display::showImageFromSD(const char* path, uint16_t durationMs) {
         Serial.printf("[Display] showImageFromSD: bad size %u for %s\n",
                       (unsigned)fileSize, path);
         imgFile.close();
+        currentMode = previousMode;
+        autoReturnActive = false;
         return;
     }
     uint8_t* buf = (uint8_t*)ps_malloc(fileSize);
@@ -1371,6 +1386,8 @@ void display::showImageFromSD(const char* path, uint16_t durationMs) {
         Serial.printf("[Display] showImageFromSD: PSRAM alloc failed (%u bytes)\n",
                       (unsigned)fileSize);
         imgFile.close();
+        currentMode = previousMode;
+        autoReturnActive = false;
         return;
     }
     imgFile.read(buf, fileSize);
@@ -1386,24 +1403,21 @@ void display::showImageFromSD(const char* path, uint16_t durationMs) {
     } else {
         Serial.printf("[Display] showImageFromSD: unsupported format: %s\n", ext);
         free(buf);
+        currentMode = previousMode;
+        autoReturnActive = false;
         return;
     }
     free(buf);
 
     if (!ok) {
         Serial.printf("[Display] showImageFromSD: draw failed for: %s\n", path);
+        currentMode = previousMode;
+        autoReturnActive = false;
         return;
     }
 
-    Serial.printf("[Display] showImageFromSD: showing %s\n", path);
-
-    // Switch to IMAGE mode — tick() skips sprite rendering so the image stays visible.
-    // After durationMs, auto-return to whatever mode was active before.
-    if (durationMs > 0) {
-        setModeTemporary(Mode::IMAGE, durationMs);
-    } else {
-        setMode(Mode::IMAGE);
-    }
+    Serial.printf("[Display] showImageFromSD: showing %s for %ums\n", path, (unsigned)durationMs);
+    // Mode already set above — displayLoop skips rendering until timer expires
 }
 
 void display::init() {
@@ -1439,9 +1453,16 @@ void display::tick(uint32_t nowMs) {
 
     if (sleeping) return;
 
+    // Auto-return timer — must run in every mode including IMAGE.
+    // Previously this was inside the rate-limited block below, which IMAGE mode
+    // never reached, so the timer never fired and images stayed forever.
+    if (autoReturnActive && nowMs >= autoReturnAtMs) {
+        autoReturnActive = false;
+        currentMode = previousMode;
+    }
+
     // IMAGE mode: image drawn directly to TFT hardware — skip sprite rendering
-    // to avoid overwriting it. Auto-return timer (set by showImageFromSD) will
-    // revert to the previous mode when durationMs elapses.
+    // to avoid overwriting it.
     if (currentMode == Mode::IMAGE) return;
 
     // Rate-limit rendering
@@ -1450,12 +1471,6 @@ void display::tick(uint32_t nowMs) {
 
     // Advance face animation
     face::tick(nowMs);
-
-    // Check auto-return timer
-    if (autoReturnActive && nowMs >= autoReturnAtMs) {
-        autoReturnActive = false;
-        currentMode = previousMode;
-    }
 
     // Render current mode
     switch (currentMode) {
