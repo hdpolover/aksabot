@@ -134,7 +134,7 @@ All design docs are in `docs/`. This is the entry point:
 - **Recording buffer**: WebSocket disconnect resilience — audio capture loop auto-switches to SD buffering, resends on reconnect via `audio:start{buffered:true}` + binary frames.
 - **Resilience audio**: loads fallback Opus clips from `/audio/resilience/` into PSRAM on startup (offline, error, stt_fail, boot, thinking, sleep, wake).
 - **Face animation**: 13 expressions (idle, listening, thinking, speaking, confused, sleeping, offline, encouraging, calm, focused, happy, sad, **shrug**), blink timer (3-8s random), **emotion-aware mouth shapes** (each expression has its own amplitude-driven talking mouth — smile-open for happy, frown-open for sad, tight for focused, etc.), breathing cycle, thinking dots (bright white at bottom), smooth transitions. **11 idle micro-animations** (look around, double blink, curious peek, yawn, disappear/reappear, eye roll, wink, bounce, **doze** (nods off then snaps awake), **munch** (chewing with squinted eyes), **sigh** (deflates and recovers)) fire every 8-20s. **Audio-reactive eyes**: eye scale widens on loud speech (1.1x), squints on quiet (0.92x), blink suppression during loud speech, eyebrow raise on amplitude peaks (400ms), speaking head-nod synced to amplitude, natural gaze drift while talking. Backend `face:expression` WS event for **per-sentence LLM emotion** (happy→HAPPY eyes, excited→ENCOURAGING, calm→CALM, etc.). Automatic triggers: happy on presence arrival, sad on departure, shrug on error.
-- **Display manager**: 6 modes (face, clock, pomodoro, reminder, countdown, status), auto-return timer, connection dot indicator (green/yellow/red), transcript overlay. PWM backlight with smoothstep fade transitions (wake 300ms, sleep 200ms, dim 500ms). TFT rendering stubbed in `display_hw` namespace — swap for real ILI9341 when hardware arrives.
+- **Display manager**: 6 modes (face, clock, pomodoro, reminder, countdown, status), auto-return timer, connection dot indicator (green/yellow/red), transcript overlay. PWM backlight with smoothstep fade transitions (wake 300ms, sleep 200ms, dim 500ms). ILI9341V rendering fully working on hardware via LovyanGFX (`display_hw` namespace, PSRAM sprite buffer).
 - **BIOS menu**: Status dashboard (Wi-Fi signal with human-readable label, server readiness, SD card, firmware version). 5 menu items: Continue Boot, Wi-Fi (scan + change network combined), Hardware Test (speaker beep, mic level, echo test, touch test, LED RGB cycle, run-all-checks automated report), System Info, Factory Reset. Touch-driven navigation with "< Back" bar on all screens. No POST on boot — hardware checks moved to BIOS menu.
 - **Touch driver**: event abstraction (tap, hold_start, hold_end, long_press, wake), debounce, hold duration tracking, tap-to-wake from sleep. FT6336G I2C keepalive prevents hibernate mode (INT pin stays responsive). Serial simulation fallback.
 - **VAD (Voice Activity Detection)**: RMS energy + zero-crossing rate analysis, adaptive noise floor, configurable silence threshold (default 1.5s). Wired into audio capture loop — auto-stops recording on end-of-speech.
@@ -149,9 +149,9 @@ All design docs are in `docs/`. This is the entry point:
 
 ### What's next
 1. Fine-tune face animations on real hardware (expression timing, mouth visibility, eye sizes)
-2. Implement TFT rendering in `display_hw` namespace (ST7789/ILI9341 SPI driver)
-3. Implement capacitive touch IC reading in touch::feedRaw()
-4. Wire esp_ota_begin/write/end in ota_update::apply()
+2. Wire esp_ota_begin/write/end in ota_update::apply()
+3. FCM push notifications (backend + app integration)
+4. Battery connector (1.25mm 2P) — hardware blocked
 5. FCM push notifications (backend + app integration)
 
 ## Backend structure

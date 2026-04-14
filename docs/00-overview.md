@@ -38,7 +38,7 @@ A physical AI desk companion powered by ESP32-S3 with voice interaction, a touch
 | Phase | Duration | Key milestone | Status | Details |
 |-------|----------|---------------|--------|---------|
 | 1. Audio pipeline + auth | Weeks 1-3 | End-to-end voice conversation with auth | **COMPLETE** | [04-audio-pipeline.md](04-audio-pipeline.md), [02-auth.md](02-auth.md) |
-| 2. Display + interaction | Weeks 4-5 | Animated face with touch-to-talk and transcript | **COMPLETE** (25 modules on hardware — TFT rendering stubbed pending hardware driver, touch IC pending) | [05-firmware.md](05-firmware.md) |
+| 2. Display + interaction | Weeks 4-5 | Animated face with touch-to-talk and transcript | **COMPLETE** (25 modules on hardware — ILI9341V display + FT6336G touch confirmed working) | [05-firmware.md](05-firmware.md) |
 | 3. Memory + personality | Weeks 6-8 | Bot remembers across sessions | **COMPLETE** | [07-memory-service.md](07-memory-service.md) |
 | 4. Flutter app | Weeks 9-11 | Mobile setup, provisioning, and management | **COMPLETE** (Phase A+B+C+D: 23 pages, 5 BLoCs, BLE, network, notifications) | [09-flutter-app.md](09-flutter-app.md) |
 | 5. Polish + reliability | Weeks 12-14 | Finished desk product | In progress (firmware resilience modules done, VAD/OTA pending) | [10-risks-and-scope.md](10-risks-and-scope.md) |

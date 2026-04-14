@@ -1,7 +1,6 @@
 #include "bios_menu.h"
 #include "config.h"
 #include "lgfx_config.h"
-#include "touch.h"
 #include "audio_io.h"
 #include "ui_audio.h"
 #include "nvs_store.h"
@@ -128,8 +127,6 @@ static int waitTapY() {
     while (tft.getTouch(&tp, 1) > 0) delay(15);
 
     for (;;) {
-        touch::processSerial(millis());
-        touch::tick(millis());
         if (bootPressed()) { waitBootRelease(); return -1; }
 
         if (tft.getTouch(&tp, 1) > 0) {
