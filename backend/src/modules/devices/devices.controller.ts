@@ -239,11 +239,12 @@ export class DevicesController {
     @CurrentUser() user: RequestUser,
   ) {
     await this.devicesService.findById(id, user.userId);
+    const offline = !this.gateway.isDeviceConnected(id);
     const result = await this.gateway.fetchDeviceLogs(id);
     if (!result) {
-      return { text: null, bytes: 0, fetchedAt: null, cached: false };
+      return { text: null, bytes: 0, fetchedAt: null, offline };
     }
-    return { ...result, cached: false };
+    return { ...result, offline: false };
   }
 
   /** Return the last cached log snapshot without triggering a new fetch.

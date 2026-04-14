@@ -1949,27 +1949,44 @@ void loop() {
     if (appState.wifiConnected != prevWifi || appState.wsConnected != prevWs) {
 
         // ── Face + audio reactions to connectivity changes (only when idle) ──
+        //
+        // Audio is throttled: sounds play at most once per CONN_AUDIO_COOLDOWN_MS
+        // so rapid flapping (bad WiFi) doesn't spam the same clip every few seconds.
+        // Face expressions always update so there is still silent visual feedback.
+        static uint32_t lastConnAudioMs = 0;
+        const uint32_t CONN_AUDIO_COOLDOWN_MS = 30000;  // 30 s between connection sounds
+        const bool audioAllowed = (now - lastConnAudioMs) >= CONN_AUDIO_COOLDOWN_MS;
+
         if (appState.botState == BotState::IDLE || appState.botState == BotState::OFFLINE) {
             if (!appState.wifiConnected && prevWifi) {
-                // WiFi lost → offline clip + sad face
-                resilience_audio::playClip(resilience_audio::Clip::OFFLINE);
+                // WiFi lost → sad face (+ offline clip if not spamming)
                 face::setExpression(face::Expression::SAD, 300);
                 scheduleFaceRevert(3000);
+                if (audioAllowed) {
+                    resilience_audio::playClip(resilience_audio::Clip::OFFLINE);
+                    lastConnAudioMs = now;
+                }
             } else if (appState.wifiConnected && !appState.wsConnected && prevWs) {
-                // WS dropped but WiFi still up → disconnected clip + confused face
-                ui_audio::play(ui_audio::Clip::SERVER_DISCONNECTED);
+                // WS dropped but WiFi still up → confused face (+ disconnected clip if not spamming)
                 face::setExpression(face::Expression::CONFUSED, 200);
                 scheduleFaceRevert(3000);
+                if (audioAllowed) {
+                    ui_audio::play(ui_audio::Clip::SERVER_DISCONNECTED);
+                    lastConnAudioMs = now;
+                }
             } else if (appState.wifiConnected && !appState.wsConnected && !prevWifi) {
-                // WiFi just recovered but WS not yet → confused (connecting...)
+                // WiFi just recovered but WS not yet → confused (connecting...) — no audio
                 face::setExpression(face::Expression::CONFUSED, 200);
                 scheduleFaceRevert(3000);
             }
         }
 
-        // WS just connected — server connected clip + happy face + send device info
+        // WS just connected — happy face + connected clip (throttled) + send device info
         if (appState.wsConnected && !prevWs) {
-            ui_audio::play(ui_audio::Clip::SERVER_CONNECTED);
+            if (audioAllowed) {
+                ui_audio::play(ui_audio::Clip::SERVER_CONNECTED);
+                lastConnAudioMs = now;
+            }
             // Start BLE advertising here (after WS is confirmed connected) so the
             // phone can scan for "Aksabot". Deferred from setup() to avoid NimBLE
             // init disrupting the WS TCP handshake.

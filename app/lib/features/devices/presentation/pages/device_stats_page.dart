@@ -270,12 +270,15 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
                 color: colors.onSurfaceVariant,
               ),
             ),
-            trailing: FilledButton.tonal(
-              onPressed: _isRefilling ? null : _refillPool,
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+            trailing: SizedBox(
+              width: 88,
+              child: FilledButton.tonal(
+                onPressed: _isRefilling ? null : _refillPool,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                ),
+                child: Text(_isRefilling ? 'Refilling…' : 'Refill'),
               ),
-              child: Text(_isRefilling ? 'Refilling…' : 'Refill'),
             ),
           ),
         ),
@@ -522,10 +525,18 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
                               ),
                               const SizedBox(width: 6),
                               Text(
-                                _fetchingLogs ? 'Requesting logs…' : 'No logs loaded',
+                                _fetchingLogs
+                                    ? 'Requesting logs… (up to 8s)'
+                                    : _logs?.offline == true
+                                        ? 'Device is offline'
+                                        : _logs != null
+                                            ? 'Device did not respond in time'
+                                            : 'No logs loaded',
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   fontFamily: 'monospace',
-                                  color: colors.onSurfaceVariant,
+                                  color: (_logs?.offline == true || (_logs != null && !hasLogs))
+                                      ? colors.error.withValues(alpha: 0.8)
+                                      : colors.onSurfaceVariant,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -534,8 +545,14 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
                           if (!_fetchingLogs) ...[
                             const SizedBox(height: 6),
                             Text(
-                              '// Tap "Fetch Logs" to pull the last 6 KB\n'
-                              '// of log data from the device over WebSocket.',
+                              _logs?.offline == true
+                                  ? '// Connect the device to Wi-Fi and\n'
+                                    '// ensure it has an active WebSocket session.'
+                                  : _logs != null && !hasLogs
+                                      ? '// The device did not send logs within 8s.\n'
+                                        '// SD card may be missing or log file empty.'
+                                      : '// Tap "Fetch Logs" to pull the last 6 KB\n'
+                                        '// of log data from the device over WebSocket.',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 fontFamily: 'monospace',
                                 color: colors.onSurfaceVariant.withValues(alpha: 0.6),

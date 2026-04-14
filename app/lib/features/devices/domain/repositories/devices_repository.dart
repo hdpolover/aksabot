@@ -60,8 +60,14 @@ class DeviceLogs {
   final String? text;
   final int bytes;
   final DateTime? fetchedAt;
+  final bool offline;
 
-  const DeviceLogs({required this.text, required this.bytes, this.fetchedAt});
+  const DeviceLogs({
+    required this.text,
+    required this.bytes,
+    this.fetchedAt,
+    this.offline = false,
+  });
 
   bool get hasData => text != null && text!.isNotEmpty;
 
@@ -69,6 +75,7 @@ class DeviceLogs {
     return DeviceLogs(
       text: json['text'] as String?,
       bytes: json['bytes'] as int? ?? 0,
+      offline: json['offline'] as bool? ?? false,
       fetchedAt: json['fetchedAt'] != null
           ? DateTime.fromMillisecondsSinceEpoch(json['fetchedAt'] as int)
           : null,

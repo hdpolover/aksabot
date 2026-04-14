@@ -473,21 +473,37 @@ export class AudioGateway
     this.logger.debug(`Cached ${data.bytes ?? 0} bytes of logs for device ${deviceId}`);
   }
 
+  /** Returns true if the device has an open WebSocket connection right now. */
+  isDeviceConnected(deviceId: string): boolean {
+    const socket = this.deviceToSocket.get(deviceId);
+    return !!socket && socket.readyState === 1;
+  }
+
   /** Sends log:fetch to the device and waits up to timeoutMs for the response.
-   *  Returns cached log text if the device responds in time, null otherwise. */
-  async fetchDeviceLogs(deviceId: string, timeoutMs = 3000): Promise<{ text: string; bytes: number; fetchedAt: number } | null> {
+   *  Returns null immediately if the device is not connected.
+   *  SD reads on ESP32 can take 2-4s, so the default timeout is 8s. */
+  async fetchDeviceLogs(deviceId: string, timeoutMs = 8000): Promise<{ text: string; bytes: number; fetchedAt: number } | null> {
+    // Bail early if the device socket is not open — sendToDevice would silently
+    // drop the event and the poll would just burn the full timeout for nothing.
+    if (!this.isDeviceConnected(deviceId)) {
+      this.logger.debug(`fetchDeviceLogs: device ${deviceId} not connected`);
+      return null;
+    }
+
     // Clear stale cache so we don't return old data on a new request
     await this.redis.del(`device:logs:${deviceId}`);
 
     this.sendToDevice(deviceId, 'log:fetch', {});
+    this.logger.debug(`log:fetch sent to device ${deviceId}, waiting up to ${timeoutMs}ms`);
 
     // Poll Redis until the device responds or we time out
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 250));
       const cached = await this.redis.get(`device:logs:${deviceId}`);
       if (cached) return JSON.parse(cached);
     }
+    this.logger.warn(`fetchDeviceLogs: device ${deviceId} did not respond within ${timeoutMs}ms`);
     return null;
   }
 
