@@ -4,7 +4,6 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -38,7 +37,6 @@ export class FirmwareService {
     private readonly repo: Repository<FirmwareRelease>,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly devicesService: DevicesService,
-    @Inject(forwardRef(() => AudioGateway))
     private readonly gateway: AudioGateway,
   ) {}
 
@@ -148,35 +146,6 @@ export class FirmwareService {
       'EX',
       OTA_STATUS_TTL,
     );
-  }
-
-  /** Called by the gateway when the device sends ota:progress or ota:complete. */
-  async onOtaProgress(deviceId: string, data: { percent?: number; phase?: string }): Promise<void> {
-    await this.setOtaStatus(deviceId, {
-      state: 'in_progress',
-      progress: data.percent ?? 0,
-      phase: data.phase,
-    });
-  }
-
-  async onOtaComplete(
-    deviceId: string,
-    data: { success?: boolean; error?: string },
-  ): Promise<void> {
-    if (data.success) {
-      await this.setOtaStatus(deviceId, {
-        state: 'complete',
-        progress: 100,
-      });
-      this.logger.log(`OTA complete for device ${deviceId}`);
-    } else {
-      await this.setOtaStatus(deviceId, {
-        state: 'error',
-        progress: 0,
-        error: data.error ?? 'Unknown error',
-      });
-      this.logger.warn(`OTA failed for device ${deviceId}: ${data.error}`);
-    }
   }
 
   /** Returns the local filesystem path and whether the file exists. */

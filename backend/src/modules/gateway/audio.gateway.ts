@@ -20,7 +20,6 @@ import { SessionManager } from './session.manager';
 import { ConversationPersistence } from './conversation.persistence';
 import type { SttResult } from '../ai/interfaces';
 import { REDIS_CLIENT } from '../../core/cache/redis.provider';
-import { FirmwareService } from '../firmware/firmware.service';
 
 interface WsMessage {
   event: string;
@@ -58,8 +57,6 @@ export class AudioGateway
     private readonly sessions: SessionManager,
     private readonly persistence: ConversationPersistence,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
-    @Inject(forwardRef(() => FirmwareService))
-    private readonly firmwareService: FirmwareService,
   ) {}
 
   onModuleInit() {
@@ -426,6 +423,32 @@ export class AudioGateway
     );
   }
 
+  // ── OTA event handlers ────────────────────────────────────────
+
+  private static readonly OTA_STATUS_TTL = 3600;
+
+  private async onOtaProgress(deviceId: string, data: { percent?: number; phase?: string }) {
+    await this.redis.set(
+      `ota:status:${deviceId}`,
+      JSON.stringify({ state: 'in_progress', progress: data.percent ?? 0, phase: data.phase }),
+      'EX',
+      AudioGateway.OTA_STATUS_TTL,
+    );
+  }
+
+  private async onOtaComplete(deviceId: string, data: { success?: boolean; error?: string }) {
+    const status = data.success
+      ? { state: 'complete', progress: 100 }
+      : { state: 'error', progress: 0, error: data.error ?? 'Unknown error' };
+    await this.redis.set(
+      `ota:status:${deviceId}`,
+      JSON.stringify(status),
+      'EX',
+      AudioGateway.OTA_STATUS_TTL,
+    );
+    this.logger.log(`OTA ${data.success ? 'complete' : 'failed'} for device ${deviceId}${data.error ? `: ${data.error}` : ''}`);
+  }
+
   /** Called when the user's phone leaves the desk area.
    *  Can be triggered by the ESP32 (legacy) OR by the mobile app REST call. */
   onPresenceDeparted(deviceId: string) {
@@ -695,12 +718,12 @@ export class AudioGateway
           );
           break;
         case 'ota:progress':
-          this.firmwareService.onOtaProgress(deviceId, msg.data ?? {}).catch((err) =>
+          this.onOtaProgress(deviceId, msg.data ?? {}).catch((err) =>
             this.logger.error(`onOtaProgress error: ${err.message}`),
           );
           break;
         case 'ota:complete':
-          this.firmwareService.onOtaComplete(deviceId, msg.data ?? {}).catch((err) =>
+          this.onOtaComplete(deviceId, msg.data ?? {}).catch((err) =>
             this.logger.error(`onOtaComplete error: ${err.message}`),
           );
           break;
