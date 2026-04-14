@@ -16,7 +16,7 @@ A physical AI desk companion powered by ESP32-S3 with voice interaction, a touch
 | Component | Details | Est. cost |
 |-----------|---------|-----------|
 | Hosyond ESP32-S3 2.8" | N16R8, 2.8" IPS touch, mic, speaker, Wi-Fi, BLE, MicroSD, USB-C, battery charging | Rp 435,600 |
-| LiPo battery (optional) | 3.7V, 1000-2000mAh, JST PH 2.0 connector | Rp 15,000-30,000 |
+| LiPo battery (optional) | 3.7V, 1000-2000mAh, **1.25mm 2P connector** (not JST PH 2.0) | Rp 15,000-30,000 |
 | 3D-printed enclosure | Custom housing for desk placement | Rp 50,000-100,000 |
 
 ---
