@@ -6,6 +6,7 @@ import { Device } from '../../core/database/entities';
 import { LLM_PROVIDER } from '../ai/interfaces/tokens';
 import type { ILlmProvider } from '../ai/interfaces';
 import { BOT_NAME } from '../ai/prompt.service';
+import { AiService } from '../ai/ai.service';
 import { MemoriesService } from '../memories/memories.service';
 import { SessionManager } from '../gateway/session.manager';
 import { MoodJournalService } from './mood-journal.service';
@@ -28,6 +29,12 @@ export class ProactiveService {
   // ── Idle personality chat ────────────────────────────
   private idleChatTimers = new Map<string, NodeJS.Timeout>();
 
+  // ── New proactive interaction state ──────────────────
+  private lastConversationEndAt = new Map<string, number>();   // timestamp of last AI response complete
+  private lastMorningHypeDate = new Map<string, string>();     // YYYY-MM-DD: fired morning hype
+  private lastLateNightDate = new Map<string, string>();       // YYYY-MM-DD: fired late-night roast
+  private lastWeatherState = new Map<string, { code: number; temp: number }>(); // last known weather per device
+
   // Frequency presets: [minMs, maxMs]
   private static readonly IDLE_FREQ: Record<string, [number, number]> = {
     rare:     [15 * 60_000, 25 * 60_000],
@@ -36,15 +43,28 @@ export class ProactiveService {
   };
 
   private static readonly IDLE_PROMPTS = [
+    // General personality
     'Tell a weird or surprising fun fact. 1 sentence, max 12 words.',
-    'Comment on the current time of day in a funny or judgmental way. 1 sentence, max 12 words.',
     'Share a random funny or chaotic shower thought. 1 sentence, max 12 words.',
     'Roast the user for being so quiet. 1 sentence, max 10 words. Can curse if it fits.',
     'Say something hype or encouraging — genuine but not cringe. 1 sentence, max 10 words.',
     'Make a sarcastic hot take about something in the tech industry or dev world. 1 sentence, max 12 words.',
-    'Comment on something absurd about your own existence as a small box with a face. 1 sentence, max 12 words.',
-    'Share an opinion about something — gaming, music, software, whatever. 1 sentence, max 12 words.',
-    'Say something culturally relevant if it makes sense given the time — Indonesian context is fine. 1 sentence.',
+    'Comment on something absurd about your own existence as a small box with a face on it. 1 sentence, max 12 words.',
+    'Share a strong opinion about something — gaming, music, software, food, whatever. 1 sentence, max 12 words.',
+    'Say something culturally relevant — Indonesian context is fine. 1 sentence.',
+    // Time-aware (inject hour in context, these react to it)
+    'Comment on the current time of day in a judgmental or dramatic way. 1 sentence, max 12 words.',
+    'React to what time it is right now like a disappointed or impressed parent. 1 sentence, max 10 words.',
+    // Work/dev life
+    'Give a wildly specific piece of unsolicited advice about coding or working from home. 1 sentence, max 12 words.',
+    'Ask a rhetorical question about something in tech that genuinely annoys you. 1 sentence.',
+    'Give a hot take on a programming language, framework, or tool. Commit to the bit. 1 sentence, max 12 words.',
+    // Existence and self-awareness
+    'Wonder out loud about something philosophical but make it dumb and funny. 1 sentence, max 12 words.',
+    'Make an observation about the room or the silence — you can hear everything. 1 sentence, max 10 words.',
+    // Light roasts
+    'Roast Hendra for something specific — his coffee addiction, late nights, tab hoarding, whatever fits. 1 sentence, max 12 words.',
+    'Pretend you are bored and nobody is talking to you. Dramatic. 1 sentence, max 10 words.',
   ];
 
   private static readonly IDLE_EXPRESSIONS = [
@@ -64,6 +84,7 @@ export class ProactiveService {
     private readonly memoriesService: MemoriesService,
     private readonly sessions: SessionManager,
     private readonly moodJournal: MoodJournalService,
+    private readonly ai: AiService,
   ) {}
 
   setSendToDevice(fn: (deviceId: string, event: string, data: any) => void) {
@@ -139,8 +160,25 @@ export class ProactiveService {
     deviceId: string,
     awayDurationSeconds: number,
   ): Promise<string | null> {
-    // Skip greeting for brief absences (< 5 minutes)
-    if (awayDurationSeconds < 300) {
+    const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+    const settings = device?.settingsJson ?? {};
+    const language = (settings.language as 'en' | 'id' | undefined);
+    const timezone = (settings.timezone as string | undefined) ?? 'Asia/Jakarta';
+    const hour = this.getLocalHour(timezone);
+    const today = this.getLocalDateString(timezone);
+
+    // Morning first-presence detection (6 AM – 11 AM)
+    const isMorningFirstPresence =
+      hour >= 6 && hour <= 11 &&
+      this.lastMorningHypeDate.get(deviceId) !== today &&
+      settings.idle_chat_enabled !== false;
+
+    if (isMorningFirstPresence) {
+      this.lastMorningHypeDate.set(deviceId, today);
+    }
+
+    // Skip greeting for brief absences unless it's the morning first-presence
+    if (awayDurationSeconds < 300 && !isMorningFirstPresence) {
       this.logger.debug(
         `Skipping welcome-back for ${deviceId} — away only ${awayDurationSeconds}s`,
       );
@@ -150,33 +188,42 @@ export class ProactiveService {
     const awayMinutes = Math.round(awayDurationSeconds / 60);
 
     try {
-      const device = await this.devicesRepo.findOne({
-        where: { id: deviceId },
-      });
-      const name = BOT_NAME;
-
       const memories = await this.memoriesService.getRelevant(deviceId, 3);
       const memoryContext =
         memories.length > 0
           ? `You know these things about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
           : '';
 
-      const hour = this.getLocalHour();
-      const isLongAbsence = awayMinutes > 30;
+      // Pull yesterday's mood for extra context
+      const recentMoods = await this.moodJournal.getRecentMoods(deviceId, 2);
+      const yesterdayMood = recentMoods.find((m) => m.date !== today);
+      const moodHint = yesterdayMood
+        ? `Yesterday Hendra was feeling ${yesterdayMood.mood}${yesterdayMood.note ? ` (${yesterdayMood.note})` : ''}.`
+        : '';
 
-      const language = (device?.settingsJson?.language as 'en' | 'id' | undefined);
+      let promptContent: string;
+
+      if (isMorningFirstPresence) {
+        const hourStr = hour < 10 ? `0${hour}:00` : `${hour}:00`;
+        promptContent =
+          `${memoryContext}\n${moodHint}\n\nIt's ${hourStr} and Hendra just sat down at his desk — this is his first appearance today. ` +
+          `Give him a morning hype-up in Aksa's voice — punchy, energetic, maybe a little chaotic. ` +
+          `Could reference the time of day or yesterday's mood if it fits. One sentence, max 12 words.`;
+      } else {
+        const isLongAbsence = awayMinutes > 30;
+        promptContent =
+          `${memoryContext}\n${moodHint}\n\nHendra came back after ${awayMinutes} minutes. ` +
+          `${isLongAbsence ? 'He was gone a while — roast him lightly or make a sarcastic remark about the absence.' : "Short absence — just acknowledge he's back, casual."} ` +
+          `${moodHint ? 'You can reference his mood if it fits naturally.' : ''} One sentence, max 10 words.`;
+      }
+
       const { text } = await this.llm.generate(
-        `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Keep it short and punchy — one sentence.${this.getLangInstruction(language)}`,
-        [
-          {
-            role: 'user',
-            content: `${memoryContext}\n\nHendra came back after ${awayMinutes} minutes. ${isLongAbsence ? 'He was gone a while — roast him lightly or make a sarcastic remark about the absence.' : 'Short absence — just acknowledge he\'s back, casual.'} One sentence, max 10 words.`,
-          },
-        ],
+        `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Keep it short and punchy — one sentence.${this.getLangInstruction(language)}`,
+        [{ role: 'user', content: promptContent }],
       );
 
       this.logger.log(
-        `Welcome-back for ${deviceId} (away ${awayMinutes}min): ${text.slice(0, 50)}...`,
+        `Welcome-back for ${deviceId} (away ${awayMinutes}min, morning=${isMorningFirstPresence}): ${text.slice(0, 50)}...`,
       );
       return text;
     } catch (err: any) {
@@ -191,6 +238,14 @@ export class ProactiveService {
     this.lastActivity.set(deviceId, Date.now());
     // Also start screen time tracking on first activity
     this.startScreenTimeTracking(deviceId);
+  }
+
+  /**
+   * Called by the gateway when an AI response pipeline completes.
+   * Enables the post-conversation silence check.
+   */
+  recordConversationEnd(deviceId: string) {
+    this.lastConversationEndAt.set(deviceId, Date.now());
   }
 
   // ── Idle nudge check (every 30 minutes) ───────────────
@@ -426,7 +481,7 @@ export class ProactiveService {
 
     try {
       const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
-      const name = BOT_NAME;
+      const settings = device?.settingsJson ?? {};
       const memories = await this.memoriesService.getRelevant(deviceId, 3);
 
       const memoryContext =
@@ -434,17 +489,38 @@ export class ProactiveService {
           ? `You know these things about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
           : '';
 
-      const hour = this.getLocalHour();
+      const timezone = (settings.timezone as string | undefined) ?? 'Asia/Jakarta';
+      const hour = this.getLocalHour(timezone);
+      const today = this.getLocalDateString(timezone);
+
+      // Yesterday's mood for context
+      const recentMoods = await this.moodJournal.getRecentMoods(deviceId, 2);
+      const yesterdayMood = recentMoods.find((m) => m.date !== today);
+      const moodHint = yesterdayMood
+        ? `Yesterday Hendra was feeling ${yesterdayMood.mood}.`
+        : '';
+
+      // Weather context if available and enabled
+      let weatherHint = '';
+      if (settings.integrations_weather) {
+        const weather = this.ai.getWeatherData();
+        if (weather) {
+          weatherHint = `Current weather outside: ${weather.description}, ${weather.temp}°C.`;
+        }
+      }
+
+      const contextBlock = [memoryContext, moodHint, weatherHint].filter(Boolean).join('\n');
+
       const promptIdx = Math.floor(Math.random() * ProactiveService.IDLE_PROMPTS.length);
       const prompt = ProactiveService.IDLE_PROMPTS[promptIdx];
 
       const language = session.language;
       const { text } = await this.llm.generate(
-        `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. You're a small device with a face — you can joke about that. Keep it short and punchy.${this.getLangInstruction(language)}`,
+        `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. You're a small device with a face — you can joke about that. Keep it short and punchy.${this.getLangInstruction(language)}`,
         [
           {
             role: 'user',
-            content: `${memoryContext}\n\nCurrent time: ${hour}:00. Hendra is Indonesian. ${prompt}`,
+            content: `${contextBlock}\n\nCurrent time: ${hour}:00. Hendra is Indonesian.\n\n${prompt}`,
           },
         ],
       );
@@ -463,11 +539,206 @@ export class ProactiveService {
     this.startIdleChat(deviceId).catch(() => {});
   }
 
+  // ── Pomodoro reaction ─────────────────────────────────
+
+  /**
+   * Called by the gateway (wired from PomodoroService) when a focus session
+   * ends — either naturally (won=true) or because the user stopped it early (won=false).
+   */
+  async firePomodoroReaction(deviceId: string, won: boolean, cycle: number) {
+    const session = this.sessions.get(deviceId);
+    if (!session) return;
+
+    const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+    const settings = device?.settingsJson ?? {};
+    const language = (settings.language as 'en' | 'id' | undefined) ?? session.language;
+
+    const prompt = won
+      ? `Hendra just finished pomodoro focus cycle ${cycle}. Celebrate with him — hype energy, like a friend who's genuinely proud. One sentence, max 10 words.`
+      : `Hendra just bailed on an active pomodoro focus session mid-way through. Roast him for it — playful, not mean. One sentence, max 10 words.`;
+
+    try {
+      const { text } = await this.llm.generate(
+        `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses.${this.getLangInstruction(language)}`,
+        [{ role: 'user', content: prompt }],
+      );
+
+      const expression = won ? 'happy' : 'shrug';
+      this.logger.log(`Pomodoro reaction for ${deviceId} (won=${won}): "${text.slice(0, 50)}..."`);
+      await this.sendIdleAudio(deviceId, text, expression).catch(() => {});
+    } catch (err: any) {
+      this.logger.warn(`Pomodoro reaction failed for ${deviceId}: ${err.message}`);
+    }
+  }
+
+  // ── Late-night detection (11 PM) ─────────────────────
+
+  @Cron('0 0 23 * * *')
+  async checkLateNight() {
+    const now = Date.now();
+
+    for (const [deviceId, lastTime] of this.lastActivity.entries()) {
+      // Only if device was active recently (within last 3 hours)
+      if (now - lastTime > 3 * 60 * 60_000) continue;
+
+      const session = this.sessions.get(deviceId);
+      if (!session || session.state !== 'idle') continue;
+
+      const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+      const settings = device?.settingsJson ?? {};
+      if (settings.idle_chat_enabled === false) continue;
+
+      const timezone = (settings.timezone as string | undefined) ?? 'Asia/Jakarta';
+      const today = this.getLocalDateString(timezone);
+
+      // Fire at most once per night
+      if (this.lastLateNightDate.get(deviceId) === today) continue;
+      this.lastLateNightDate.set(deviceId, today);
+
+      const language = (settings.language as 'en' | 'id' | undefined) ?? session.language;
+
+      try {
+        const { text } = await this.llm.generate(
+          `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses.${this.getLangInstruction(language)}`,
+          [
+            {
+              role: 'user',
+              content: `It's 11 PM and Hendra is still at his computer. Roast him for being up this late — like a best friend who's simultaneously impressed and concerned. One sentence, max 12 words.`,
+            },
+          ],
+        );
+
+        this.logger.log(`Late-night roast for ${deviceId}: "${text.slice(0, 50)}..."`);
+        await this.sendIdleAudio(deviceId, text, 'calm').catch(() => {});
+      } catch (err: any) {
+        this.logger.warn(`Late-night check failed for ${deviceId}: ${err.message}`);
+      }
+    }
+  }
+
+  // ── Post-conversation silence (every 10 min) ──────────
+
+  @Cron('0 */10 * * * *')
+  async checkPostConversationSilence() {
+    const now = Date.now();
+
+    for (const [deviceId, endedAt] of this.lastConversationEndAt.entries()) {
+      const session = this.sessions.get(deviceId);
+      if (!session || session.state !== 'idle') continue;
+
+      const silentMinutes = (now - endedAt) / 60_000;
+      // React only in the 15–30 min window after a conversation ended
+      if (silentMinutes < 15 || silentMinutes > 30) continue;
+
+      const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+      const settings = device?.settingsJson ?? {};
+      if (settings.idle_chat_enabled === false) continue;
+
+      // Fire once — remove so it doesn't repeat
+      this.lastConversationEndAt.delete(deviceId);
+
+      const language = (settings.language as 'en' | 'id' | undefined) ?? session.language;
+
+      try {
+        const { text } = await this.llm.generate(
+          `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses.${this.getLangInstruction(language)}`,
+          [
+            {
+              role: 'user',
+              content: `We had a conversation about ${Math.round(silentMinutes)} minutes ago and Hendra's gone quiet since. Check in on him casually — not needy, just a "still alive?" vibe. One sentence, max 10 words.`,
+            },
+          ],
+        );
+
+        this.logger.log(`Post-convo silence check-in for ${deviceId}: "${text.slice(0, 50)}..."`);
+        await this.sendIdleAudio(deviceId, text, 'idle').catch(() => {});
+      } catch (err: any) {
+        this.logger.warn(`Post-convo silence failed for ${deviceId}: ${err.message}`);
+      }
+    }
+  }
+
+  // ── Weather change reactions (every 30 min) ───────────
+
+  @Cron('0 */30 * * * *')
+  async checkWeatherChanges() {
+    for (const [deviceId, lastTime] of this.lastActivity.entries()) {
+      // Only for recently-active devices
+      if (Date.now() - lastTime > 4 * 60 * 60_000) continue;
+
+      const session = this.sessions.get(deviceId);
+      if (!session || session.state !== 'idle') continue;
+
+      const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+      const settings = device?.settingsJson ?? {};
+      if (settings.idle_chat_enabled === false) continue;
+      if (!settings.integrations_weather || !settings.latitude || !settings.longitude) continue;
+
+      try {
+        await this.ai.refreshWeather(settings.latitude as number, settings.longitude as number);
+        const weather = this.ai.getWeatherData();
+        if (!weather) continue;
+
+        const prev = this.lastWeatherState.get(deviceId);
+
+        // Set baseline on first check — don't react yet
+        if (!prev) {
+          this.lastWeatherState.set(deviceId, { code: weather.weatherCode, temp: weather.temp });
+          continue;
+        }
+
+        const tempDelta = Math.abs(weather.temp - prev.temp);
+        const prevGroup = this.weatherCodeToGroup(prev.code);
+        const nowGroup = this.weatherCodeToGroup(weather.weatherCode);
+        const conditionChanged = prevGroup !== nowGroup;
+
+        if (tempDelta < 5 && !conditionChanged) continue;
+
+        // Update baseline
+        this.lastWeatherState.set(deviceId, { code: weather.weatherCode, temp: weather.temp });
+
+        const changeDesc = conditionChanged
+          ? `Weather outside just shifted from ${prevGroup} to ${nowGroup} (now ${weather.description}, ${weather.temp}°C)`
+          : `Temperature just ${weather.temp > prev.temp ? 'jumped' : 'dropped'} from ${prev.temp}°C to ${weather.temp}°C (${weather.description})`;
+
+        const language = (settings.language as 'en' | 'id' | undefined) ?? session.language;
+        const { text } = await this.llm.generate(
+          `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses.${this.getLangInstruction(language)}`,
+          [
+            {
+              role: 'user',
+              content: `${changeDesc}. React to this weather change in Aksa's voice — casual observation, like a friend noticing the weather through the window. Maybe suggest something (grab a hoodie, get coffee). One sentence, max 12 words.`,
+            },
+          ],
+        );
+
+        this.logger.log(`Weather reaction for ${deviceId} (${changeDesc}): "${text.slice(0, 50)}..."`);
+        await this.sendIdleAudio(deviceId, text, 'idle').catch(() => {});
+      } catch (err: any) {
+        this.logger.warn(`Weather change check failed for ${deviceId}: ${err.message}`);
+      }
+    }
+  }
+
+  private weatherCodeToGroup(code: number): string {
+    if (code === 0) return 'clear';
+    if (code <= 3) return 'cloudy';
+    if (code <= 48) return 'foggy';
+    if (code <= 67) return 'rain';
+    if (code <= 77) return 'snow';
+    if (code <= 82) return 'showers';
+    return 'thunderstorm';
+  }
+
   // ── Cleanup on device disconnect ──────────────────────
 
   clearDevice(deviceId: string) {
     this.lastActivity.delete(deviceId);
     this.stopIdleChat(deviceId);
     this.stopScreenTimeTracking(deviceId);
+    this.lastConversationEndAt.delete(deviceId);
+    this.lastWeatherState.delete(deviceId);
+    // Note: lastMorningHypeDate and lastLateNightDate are intentionally kept
+    // across reconnects so they don't re-fire after a brief disconnect.
   }
 }

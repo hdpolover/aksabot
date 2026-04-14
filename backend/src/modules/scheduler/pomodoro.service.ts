@@ -22,10 +22,21 @@ export class PomodoroService {
     data: any,
   ) => void = () => {};
 
+  // Injected from gateway — fires LLM-generated celebration/taunt via TTS
+  private sendPomodoroReaction: (
+    deviceId: string,
+    won: boolean,
+    cycle: number,
+  ) => Promise<void> = async () => {};
+
   constructor(private readonly reminderService: ReminderService) {}
 
   setSendToDevice(fn: (deviceId: string, event: string, data: any) => void) {
     this.sendToDevice = fn;
+  }
+
+  setSendPomodoroReaction(fn: (deviceId: string, won: boolean, cycle: number) => Promise<void>) {
+    this.sendPomodoroReaction = fn;
   }
 
   async start(deviceId: string): Promise<PomodoroInfo> {
@@ -64,6 +75,8 @@ export class PomodoroService {
     if (!state) return;
 
     if (state.phase === 'focus') {
+      const completedCycle = state.cycle;
+
       // Switch to break
       const isLongBreak =
         state.cycle % state.cyclesBeforeLongBreak === 0;
@@ -80,7 +93,7 @@ export class PomodoroService {
         durationMinutes: breakMinutes,
       });
 
-      // Send audio reminder
+      // Send audio reminder (pool-based)
       this.reminderService
         .generatePomodoro(deviceId, state)
         .then((reminder) => {
@@ -90,11 +103,15 @@ export class PomodoroService {
             cacheKey: reminder.cacheKey,
             display: reminder.display,
           });
-          // Send audio as binary (handled by gateway)
         })
         .catch((err) =>
           this.logger.warn(`Pomodoro reminder failed: ${err.message}`),
         );
+
+      // Fire LLM-generated celebration quip for completing focus
+      this.sendPomodoroReaction(deviceId, true, completedCycle).catch((err) =>
+        this.logger.warn(`Pomodoro celebration failed: ${err.message}`),
+      );
 
       this.scheduleTransition(deviceId, breakMinutes);
     } else {
@@ -132,11 +149,21 @@ export class PomodoroService {
     const state = this.sessions.get(deviceId);
     if (!state) return;
 
+    const abandonedFocus = state.phase === 'focus';
+    const cycle = state.cycle;
+
     if (state.timer) clearTimeout(state.timer);
     this.sessions.delete(deviceId);
 
     this.sendToDevice(deviceId, 'proactive:pomodoro', { action: 'stop' });
     this.logger.log(`Pomodoro stopped for device ${deviceId}`);
+
+    // If stopped mid-focus, fire a playful taunt
+    if (abandonedFocus) {
+      this.sendPomodoroReaction(deviceId, false, cycle).catch((err) =>
+        this.logger.warn(`Pomodoro abandon taunt failed: ${err.message}`),
+      );
+    }
   }
 
   getInfo(deviceId: string): PomodoroInfo {

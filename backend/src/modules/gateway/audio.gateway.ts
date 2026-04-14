@@ -75,6 +75,11 @@ export class AudioGateway
       (deviceId, text, expression) => this.sendIdleChatAudio(deviceId, text, expression),
     );
 
+    // Wire pomodoro → proactive so celebrations/taunts go through TTS
+    this.pomodoro.setSendPomodoroReaction(
+      (deviceId, won, cycle) => this.proactive.firePomodoroReaction(deviceId, won, cycle),
+    );
+
     // Server-side heartbeat: ping all devices every 10s, close dead ones after 20s
     this.heartbeatTimer = setInterval(() => this.heartbeat(), AudioGateway.HEARTBEAT_INTERVAL_MS);
   }
@@ -1153,6 +1158,9 @@ export class AudioGateway
       session.state = 'idle';
       this.sessions.clearInterrupted(deviceId);
       this.sendToDevice(deviceId, 'state:update', { state: 'idle' });
+
+      // Mark conversation end for post-conversation silence detection
+      this.proactive.recordConversationEnd(deviceId);
 
       // Resume idle personality chat
       this.proactive.startIdleChat(deviceId).catch(() => {});
