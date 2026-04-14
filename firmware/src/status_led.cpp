@@ -123,6 +123,10 @@ void status_led::syncToState() {
             set(0, 200, 220, Pattern::SOLID);          // Cyan solid
             break;
 
+        case BotState::INTERCOM:
+            set(200, 50, 180, Pattern::PULSE);         // Magenta pulse — incoming voice from app
+            break;
+
         case BotState::OFFLINE:
             set(200, 40, 40, Pattern::BLINK);          // Red slow blink
             break;

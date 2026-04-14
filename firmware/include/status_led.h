@@ -11,7 +11,8 @@
 ///   Idle + connected     → green slow breathe
 ///   Listening            → blue solid
 ///   Thinking             → yellow pulse
-///   Speaking             → cyan solid
+///   Speaking (AI)        → cyan solid
+///   Intercom (app voice) → magenta pulse
 ///   Focus mode           → purple dim solid
 ///   Offline/disconnected → red slow blink
 ///   Low battery          → orange fast blink

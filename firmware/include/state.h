@@ -6,7 +6,8 @@ enum class BotState {
     IDLE,       // Default, waiting for interaction
     LISTENING,  // Touch held, recording audio
     THINKING,   // Waiting for backend response
-    SPEAKING,   // Playing audio response
+    SPEAKING,   // Playing audio response from AI
+    INTERCOM,   // Playing voice message pushed from mobile app
     OFFLINE,    // No backend connection
     SLEEPING,   // Power saving
 };

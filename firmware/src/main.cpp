@@ -117,6 +117,9 @@ static void syncFaceToState() {
         case BotState::SPEAKING:
             face::setExpression(face::Expression::SPEAKING, 100);
             break;
+        case BotState::INTERCOM:
+            face::setExpression(face::Expression::CALM, 100);
+            break;
         case BotState::OFFLINE:
             face::setExpression(face::Expression::OFFLINE, 300);
             break;
@@ -271,6 +274,7 @@ static void onWsJson(const char* event, const char* data) {
         face::feedAudioAmplitude(0);
         display::setTranscriptText("");
         if (appState.botState == BotState::SPEAKING ||
+            appState.botState == BotState::INTERCOM ||
             appState.botState == BotState::THINKING) {
             appState.botState = BotState::IDLE;
             syncFaceToState();
@@ -297,14 +301,25 @@ static void onWsJson(const char* event, const char* data) {
 
         pendingResponseEnds++;  // This response:start will produce exactly one response:end
 
-        appState.botState = BotState::SPEAKING;
+        // Detect intercom pushes from the mobile app (type:"intercom") vs normal AI speech.
+        bool isIntercom = false;
+        if (data && data[0] != '\0') {
+            JsonDocument startDoc;
+            if (deserializeJson(startDoc, data) == DeserializationError::Ok) {
+                const char* type = startDoc["type"] | "";
+                isIntercom = (strcmp(type, "intercom") == 0);
+            }
+        }
+
+        appState.botState = isIntercom ? BotState::INTERCOM : BotState::SPEAKING;
         syncFaceToState();
         cacheAccumLen = 0;
         playbackDone = false;
         playbackBuffering = true;  // accumulate frames before playing
         playbackActive = true;
         lastFrameReceivedMs = millis();  // Init starvation timer
-        Serial.printf("[Main] Response start — buffering audio (pending ends: %d)\n", (int)pendingResponseEnds);
+        Serial.printf("[Main] Response start — %s, buffering audio (pending ends: %d)\n",
+                      isIntercom ? "intercom" : "AI speech", (int)pendingResponseEnds);
     }
     else if (strcmp(event, "response:text") == 0) {
         // LLM response text: parse {"text":"...","isFinal":bool} or use raw
@@ -886,10 +901,12 @@ static void onTouchEvent(touch::Event event) {
 
         case touch::Event::TAP:
             if (appState.botState == BotState::SPEAKING ||
+                appState.botState == BotState::INTERCOM ||
                 appState.botState == BotState::THINKING) {
                 // Interrupt — stop whatever is happening and show confusion.
-                // Playback-specific teardown only applies when actually speaking.
-                if (appState.botState == BotState::SPEAKING) {
+                // Playback-specific teardown applies to both SPEAKING and INTERCOM.
+                if (appState.botState == BotState::SPEAKING ||
+                    appState.botState == BotState::INTERCOM) {
                     playbackActive      = false;
                     playbackDone        = false;
                     pendingResponseEnds = 0;
