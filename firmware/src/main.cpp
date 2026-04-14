@@ -634,11 +634,12 @@ static void onWsJson(const char* event, const char* data) {
                 nvs_store::setFaceStyle(static_cast<uint8_t>(style->id));
                 Serial.printf("[Main] Config: face_style=%s\n", styleName);
             }
-            // Face colors — background and eye body as 6-char hex strings ("rrggbb")
+            // Face colors — background, eye body, and mouth as 6-char hex strings ("rrggbb")
             {
                 bool colorChanged = false;
-                uint32_t newBg  = nvs_store::getFaceBgColor();
-                uint32_t newEye = nvs_store::getFaceEyeColor();
+                uint32_t newBg    = nvs_store::getFaceBgColor();
+                uint32_t newEye   = nvs_store::getFaceEyeColor();
+                uint32_t newMouth = nvs_store::getFaceMouthColor();
                 if (!doc["face_bg_color"].isNull()) {
                     const char* hex = doc["face_bg_color"] | "000000";
                     newBg = (uint32_t)strtol(hex, nullptr, 16) & 0x00FFFFFFu;
@@ -651,8 +652,14 @@ static void onWsJson(const char* event, const char* data) {
                     nvs_store::setFaceEyeColor(newEye);
                     colorChanged = true;
                 }
+                if (!doc["face_mouth_color"].isNull()) {
+                    const char* hex = doc["face_mouth_color"] | "FFFFFF";
+                    newMouth = (uint32_t)strtol(hex, nullptr, 16) & 0x00FFFFFFu;
+                    nvs_store::setFaceMouthColor(newMouth);
+                    colorChanged = true;
+                }
                 if (colorChanged) {
-                    display::setFaceColors(newBg, newEye);
+                    display::setFaceColors(newBg, newEye, newMouth);
                 }
             }
             // Show transcript overlay
@@ -1416,7 +1423,7 @@ void setup() {
     // ── 3. Display init + splash ───────────────────────────
     display::init();
     display::setFaceStyle(nvs_store::getFaceStyle());  // restore face style from NVS
-    display::setFaceColors(nvs_store::getFaceBgColor(), nvs_store::getFaceEyeColor());
+    display::setFaceColors(nvs_store::getFaceBgColor(), nvs_store::getFaceEyeColor(), nvs_store::getFaceMouthColor());
     {
         // Restore idle display mode from NVS
         char idleMode[16];

@@ -80,6 +80,11 @@ bool setFaceBgColor(uint32_t color);
 uint32_t getFaceEyeColor();
 bool setFaceEyeColor(uint32_t color);
 
+/// Mouth color as 24-bit RGB (0xRRGGBB). Default: 0xFFFFFF (white).
+/// Applied to all expression mouth shapes uniformly.
+uint32_t getFaceMouthColor();
+bool setFaceMouthColor(uint32_t color);
+
 // ── Idle display mode ─────────────────────────────────
 
 /// Returns the stored idle display mode as a string ("face", "clock", "status").

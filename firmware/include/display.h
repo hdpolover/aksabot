@@ -139,18 +139,16 @@ void setFaceStyle(uint8_t styleId);
 /// Returns the current face style ID.
 uint8_t getFaceStyleId();
 
-/// Override the face background color and eye body color at runtime.
+/// Override the face background, eye body, and mouth color at runtime.
 ///
-/// bgColor     — 24-bit RGB (0xRRGGBB) for the screen background.
-///               All expressions share the same background, so this is safe
-///               to override without breaking emotional expressiveness.
-/// eyeBodyColor — 24-bit RGB for:
-///               - NOVA: the rounded-rectangle eye fill
-///               - ORBIT: the eye sclera (white of the eye)
+/// bgColor      — 24-bit RGB (0xRRGGBB) for the screen background.
+/// eyeBodyColor — 24-bit RGB for NOVA eye rectangles / ORBIT eye sclera.
+/// mouthColor   — 24-bit RGB for the mouth shape across all expressions.
 ///
 /// Takes effect immediately on the next rendered frame.
-/// Call nvs_store::setFaceBgColor() / setFaceEyeColor() separately to persist.
-void setFaceColors(uint32_t bgColor, uint32_t eyeBodyColor);
+/// Call nvs_store::setFaceBgColor() / setFaceEyeColor() / setFaceMouthColor()
+/// separately to persist across reboots.
+void setFaceColors(uint32_t bgColor, uint32_t eyeBodyColor, uint32_t mouthColor);
 
 /// Set the home mode — the mode the display returns to after wake, reminder
 /// dismiss, and other events that would otherwise hard-reset to FACE.

@@ -88,6 +88,11 @@ export class UpdateSettingsDto {
   @IsOptional()
   face_eye_color?: string;
 
+  @IsString()
+  @Matches(/^[0-9a-fA-F]{6}$/, { message: 'face_mouth_color must be a 6-character hex string' })
+  @IsOptional()
+  face_mouth_color?: string;
+
   @IsNumber()
   @Min(100)
   @Max(500)

@@ -21,8 +21,9 @@ static const char* K_PRES_RSSI     = "pres_rssi";
 static const char* K_PRES_GRACE    = "pres_grace";
 static const char* K_DISP_TRANSCRIPT = "disp_transcript";
 static const char* K_FACE_STYLE    = "face_style";
-static const char* K_FACE_BG_COL  = "face_bg_col";   // 24-bit RGB as uint32
-static const char* K_FACE_EYE_COL = "face_eye_col";  // 24-bit RGB as uint32
+static const char* K_FACE_BG_COL    = "face_bg_col";    // 24-bit RGB as uint32
+static const char* K_FACE_EYE_COL  = "face_eye_col";   // 24-bit RGB as uint32
+static const char* K_FACE_MOUTH_COL = "face_mth_col";  // 24-bit RGB as uint32
 static const char* K_IDLE_DISP    = "idle_disp";
 static const char* K_SETUP_DONE   = "setup_done";
 static const char* K_FORCE_PROV   = "force_prov";
@@ -222,6 +223,16 @@ uint32_t nvs_store::getFaceEyeColor() {
 bool nvs_store::setFaceEyeColor(uint32_t color) {
     if (!initialized) return false;
     return prefs.putUInt(K_FACE_EYE_COL, color) > 0;
+}
+
+uint32_t nvs_store::getFaceMouthColor() {
+    if (!initialized) return 0xFFFFFFu;
+    return prefs.getUInt(K_FACE_MOUTH_COL, 0xFFFFFFu);
+}
+
+bool nvs_store::setFaceMouthColor(uint32_t color) {
+    if (!initialized) return false;
+    return prefs.putUInt(K_FACE_MOUTH_COL, color) > 0;
 }
 
 // ── Idle display mode ──────────────────────────────────

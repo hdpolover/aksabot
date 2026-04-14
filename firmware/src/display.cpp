@@ -93,6 +93,7 @@ static const face_style::FaceStyleDef* g_faceStyle = &face_style::NOVA;
 // Default eyeBody is rgb(218,220,230) = 0xDEFC in RGB565.
 static uint32_t g_faceBgColor    = 0x000000u;
 static uint16_t g_faceEyeBody565 = 0xDEFCu;  // rgb(218,220,230)
+static uint16_t g_faceMouth565   = 0xFFFFu;  // rgb(255,255,255) — default white mouth
 
 // ── Rich color system (from face-animations firmware) ─────
 
@@ -823,11 +824,12 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
 
     int exprIdx = (int)fs.expression;
     if (exprIdx < 0 || exprIdx >= EXPR_COUNT) exprIdx = 0;
-    // Copy so we can apply the runtime bg override without modifying the const table.
+    // Copy so we can apply runtime color overrides without modifying the const table.
     Palette pal = PAL[exprIdx];
     pal.bg = rgb((g_faceBgColor >> 16) & 0xFF,
                  (g_faceBgColor >>  8) & 0xFF,
                   g_faceBgColor        & 0xFF);
+    pal.mouth = g_faceMouth565;
     const EyeShape& eye = EYES[exprIdx];
 
     // Clear with (overridable) background
@@ -1499,15 +1501,22 @@ uint8_t display::getFaceStyleId() {
     return static_cast<uint8_t>(g_faceStyle->id);
 }
 
-void display::setFaceColors(uint32_t bgColor, uint32_t eyeBodyColor) {
+void display::setFaceColors(uint32_t bgColor, uint32_t eyeBodyColor, uint32_t mouthColor) {
     g_faceBgColor    = bgColor & 0x00FFFFFFu;
-    // Convert 24-bit RGB → RGB565 for the eye body
-    uint8_t r = (eyeBodyColor >> 16) & 0xFF;
-    uint8_t g = (eyeBodyColor >>  8) & 0xFF;
-    uint8_t b =  eyeBodyColor        & 0xFF;
-    g_faceEyeBody565 = rgb(r, g, b);
-    Serial.printf("[Display] Face colors: bg=#%06lX eye=#%06lX (565=0x%04X)\n",
-                  (unsigned long)g_faceBgColor, (unsigned long)eyeBodyColor, g_faceEyeBody565);
+    {
+        uint8_t r = (eyeBodyColor >> 16) & 0xFF;
+        uint8_t g = (eyeBodyColor >>  8) & 0xFF;
+        uint8_t b =  eyeBodyColor        & 0xFF;
+        g_faceEyeBody565 = rgb(r, g, b);
+    }
+    {
+        uint8_t r = (mouthColor >> 16) & 0xFF;
+        uint8_t g = (mouthColor >>  8) & 0xFF;
+        uint8_t b =  mouthColor        & 0xFF;
+        g_faceMouth565 = rgb(r, g, b);
+    }
+    Serial.printf("[Display] Face colors: bg=#%06lX eye=#%06lX mouth=#%06lX\n",
+                  (unsigned long)g_faceBgColor, (unsigned long)eyeBodyColor, (unsigned long)mouthColor);
 }
 
 // ── Image dimension helpers ──────────────────────────────────────────────────

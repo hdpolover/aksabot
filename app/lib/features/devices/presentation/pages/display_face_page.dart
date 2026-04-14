@@ -29,8 +29,9 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
   String _idleDisplayMode = 'face';
 
   // ── Face colors ───────────────────────────────────────────────────────────
-  Color _bgColor  = const Color(0xFF000000);
-  Color _eyeColor = const Color(0xFFDADCE6);
+  Color _bgColor    = const Color(0xFF000000);
+  Color _eyeColor   = const Color(0xFFDADCE6);
+  Color _mouthColor = const Color(0xFFFFFFFF);
 
   // ── Idle behavior settings ────────────────────────────────────────────────
   bool _idleChatEnabled = true;
@@ -40,8 +41,9 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
   // Server copies for dirty detection
   String _serverFaceStyle = 'nova';
   String _serverIdleDisplayMode = 'face';
-  Color _serverBgColor  = const Color(0xFF000000);
-  Color _serverEyeColor = const Color(0xFFDADCE6);
+  Color _serverBgColor    = const Color(0xFF000000);
+  Color _serverEyeColor   = const Color(0xFFDADCE6);
+  Color _serverMouthColor = const Color(0xFFFFFFFF);
   bool _serverChatEnabled = true;
   String _serverChatFrequency = 'normal';
   String _serverAnimationSpeed = 'normal';
@@ -73,8 +75,9 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
 
     final fs = s['face_style'] as String?;
     final idm = s['idle_display_mode'] as String?;
-    final bgHex  = s['face_bg_color']  as String?;
-    final eyeHex = s['face_eye_color'] as String?;
+    final bgHex    = s['face_bg_color']    as String?;
+    final eyeHex   = s['face_eye_color']   as String?;
+    final mouthHex = s['face_mouth_color'] as String?;
     final chatEnabled = s['idle_chat_enabled'] as bool? ?? true;
     final chatFreq = s['idle_chat_frequency'] as String? ?? 'normal';
     final animSpeed = s['idle_animation_speed'] as String? ?? 'normal';
@@ -82,22 +85,25 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
     final faceStyle = (fs == 'orbit' || fs == 'nova') ? fs! : 'nova';
     final idleMode =
         (idm == 'face' || idm == 'clock' || idm == 'status') ? idm! : 'face';
-    final bgColor  = _hexToColor(bgHex)  ?? const Color(0xFF000000);
-    final eyeColor = _hexToColor(eyeHex) ?? const Color(0xFFDADCE6);
+    final bgColor    = _hexToColor(bgHex)    ?? const Color(0xFF000000);
+    final eyeColor   = _hexToColor(eyeHex)   ?? const Color(0xFFDADCE6);
+    final mouthColor = _hexToColor(mouthHex) ?? const Color(0xFFFFFFFF);
 
     setState(() {
       _faceStyle = faceStyle;
       _idleDisplayMode = idleMode;
-      _bgColor  = bgColor;
-      _eyeColor = eyeColor;
+      _bgColor    = bgColor;
+      _eyeColor   = eyeColor;
+      _mouthColor = mouthColor;
       _idleChatEnabled = chatEnabled;
       _idleChatFrequency = chatFreq;
       _idleAnimationSpeed = animSpeed;
 
       _serverFaceStyle = faceStyle;
       _serverIdleDisplayMode = idleMode;
-      _serverBgColor  = bgColor;
-      _serverEyeColor = eyeColor;
+      _serverBgColor    = bgColor;
+      _serverEyeColor   = eyeColor;
+      _serverMouthColor = mouthColor;
       _serverChatEnabled = chatEnabled;
       _serverChatFrequency = chatFreq;
       _serverAnimationSpeed = animSpeed;
@@ -112,6 +118,7 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
         _idleDisplayMode != _serverIdleDisplayMode ||
         _bgColor != _serverBgColor ||
         _eyeColor != _serverEyeColor ||
+        _mouthColor != _serverMouthColor ||
         _idleChatEnabled != _serverChatEnabled ||
         _idleChatFrequency != _serverChatFrequency ||
         _idleAnimationSpeed != _serverAnimationSpeed;
@@ -132,6 +139,9 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
     }
     if (_eyeColor != _serverEyeColor) {
       patch['face_eye_color'] = _colorToHex(_eyeColor);
+    }
+    if (_mouthColor != _serverMouthColor) {
+      patch['face_mouth_color'] = _colorToHex(_mouthColor);
     }
     if (_idleChatEnabled != _serverChatEnabled) {
       patch['idle_chat_enabled'] = _idleChatEnabled;
@@ -239,6 +249,7 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
                   faceStyle: _faceStyle,
                   bgColor: _bgColor,
                   eyeColor: _eyeColor,
+                  mouthColor: _mouthColor,
                 ),
                 const SizedBox(height: AppConstants.spacingXxl),
 
@@ -321,6 +332,18 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
                           swatches: _kEyeSwatches,
                           onSelect: (c) {
                             setState(() => _eyeColor = c);
+                            _markDirty();
+                          },
+                        ),
+                        const SizedBox(height: AppConstants.spacingLg),
+                        const Divider(height: 1),
+                        const SizedBox(height: AppConstants.spacingLg),
+                        _ColorSwatchRow(
+                          label: 'Mouth color',
+                          selected: _mouthColor,
+                          swatches: _kMouthSwatches,
+                          onSelect: (c) {
+                            setState(() => _mouthColor = c);
                             _markDirty();
                           },
                         ),
@@ -503,15 +526,27 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
 
 // ── Color swatch data ─────────────────────────────────────────────────────────
 
-/// Background swatches — all dark, designed for a backlit ILI9341 display.
+/// Background swatches — dark colors for the device display.
+/// Brightened enough to be visually distinct as swatches on a phone screen.
 const _kBgSwatches = [
   (Color(0xFF000000), 'Black'),
-  (Color(0xFF001030), 'Navy'),
-  (Color(0xFF0A0018), 'Purple'),
-  (Color(0xFF001A1A), 'Teal'),
-  (Color(0xFF001800), 'Forest'),
-  (Color(0xFF1A0000), 'Crimson'),
-  (Color(0xFF181420), 'Midnight'),
+  (Color(0xFF001A4A), 'Navy'),
+  (Color(0xFF1A0040), 'Purple'),
+  (Color(0xFF004040), 'Teal'),
+  (Color(0xFF004800), 'Forest'),
+  (Color(0xFF400010), 'Crimson'),
+  (Color(0xFF201830), 'Midnight'),
+];
+
+/// Mouth swatches — bright colors that stand out against dark backgrounds.
+const _kMouthSwatches = [
+  (Color(0xFFFFFFFF), 'White'),
+  (Color(0xFF00FFFF), 'Cyan'),
+  (Color(0xFFFFB0D0), 'Pink'),
+  (Color(0xFFFFD060), 'Amber'),
+  (Color(0xFF80FF80), 'Lime'),
+  (Color(0xFF80C8FF), 'Sky'),
+  (Color(0xFFC080FF), 'Violet'),
 ];
 
 /// Eye body swatches — bright/pastel, high contrast against dark backgrounds.
@@ -620,11 +655,13 @@ class _FacePreview extends StatelessWidget {
   final String faceStyle;
   final Color bgColor;
   final Color eyeColor;
+  final Color mouthColor;
 
   const _FacePreview({
     required this.faceStyle,
     required this.bgColor,
     required this.eyeColor,
+    required this.mouthColor,
   });
 
   @override
@@ -661,7 +698,7 @@ class _FacePreview extends StatelessWidget {
               width: 36,
               height: 3,
               decoration: BoxDecoration(
-                color: eyeColor.withValues(alpha: 0.6),
+                color: mouthColor.withValues(alpha: 0.85),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
