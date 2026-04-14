@@ -192,4 +192,14 @@ class DevicesRepositoryImpl implements DevicesRepository {
       return Left(ServerFailure(e.message, statusCode: e.statusCode));
     }
   }
+
+  @override
+  Future<Either<Failure, DeviceLogs>> fetchLogs(String id) async {
+    try {
+      final data = await _datasource.fetchLogs(id);
+      return Right(DeviceLogs.fromJson(data));
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
 }

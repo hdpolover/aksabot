@@ -417,7 +417,10 @@ export class ProactiveService {
 
     const session = this.sessions.get(deviceId);
     if (!session || session.state !== 'idle') {
-      this.logger.debug(`Idle chat skipped for ${deviceId} — not idle`);
+      this.logger.debug(`Idle chat skipped for ${deviceId} — not idle, rescheduling`);
+      // Reschedule so idle chat resumes after the current speaking/listening slot.
+      // Without this, the timer stays dead until the next user conversation.
+      this.startIdleChat(deviceId).catch(() => {});
       return;
     }
 

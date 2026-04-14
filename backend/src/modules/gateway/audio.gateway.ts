@@ -194,35 +194,39 @@ export class AudioGateway
 
     try {
       const greetingText = await this.proactive.checkGreeting(deviceId);
-      if (!greetingText) return;
 
-      const sentences = this.splitSentences(greetingText);
-      this.sendToDevice(deviceId, 'response:start', { type: 'greeting' });
+      if (greetingText) {
+        const sentences = this.splitSentences(greetingText);
+        this.sendToDevice(deviceId, 'response:start', { type: 'greeting' });
 
-      for (const sentence of sentences) {
-        const sock = this.deviceToSocket.get(deviceId);
-        if (!sock || sock.readyState !== 1) return;
+        for (const sentence of sentences) {
+          const sock = this.deviceToSocket.get(deviceId);
+          if (!sock || sock.readyState !== 1) return;
 
-        const device = await this.persistence.getDevice(deviceId);
-        const s = device?.settingsJson ?? {};
-        const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability, language: (s.language as 'en' | 'id' | undefined) ?? 'en' };
-        const cleanSentence = this.stripLlmTags(sentence);
-        if (!cleanSentence) continue;
-        const { opusAudio } = await this.aiService.synthesizeWithCache(cleanSentence, undefined, voiceOpts);
-        this.sendToDevice(deviceId, 'response:text', { text: cleanSentence, isFinal: false });
-        await this.sendFramedOpusToDevice(deviceId, opusAudio);
+          const device = await this.persistence.getDevice(deviceId);
+          const s = device?.settingsJson ?? {};
+          const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability, language: (s.language as 'en' | 'id' | undefined) ?? 'en' };
+          const cleanSentence = this.stripLlmTags(sentence);
+          if (!cleanSentence) continue;
+          const { opusAudio } = await this.aiService.synthesizeWithCache(cleanSentence, undefined, voiceOpts);
+          this.sendToDevice(deviceId, 'response:text', { text: cleanSentence, isFinal: false });
+          await this.sendFramedOpusToDevice(deviceId, opusAudio);
+        }
+
+        this.sendToDevice(deviceId, 'response:end', { fullText: greetingText, cacheKeys: [] });
+        this.logger.log(`Greeting sent to ${deviceId}: "${greetingText.slice(0, 60)}..."`);
       }
-
-      this.sendToDevice(deviceId, 'response:end', { fullText: greetingText, cacheKeys: [] });
-      this.logger.log(`Greeting sent to ${deviceId}: "${greetingText.slice(0, 60)}..."`);
     } finally {
       const s = this.sessions.get(deviceId);
       if (s && s.state === 'speaking') s.state = 'idle';
-    }
 
-    this.proactive.startIdleChat(deviceId).catch((err) =>
-      this.logger.warn(`Idle chat start failed: ${err.message}`),
-    );
+      // Always start idle chat — even if greeting was null or failed.
+      // Previously a null/failed greeting caused an early return that
+      // skipped this, leaving idle chat dead for the entire session.
+      this.proactive.startIdleChat(deviceId).catch((err) =>
+        this.logger.warn(`Idle chat start failed: ${err.message}`),
+      );
+    }
   }
 
   // ── Voice preview pushed to device ───────────────────────────────
@@ -451,6 +455,46 @@ export class AudioGateway
       AudioGateway.OTA_STATUS_TTL,
     );
     this.logger.log(`OTA ${data.success ? 'complete' : 'failed'} for device ${deviceId}${data.error ? `: ${data.error}` : ''}`);
+  }
+
+  // ── Device log handlers ───────────────────────────────────────
+
+  private static readonly LOG_TTL_SECONDS = 300; // 5 min
+
+  /** Stores the log payload sent by the device in response to a log:fetch request. */
+  private async onLogData(deviceId: string, data: { text?: string; bytes?: number }) {
+    const text = data.text ?? '';
+    await this.redis.set(
+      `device:logs:${deviceId}`,
+      JSON.stringify({ text, bytes: data.bytes ?? text.length, fetchedAt: Date.now() }),
+      'EX',
+      AudioGateway.LOG_TTL_SECONDS,
+    );
+    this.logger.debug(`Cached ${data.bytes ?? 0} bytes of logs for device ${deviceId}`);
+  }
+
+  /** Sends log:fetch to the device and waits up to timeoutMs for the response.
+   *  Returns cached log text if the device responds in time, null otherwise. */
+  async fetchDeviceLogs(deviceId: string, timeoutMs = 3000): Promise<{ text: string; bytes: number; fetchedAt: number } | null> {
+    // Clear stale cache so we don't return old data on a new request
+    await this.redis.del(`device:logs:${deviceId}`);
+
+    this.sendToDevice(deviceId, 'log:fetch', {});
+
+    // Poll Redis until the device responds or we time out
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
+      const cached = await this.redis.get(`device:logs:${deviceId}`);
+      if (cached) return JSON.parse(cached);
+    }
+    return null;
+  }
+
+  /** Returns the most recently cached logs for a device (without triggering a new fetch). */
+  async getCachedLogs(deviceId: string): Promise<{ text: string; bytes: number; fetchedAt: number } | null> {
+    const cached = await this.redis.get(`device:logs:${deviceId}`);
+    return cached ? JSON.parse(cached) : null;
   }
 
   /** Called when the user's phone leaves the desk area.
@@ -737,6 +781,11 @@ export class AudioGateway
         case 'ota:complete':
           this.onOtaComplete(deviceId, msg.data ?? {}).catch((err) =>
             this.logger.error(`onOtaComplete error: ${err.message}`),
+          );
+          break;
+        case 'log:data':
+          this.onLogData(deviceId, msg.data ?? {}).catch((err) =>
+            this.logger.error(`onLogData error: ${err.message}`),
           );
           break;
         // Server-to-device events that the simulator may echo back — safe to ignore

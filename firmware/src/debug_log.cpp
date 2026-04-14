@@ -103,6 +103,41 @@ uint32_t debug_log::getFileSize() {
     return size;
 }
 
+size_t debug_log::getRecentBytes(char* buf, size_t bufLen, size_t maxBytes) {
+    if (!fileEnabled || !SD.exists(LOG_PATH)) return 0;
+
+    File f = SD.open(LOG_PATH, FILE_READ);
+    if (!f) return 0;
+
+    uint32_t fileSize = f.size();
+    size_t toRead = (fileSize < maxBytes) ? fileSize : maxBytes;
+
+    // Seek to the tail window
+    if (fileSize > maxBytes) {
+        f.seek(fileSize - maxBytes);
+    }
+
+    size_t capacity = bufLen - 1; // leave room for null terminator
+    if (toRead > capacity) toRead = capacity;
+
+    size_t n = f.readBytes(buf, toRead);
+    f.close();
+    buf[n] = '\0';
+
+    // Trim the leading partial line (everything before the first '\n')
+    // so callers always receive complete log lines.
+    if (fileSize > maxBytes && n > 0) {
+        char* nl = (char*)memchr(buf, '\n', n);
+        if (nl && (nl + 1) < (buf + n)) {
+            size_t trimmed = n - (size_t)(nl + 1 - buf);
+            memmove(buf, nl + 1, trimmed);
+            buf[trimmed] = '\0';
+            return trimmed;
+        }
+    }
+    return n;
+}
+
 void debug_log::rotate() {
     if (!fileEnabled) return;
 

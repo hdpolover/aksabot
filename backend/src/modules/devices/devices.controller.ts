@@ -229,6 +229,39 @@ export class DevicesController {
     }
   }
 
+  /** Fetch the most recent log lines from the device.
+   *  Sends `log:fetch` to the device, waits up to 3s for `log:data` response,
+   *  caches it in Redis (5 min TTL), and returns the text.
+   *  Returns { text: null, cached: false } if the device is offline or times out. */
+  @Post(':id/logs/fetch')
+  async fetchLogs(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    await this.devicesService.findById(id, user.userId);
+    const result = await this.gateway.fetchDeviceLogs(id);
+    if (!result) {
+      return { text: null, bytes: 0, fetchedAt: null, cached: false };
+    }
+    return { ...result, cached: false };
+  }
+
+  /** Return the last cached log snapshot without triggering a new fetch.
+   *  Useful for retrieving recently fetched logs without waiting again.
+   *  Returns { text: null } if no cached data is available. */
+  @Get(':id/logs')
+  async getLogs(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    await this.devicesService.findById(id, user.userId);
+    const result = await this.gateway.getCachedLogs(id);
+    if (!result) {
+      return { text: null, bytes: 0, fetchedAt: null };
+    }
+    return result;
+  }
+
   /** Signal an online device to reboot into BLE provisioning mode.
    *  Sends `device:provision` via WebSocket so the ESP32 sets the force-provision
    *  NVS flag and restarts — the app can then re-provision it over BLE.

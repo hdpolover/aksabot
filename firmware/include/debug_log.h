@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cstddef>
 
 /// Structured debug logging framework.
 ///
@@ -41,6 +42,12 @@ void rotate();
 
 /// Maximum log file size before rotation (default 1 MB).
 static const uint32_t MAX_FILE_SIZE = 1024 * 1024;
+
+/// Copy the last `maxBytes` of the log file into `buf` (null-terminated).
+/// Trims the leading partial line so only complete lines are returned.
+/// Returns the number of bytes written (excluding the null terminator).
+/// Returns 0 if SD is not mounted or the log file does not exist.
+size_t getRecentBytes(char* buf, size_t bufLen, size_t maxBytes = 6144);
 
 }  // namespace debug_log
 

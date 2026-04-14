@@ -128,13 +128,23 @@ export class SchedulerService implements OnModuleInit {
     if (this.focusMode.has(deviceId)) return; // focus mode active
     if (this.pomodoroService.isActive(deviceId)) return; // pomodoro active
 
-    // Enforce work hours — only fire during configured work hours
+    // Enforce work hours — only fire during configured work hours.
+    // Skip entirely when allDay is enabled.
+    // Use device timezone so the check reflects local time, not server UTC.
     const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
-    const remConfig = device?.settingsJson?.reminders ?? {};
-    const workStart = remConfig.workHoursStart ?? 9;
-    const workEnd = remConfig.workHoursEnd ?? 18;
-    const hour = new Date().getHours();
-    if (hour < workStart || hour >= workEnd) return;
+    const remConfig: Partial<import('./types').ReminderConfig> = device?.settingsJson?.reminders ?? {};
+    if (!remConfig.allDay) {
+      const workStart = remConfig.workHoursStart ?? 9;
+      const workEnd = remConfig.workHoursEnd ?? 18;
+      const timezone = (device?.settingsJson?.timezone as string | undefined) ?? 'Asia/Jakarta';
+      const hour = parseInt(
+        new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour: 'numeric', hour12: false })
+          .formatToParts(new Date())
+          .find((p) => p.type === 'hour')!.value,
+        10,
+      );
+      if (hour < workStart || hour >= workEnd) return;
+    }
 
     try {
       const reminder = await this.reminderService.generate(deviceId, type);

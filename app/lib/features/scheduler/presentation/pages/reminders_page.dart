@@ -6,10 +6,8 @@ import '../bloc/scheduler_bloc.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 
-/// Page for toggling and configuring reminder intervals per type.
 class RemindersPage extends StatelessWidget {
   final String deviceId;
-
   const RemindersPage({super.key, required this.deviceId});
 
   @override
@@ -20,18 +18,18 @@ class RemindersPage extends StatelessWidget {
         appBar: AppBar(title: const Text('Reminders')),
         body: BlocBuilder<SchedulerBloc, SchedulerState>(
           builder: (context, state) {
-            if (state is SchedulerLoading) {
-              return const AppLoadingIndicator();
-            }
+            if (state is SchedulerLoading) return const AppLoadingIndicator();
             if (state is SchedulerError) {
               return Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(state.message, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    Text(state.message,
+                        style: TextStyle(color: Theme.of(context).colorScheme.error)),
                     const SizedBox(height: 16),
                     FilledButton.tonal(
-                      onPressed: () => context.read<SchedulerBloc>().add(LoadReminderConfig(deviceId)),
+                      onPressed: () =>
+                          context.read<SchedulerBloc>().add(LoadReminderConfig(deviceId)),
                       child: const Text('Retry'),
                     ),
                   ],
@@ -53,6 +51,8 @@ class RemindersPage extends StatelessWidget {
   }
 }
 
+// ── Content ───────────────────────────────────────────────────────────────────
+
 class _RemindersContent extends StatelessWidget {
   final ReminderConfig config;
   final bool isSaving;
@@ -64,191 +64,152 @@ class _RemindersContent extends StatelessWidget {
     required this.deviceId,
   });
 
-  String _jsonKey(String label) {
-    switch (label) {
-      case 'Stand Up':
-        return 'standUp';
-      case 'Hydration':
-        return 'hydration';
-      case 'Eye Break':
-        return 'eyeBreak';
-      case 'Stretch':
-        return 'stretch';
-      case 'Posture':
-        return 'posture';
-      default:
-        return label.toLowerCase();
+  void _patch(BuildContext context, Map<String, dynamic> patch) {
+    context.read<SchedulerBloc>().add(UpdateReminderConfig(deviceId, patch));
+  }
+
+  void _onToggle(BuildContext context, String key, bool enabled) {
+    final entry = config.entries.firstWhere((e) => e.key == _label(key));
+    _patch(context, {
+      key: {'enabled': enabled, 'intervalMinutes': entry.value.intervalMinutes},
+    });
+  }
+
+  void _onInterval(BuildContext context, String key, int minutes) {
+    final entry = config.entries.firstWhere((e) => e.key == _label(key));
+    _patch(context, {
+      key: {'enabled': entry.value.enabled, 'intervalMinutes': minutes},
+    });
+  }
+
+  String _label(String jsonKey) => switch (jsonKey) {
+        'standUp'   => 'Stand Up',
+        'hydration' => 'Hydration',
+        'eyeBreak'  => 'Eye Break',
+        'stretch'   => 'Stretch',
+        'posture'   => 'Posture',
+        _           => jsonKey,
+      };
+
+  String _jsonKey(String label) => switch (label) {
+        'Stand Up'  => 'standUp',
+        'Hydration' => 'hydration',
+        'Eye Break' => 'eyeBreak',
+        'Stretch'   => 'stretch',
+        'Posture'   => 'posture',
+        _           => label.toLowerCase(),
+      };
+
+  Future<void> _pickHour(BuildContext context, bool isStart) async {
+    final initial = TimeOfDay(
+      hour: isStart ? config.workHoursStart : config.workHoursEnd,
+      minute: 0,
+    );
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: initial,
+      helpText: isStart ? 'Start of work hours' : 'End of work hours',
+      builder: (ctx, child) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
+    );
+    if (picked != null && context.mounted) {
+      _patch(context, {
+        isStart ? 'workHoursStart' : 'workHoursEnd': picked.hour,
+      });
     }
-  }
-
-  void _onToggle(BuildContext context, String label, bool enabled) {
-    final key = _jsonKey(label);
-    final entry = config.entries.firstWhere((e) => e.key == label);
-    context.read<SchedulerBloc>().add(UpdateReminderConfig(deviceId, {
-      key: {
-        'enabled': enabled,
-        'intervalMinutes': entry.value.intervalMinutes,
-      },
-    }));
-  }
-
-  void _onIntervalChanged(BuildContext context, String label, int minutes) {
-    final key = _jsonKey(label);
-    final entry = config.entries.firstWhere((e) => e.key == label);
-    context.read<SchedulerBloc>().add(UpdateReminderConfig(deviceId, {
-      key: {
-        'enabled': entry.value.enabled,
-        'intervalMinutes': minutes,
-      },
-    }));
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
-    const healthKeys = ['Stand Up', 'Hydration', 'Eye Break', 'Stretch', 'Posture'];
-    final healthEntries = config.entries
-        .where((e) => healthKeys.contains(e.key))
-        .toList();
-    final dailyEntries = config.entries
-        .where((e) => !healthKeys.contains(e.key))
-        .toList();
+    final colors = theme.colorScheme;
 
     return Stack(
       children: [
         ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
-            // Work Hours card
-            Text('Work Hours', style: theme.textTheme.titleMedium),
+            // ── Schedule ───────────────────────────────────
+            Text('Schedule', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Start', style: theme.textTheme.bodySmall),
-                              const SizedBox(height: 4),
-                              FilledButton.tonal(
-                                onPressed: () async {
-                                  final time = await showTimePicker(
-                                    context: context,
-                                    initialTime: const TimeOfDay(hour: 8, minute: 0),
-                                  );
-                                  if (time != null && context.mounted) {
-                                    context.read<SchedulerBloc>().add(
-                                      UpdateReminderConfig(deviceId, {
-                                        'workHoursStart':
-                                            '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
-                                      }),
-                                    );
-                                  }
-                                },
-                                child: const Text('08:00'),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('End', style: theme.textTheme.bodySmall),
-                              const SizedBox(height: 4),
-                              FilledButton.tonal(
-                                onPressed: () async {
-                                  final time = await showTimePicker(
-                                    context: context,
-                                    initialTime: const TimeOfDay(hour: 18, minute: 0),
-                                  );
-                                  if (time != null && context.mounted) {
-                                    context.read<SchedulerBloc>().add(
-                                      UpdateReminderConfig(deviceId, {
-                                        'workHoursEnd':
-                                            '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
-                                      }),
-                                    );
-                                  }
-                                },
-                                child: const Text('18:00'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+              child: Column(
+                children: [
+                  SwitchListTile(
+                    title: const Text('Run all day'),
+                    subtitle: Text(
+                      config.allDay
+                          ? 'Reminders fire any time of day'
+                          : 'Reminders only fire during work hours',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: colors.onSurfaceVariant),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Reminders only fire during work hours.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                    secondary: Icon(
+                      config.allDay
+                          ? Icons.all_inclusive_rounded
+                          : Icons.schedule_rounded,
+                      color: colors.primary,
+                    ),
+                    value: config.allDay,
+                    onChanged: (v) => _patch(context, {'allDay': v}),
+                  ),
+                  if (!config.allDay) ...[
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _HourButton(
+                              label: 'Start',
+                              hour: config.workHoursStart,
+                              onTap: () => _pickHour(context, true),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _HourButton(
+                              label: 'End',
+                              hour: config.workHoursEnd,
+                              onTap: () => _pickHour(context, false),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
-                ),
+                ],
               ),
             ),
             const SizedBox(height: 24),
 
-            // Health section
+            // ── Health reminders ───────────────────────────
             Text('Health', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            ...healthEntries.map((entry) {
-              return _ReminderTile(
-                label: entry.key,
-                item: entry.value,
-                onToggle: (enabled) => _onToggle(context, entry.key, enabled),
-                onIntervalChanged: (minutes) =>
-                    _onIntervalChanged(context, entry.key, minutes),
-              );
-            }),
-            const SizedBox(height: 24),
-
-            // Daily section
-            Text('Daily', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            if (dailyEntries.isNotEmpty)
-              ...dailyEntries.map((entry) {
-                return _ReminderTile(
-                  label: entry.key,
-                  item: entry.value,
-                  onToggle: (enabled) => _onToggle(context, entry.key, enabled),
-                  onIntervalChanged: (minutes) =>
-                      _onIntervalChanged(context, entry.key, minutes),
-                );
-              })
-            else
-              Card(
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  children: [
-                    _DailyToggleTile(
-                      icon: Icons.nightlight_outlined,
-                      label: 'End of day',
-                      subtitle: '18:00',
-                      enabled: true,
-                      onChanged: (_) {},
-                    ),
-                    const Divider(height: 1),
-                    _DailyToggleTile(
-                      icon: Icons.snooze,
-                      label: 'Idle nudge',
-                      subtitle: 'After 3 hours',
-                      enabled: false,
-                      onChanged: (_) {},
+            const SizedBox(height: 4),
+            Text(
+              'Periodic nudges to keep you moving and comfortable.',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: colors.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
+            Card(
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: [
+                  for (final entry in config.entries) ...[
+                    if (entry != config.entries.first) const Divider(height: 1),
+                    _ReminderRow(
+                      label: entry.key,
+                      item: entry.value,
+                      onToggle: (v) => _onToggle(context, _jsonKey(entry.key), v),
+                      onInterval: (m) => _onInterval(context, _jsonKey(entry.key), m),
                     ),
                   ],
-                ),
+                ],
               ),
+            ),
           ],
         ),
         if (isSaving)
@@ -263,115 +224,110 @@ class _RemindersContent extends StatelessWidget {
   }
 }
 
-class _DailyToggleTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String? subtitle;
-  final bool enabled;
-  final ValueChanged<bool> onChanged;
+// ── Hour picker button ────────────────────────────────────────────────────────
 
-  const _DailyToggleTile({
-    required this.icon,
+class _HourButton extends StatelessWidget {
+  final String label;
+  final int hour;
+  final VoidCallback onTap;
+
+  const _HourButton({
     required this.label,
-    this.subtitle,
-    required this.enabled,
-    required this.onChanged,
+    required this.hour,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return SwitchListTile(
-      secondary: Icon(icon, color: theme.colorScheme.primary),
-      title: Text(label),
-      subtitle: subtitle != null ? Text(subtitle!) : null,
-      value: enabled,
-      onChanged: onChanged,
+    final formatted = '${hour.toString().padLeft(2, '0')}:00';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: theme.textTheme.bodySmall),
+        const SizedBox(height: 4),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.tonal(
+            onPressed: onTap,
+            child: Text(formatted),
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _ReminderTile extends StatelessWidget {
+// ── Reminder row ──────────────────────────────────────────────────────────────
+
+class _ReminderRow extends StatelessWidget {
   final String label;
   final ReminderItem item;
   final ValueChanged<bool> onToggle;
-  final ValueChanged<int> onIntervalChanged;
+  final ValueChanged<int> onInterval;
 
-  const _ReminderTile({
+  const _ReminderRow({
     required this.label,
     required this.item,
     required this.onToggle,
-    required this.onIntervalChanged,
+    required this.onInterval,
   });
 
-  static const _intervalOptions = [5, 10, 15, 20, 30, 45, 60, 90, 120];
+  static const _intervals = [5, 10, 15, 20, 30, 45, 60, 90, 120];
 
-  IconData get _icon {
-    switch (label) {
-      case 'Stand Up':
-        return Icons.accessibility_new;
-      case 'Hydration':
-        return Icons.water_drop_outlined;
-      case 'Eye Break':
-        return Icons.visibility_outlined;
-      case 'Stretch':
-        return Icons.self_improvement;
-      case 'Posture':
-        return Icons.airline_seat_recline_normal;
-      default:
-        return Icons.notifications_outlined;
-    }
-  }
+  IconData get _icon => switch (label) {
+        'Stand Up'  => Icons.accessibility_new_rounded,
+        'Hydration' => Icons.water_drop_outlined,
+        'Eye Break' => Icons.visibility_outlined,
+        'Stretch'   => Icons.self_improvement_rounded,
+        'Posture'   => Icons.airline_seat_recline_normal_rounded,
+        _           => Icons.notifications_outlined,
+      };
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Icon(_icon, color: theme.colorScheme.primary),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: theme.textTheme.titleSmall),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Every ${item.intervalMinutes} min',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ],
-              ),
+    final effectiveInterval =
+        _intervals.contains(item.intervalMinutes) ? item.intervalMinutes : _intervals.first;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Icon(_icon,
+              color: item.enabled ? colors.primary : colors.onSurfaceVariant,
+              size: 22),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: item.enabled ? null : colors.onSurfaceVariant,
+                    )),
+                Text(
+                  'Every ${item.intervalMinutes}m',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: colors.onSurfaceVariant),
+                ),
+              ],
             ),
-            DropdownButton<int>(
-              value: _intervalOptions.contains(item.intervalMinutes)
-                  ? item.intervalMinutes
-                  : _intervalOptions.first,
-              underline: const SizedBox.shrink(),
-              items: _intervalOptions
-                  .map((m) => DropdownMenuItem(
-                        value: m,
-                        child: Text('${m}m'),
-                      ))
-                  .toList(),
-              onChanged: item.enabled
-                  ? (value) {
-                      if (value != null) onIntervalChanged(value);
-                    }
-                  : null,
-            ),
-            const SizedBox(width: 8),
-            Switch(
-              value: item.enabled,
-              onChanged: onToggle,
-            ),
-          ],
-        ),
+          ),
+          DropdownButton<int>(
+            value: effectiveInterval,
+            underline: const SizedBox.shrink(),
+            style: theme.textTheme.bodyMedium,
+            items: _intervals
+                .map((m) => DropdownMenuItem(value: m, child: Text('${m}m')))
+                .toList(),
+            onChanged: item.enabled ? (v) { if (v != null) onInterval(v); } : null,
+          ),
+          const SizedBox(width: 4),
+          Switch(value: item.enabled, onChanged: onToggle),
+        ],
       ),
     );
   }

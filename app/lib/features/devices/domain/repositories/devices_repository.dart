@@ -49,4 +49,29 @@ abstract class DevicesRepository {
     Uint8List imageBytes, {
     int durationMs = 10000,
   });
+
+  /// Request fresh logs from the device (sends log:fetch over WebSocket).
+  /// Waits up to ~3s for the device to respond.
+  /// Returns [DeviceLogs] on success, or a failure if the device is offline.
+  Future<Either<Failure, DeviceLogs>> fetchLogs(String id);
+}
+
+class DeviceLogs {
+  final String? text;
+  final int bytes;
+  final DateTime? fetchedAt;
+
+  const DeviceLogs({required this.text, required this.bytes, this.fetchedAt});
+
+  bool get hasData => text != null && text!.isNotEmpty;
+
+  factory DeviceLogs.fromJson(Map<String, dynamic> json) {
+    return DeviceLogs(
+      text: json['text'] as String?,
+      bytes: json['bytes'] as int? ?? 0,
+      fetchedAt: json['fetchedAt'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(json['fetchedAt'] as int)
+          : null,
+    );
+  }
 }

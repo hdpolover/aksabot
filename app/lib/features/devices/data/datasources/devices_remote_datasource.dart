@@ -222,4 +222,9 @@ class DevicesRemoteDatasource {
       throw ServerException(message, statusCode: e.response?.statusCode);
     }
   }
+
+  Future<Map<String, dynamic>> fetchLogs(String id) async {
+    final data = await _client.post('/devices/$id/logs/fetch', data: {});
+    return data as Map<String, dynamic>;
+  }
 }

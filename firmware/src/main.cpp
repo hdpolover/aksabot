@@ -741,6 +741,29 @@ static void onWsJson(const char* event, const char* data) {
         ESP.restart();
     }
     // ── Remote re-provisioning request ───────────────────
+    else if (strcmp(event, "log:fetch") == 0) {
+        // App requested recent log lines — read tail of /logs/debug.log and send back.
+        static char logBuf[6144 + 64];  // 6 KB log tail + JSON wrapper headroom
+        static char payloadBuf[6144 + 64];
+        size_t n = debug_log::getRecentBytes(logBuf, sizeof(logBuf) - 64);
+        if (n == 0) {
+            ws_client::sendEvent("log:data", "{\"text\":\"(no log data)\",\"bytes\":0}");
+        } else {
+            // Build JSON manually — the log text may contain quotes/backslashes,
+            // so escape them before wrapping in {"text":"..."}.
+            // Use ArduinoJson to handle escaping correctly.
+            JsonDocument doc;
+            doc["text"] = logBuf;
+            doc["bytes"] = (int)n;
+            size_t pLen = serializeJson(doc, payloadBuf, sizeof(payloadBuf));
+            if (pLen > 0 && pLen < sizeof(payloadBuf)) {
+                ws_client::sendEvent("log:data", payloadBuf);
+            } else {
+                ws_client::sendEvent("log:data", "{\"text\":\"(payload too large)\",\"bytes\":0}");
+            }
+        }
+        LOG_I("Main", "log:fetch handled — sent %u bytes", (unsigned)n);
+    }
     else if (strcmp(event, "device:provision") == 0) {
         Serial.println("[Main] device:provision received — rebooting to setup mode");
         // Persist the flag so the next boot skips the credentials check and

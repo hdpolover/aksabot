@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/di/injection.dart';
@@ -35,6 +36,10 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
   // Connection test
   bool _testing = false;
   List<_TestResult>? _testResults;
+
+  // Device logs
+  bool _fetchingLogs = false;
+  DeviceLogs? _logs;
 
   @override
   void initState() {
@@ -430,20 +435,61 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
     );
   }
 
+  Future<void> _fetchLogs() async {
+    setState(() => _fetchingLogs = true);
+    final result = await _devicesRepo.fetchLogs(widget.deviceId);
+    if (!mounted) return;
+    result.fold(
+      (failure) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to fetch logs: ${failure.message}')),
+        );
+      },
+      (logs) => setState(() => _logs = logs),
+    );
+    setState(() => _fetchingLogs = false);
+  }
+
+  Future<void> _exportLogs() async {
+    final text = _logs?.text;
+    if (text == null || text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Log text copied to clipboard')),
+    );
+  }
+
   // ── Device logs ────────────────────────────────────────────────────────────
 
   Widget _buildDeviceLogsSection(ThemeData theme, ColorScheme colors) {
+    final hasLogs = _logs?.hasData == true;
+    final logText = _logs?.text ?? '';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Device Logs', style: theme.textTheme.titleMedium),
+        Row(
+          children: [
+            Text('Device Logs', style: theme.textTheme.titleMedium),
+            if (_logs?.fetchedAt != null) ...[
+              const SizedBox(width: 8),
+              Text(
+                'fetched ${_formatAgo(DateTime.now().difference(_logs!.fetchedAt!))} ago',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        ),
         const SizedBox(height: 8),
         Card(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Container(
-                height: 160,
+                height: 200,
                 margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -451,51 +497,85 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: colors.outlineVariant),
                 ),
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.fiber_manual_record,
-                            size: 8,
-                            color: colors.onSurfaceVariant.withValues(alpha: 0.4),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'No logs available',
+                child: hasLogs
+                    ? Scrollbar(
+                        child: SingleChildScrollView(
+                          child: SelectableText(
+                            logText,
                             style: theme.textTheme.bodySmall?.copyWith(
                               fontFamily: 'monospace',
-                              color: colors.onSurfaceVariant,
-                              fontWeight: FontWeight.w500,
+                              color: colors.onSurface,
+                              height: 1.5,
                             ),
                           ),
+                        ),
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.fiber_manual_record,
+                                size: 8,
+                                color: colors.onSurfaceVariant.withValues(alpha: 0.4),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                _fetchingLogs ? 'Requesting logs…' : 'No logs loaded',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontFamily: 'monospace',
+                                  color: colors.onSurfaceVariant,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (!_fetchingLogs) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              '// Tap "Fetch Logs" to pull the last 6 KB\n'
+                              '// of log data from the device over WebSocket.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                fontFamily: 'monospace',
+                                color: colors.onSurfaceVariant.withValues(alpha: 0.6),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '// Logs stream from the device over WebSocket.\n'
-                        '// Live log viewer requires the device to be\n'
-                        '// online with firmware v5+.',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontFamily: 'monospace',
-                          color: colors.onSurfaceVariant.withValues(alpha: 0.6),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               ),
               Padding(
                 padding: const EdgeInsets.all(16),
-                child: OutlinedButton.icon(
-                  onPressed: null,
-                  icon: const Icon(Icons.download_outlined, size: 18),
-                  label: const Text('Export Logs'),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(double.infinity, 44),
-                  ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.tonal(
+                        onPressed: _fetchingLogs ? null : _fetchLogs,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(double.infinity, 44),
+                        ),
+                        child: _fetchingLogs
+                            ? const SizedBox(
+                                height: 16,
+                                width: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Text(hasLogs ? 'Refresh Logs' : 'Fetch Logs'),
+                      ),
+                    ),
+                    if (hasLogs) ...[
+                      const SizedBox(width: 12),
+                      OutlinedButton.icon(
+                        onPressed: _exportLogs,
+                        icon: const Icon(Icons.copy_outlined, size: 18),
+                        label: const Text('Copy'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 44),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ],
