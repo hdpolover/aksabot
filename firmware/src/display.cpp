@@ -1335,6 +1335,58 @@ uint8_t display::getFaceStyleId() {
     return static_cast<uint8_t>(g_faceStyle->id);
 }
 
+// ── Image dimension helpers ──────────────────────────────────────────────────
+// Parse just the header bytes to get width/height before decoding.
+// Lets us compute a "contain" scale without a full decode pass.
+
+static bool jpegDimensions(const uint8_t* buf, size_t len, int& w, int& h) {
+    // Walk JPEG markers: SOI (FF D8) then [FF][marker][len(2)][data...]
+    // SOF0/1/2/3 (FF C0-C3) carry height/width.
+    size_t i = 2; // skip SOI
+    while (i + 4 < len) {
+        if (buf[i] != 0xFF) return false;
+        uint8_t marker = buf[i + 1];
+        if (marker >= 0xC0 && marker <= 0xC3) { // SOF0/1/2/3
+            if (i + 9 >= len) return false;
+            h = (buf[i + 5] << 8) | buf[i + 6];
+            w = (buf[i + 7] << 8) | buf[i + 8];
+            return (w > 0 && h > 0);
+        }
+        uint16_t segLen = (buf[i + 2] << 8) | buf[i + 3];
+        i += 2 + segLen;
+    }
+    return false;
+}
+
+static bool pngDimensions(const uint8_t* buf, size_t len, int& w, int& h) {
+    // PNG: 8-byte signature, then IHDR chunk: [len(4)]["IHDR"][width(4)][height(4)]
+    if (len < 24) return false;
+    w = (buf[16] << 24) | (buf[17] << 16) | (buf[18] << 8) | buf[19];
+    h = (buf[20] << 24) | (buf[21] << 16) | (buf[22] << 8) | buf[23];
+    return (w > 0 && h > 0);
+}
+
+static bool bmpDimensions(const uint8_t* buf, size_t len, int& w, int& h) {
+    // BMP: signature "BM" then BITMAPFILEHEADER (14 bytes), then BITMAPINFOHEADER
+    // width at offset 18, height at offset 22 (both little-endian signed 32-bit)
+    if (len < 26 || buf[0] != 'B' || buf[1] != 'M') return false;
+    w = buf[18] | (buf[19] << 8) | (buf[20] << 16) | (buf[21] << 24);
+    int raw_h = buf[22] | (buf[23] << 8) | (buf[24] << 16) | (buf[25] << 24);
+    h = raw_h < 0 ? -raw_h : raw_h; // negative height = top-down DIB
+    return (w > 0 && h > 0);
+}
+
+// Compute scale and centered offset so the image fits entirely on screen.
+static void containScale(int imgW, int imgH, float& scale, int& offX, int& offY) {
+    float sx = (float)LCD_WIDTH  / imgW;
+    float sy = (float)LCD_HEIGHT / imgH;
+    scale = (sx < sy) ? sx : sy;
+    offX  = (LCD_WIDTH  - (int)(imgW * scale)) / 2;
+    offY  = (LCD_HEIGHT - (int)(imgH * scale)) / 2;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+
 void display::showImageFromSD(const char* path, uint16_t durationMs) {
     if (!path || !*path) return;
 
@@ -1373,7 +1425,7 @@ void display::showImageFromSD(const char* path, uint16_t durationMs) {
         return;
     }
     size_t fileSize = imgFile.size();
-    if (fileSize == 0 || fileSize > 512 * 1024) {
+    if (fileSize == 0 || fileSize > 2 * 1024 * 1024) {
         Serial.printf("[Display] showImageFromSD: bad size %u for %s\n",
                       (unsigned)fileSize, path);
         imgFile.close();
@@ -1393,13 +1445,32 @@ void display::showImageFromSD(const char* path, uint16_t durationMs) {
     imgFile.read(buf, fileSize);
     imgFile.close();
 
+    // Parse dimensions and compute "contain" scale + centering offset
+    int imgW = 0, imgH = 0;
+    float scale = 1.0f;
+    int offX = 0, offY = 0;
+    bool gotDims = false;
+    if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0)
+        gotDims = jpegDimensions(buf, fileSize, imgW, imgH);
+    else if (strcasecmp(ext, ".png") == 0)
+        gotDims = pngDimensions(buf, fileSize, imgW, imgH);
+    else if (strcasecmp(ext, ".bmp") == 0)
+        gotDims = bmpDimensions(buf, fileSize, imgW, imgH);
+
+    if (gotDims) {
+        containScale(imgW, imgH, scale, offX, offY);
+        Serial.printf("[Display] image %dx%d → scale %.3f, offset (%d,%d)\n",
+                      imgW, imgH, scale, offX, offY);
+    }
+
     bool ok = false;
     if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0) {
-        ok = tft.drawJpg(buf, fileSize, 0, 0, LCD_WIDTH, LCD_HEIGHT);
+        // scale_y=0 in LovyanGFX means "same as scale_x"
+        ok = tft.drawJpg(buf, fileSize, offX, offY, 0, 0, 0, 0, scale, 0.0f);
     } else if (strcasecmp(ext, ".bmp") == 0) {
-        ok = tft.drawBmp(buf, fileSize, 0, 0);
+        ok = tft.drawBmp(buf, fileSize, offX, offY, 0, 0, 0, 0, scale, 0.0f);
     } else if (strcasecmp(ext, ".png") == 0) {
-        ok = tft.drawPng(buf, fileSize, 0, 0, LCD_WIDTH, LCD_HEIGHT);
+        ok = tft.drawPng(buf, fileSize, offX, offY, 0, 0, 0, 0, scale, 0.0f);
     } else {
         Serial.printf("[Display] showImageFromSD: unsupported format: %s\n", ext);
         free(buf);

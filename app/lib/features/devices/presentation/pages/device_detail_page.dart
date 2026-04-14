@@ -315,12 +315,12 @@ class _PushImageSheetState extends State<_PushImageSheet> {
 
       final raw = await file.readAsBytes();
 
-      // Compress + resize to 240×320 JPEG, quality 85
+      // Resize to 240×320 at high quality — device has 2MB PSRAM budget for images
       final compressed = await FlutterImageCompress.compressWithList(
         raw,
         minWidth: _targetWidth,
         minHeight: _targetHeight,
-        quality: 85,
+        quality: 92,
         format: CompressFormat.jpeg,
       );
 

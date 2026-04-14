@@ -234,7 +234,7 @@ export class DevicesController {
           cb(null, `${randomUUID()}${ext}`);
         },
       }),
-      limits: { fileSize: 2 * 1024 * 1024 }, // 2 MB max (compressed images are tiny)
+      limits: { fileSize: 2 * 1024 * 1024 }, // 2 MB — matches firmware PSRAM budget
       fileFilter: (_req, file, cb) => {
         const allowed = ['image/jpeg', 'image/png', 'image/bmp'];
         cb(null, allowed.includes(file.mimetype));

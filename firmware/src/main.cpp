@@ -180,7 +180,7 @@ static const char* downloadImage(const char* url) {
     }
 
     int contentLen = http.getSize(); // -1 if server uses chunked encoding
-    if (contentLen > 512 * 1024) {
+    if (contentLen > 2 * 1024 * 1024) {
         Serial.printf("[ImgDL] Content-Length too large: %d\n", contentLen);
         http.end();
         return nullptr;
@@ -199,7 +199,7 @@ static const char* downloadImage(const char* url) {
     WiFiClient* stream = http.getStreamPtr();
     uint8_t buf[2048];
     int totalRead = 0;
-    const int maxBytes = 512 * 1024; // hard cap regardless of Content-Length
+    const int maxBytes = 2 * 1024 * 1024; // hard cap regardless of Content-Length
     // Stream until connection closes (handles both Content-Length and chunked)
     while (http.connected() && (contentLen < 0 || totalRead < contentLen)) {
         int avail = stream->available();
