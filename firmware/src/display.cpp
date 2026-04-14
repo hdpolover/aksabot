@@ -269,6 +269,13 @@ static void drawEyeV2(LGFX_Sprite& s, int cx, int cy,
     int tl = (int)(tiltLeft  * scaleY);
     int tr = (int)(tiltRight * scaleY);
 
+    // Clamp tilt so no corner can exceed the half-height — prevents inverted bodyH
+    int maxTilt = hhTop > 0 ? hhTop - 1 : 0;
+    if (tl >  maxTilt) tl =  maxTilt;
+    if (tl < -maxTilt) tl = -maxTilt;
+    if (tr >  maxTilt) tr =  maxTilt;
+    if (tr < -maxTilt) tr = -maxTilt;
+
     // Base top (flat, no tilt)
     int baseTop = ey - hhTop;
     // Actual per-corner tops — raised corner has smaller Y (higher on screen)
@@ -281,6 +288,11 @@ static void drawEyeV2(LGFX_Sprite& s, int cx, int cy,
 
     int actualCR = CR;
     int bodyH = botY - bodyTopY;
+    if (bodyH <= 0) {
+        // Degenerate: tilt exceeded eye height — draw a flat line and return
+        s.fillRoundRect(ex - eyeW / 2, bodyTopY, eyeW, 1, 1, EYE_COL);
+        return;
+    }
     if (actualCR > hhBot)   actualCR = (hhBot   > 1) ? hhBot   - 1 : 1;
     if (actualCR > bodyH/2) actualCR = (bodyH/2 > 1) ? bodyH/2 - 1 : 1;
 
