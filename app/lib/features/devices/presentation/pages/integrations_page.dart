@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../../../core/di/injection.dart';
-import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../domain/entities/device_entity.dart';
 import '../../domain/repositories/devices_repository.dart';
@@ -191,8 +190,6 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text('Connected', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 8),
           Card(
             clipBehavior: Clip.antiAlias,
             child: Column(
@@ -203,7 +200,7 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
                   subtitle: Text(
                     _weatherEnabled && _latitude != null
                         ? 'Open-Meteo (${_latitude!.toStringAsFixed(1)}, ${_longitude!.toStringAsFixed(1)})'
-                        : 'Open-Meteo',
+                        : 'Open-Meteo — injects local weather into Aksa\'s context',
                   ),
                   value: _weatherEnabled,
                   onChanged: _saving ? null : _toggleWeather,
@@ -244,101 +241,9 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
               ],
             ),
           ),
-          const SizedBox(height: 24),
-
-          // Available (coming soon)
-          Text('Available', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Card(
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                _ComingSoonTile(
-                  icon: Icons.calendar_today,
-                  name: 'Google Calendar',
-                  description: 'Morning briefing, events',
-                  color: colors.primary,
-                ),
-                const Divider(height: 1),
-                _ComingSoonTile(
-                  icon: Icons.newspaper,
-                  name: 'News',
-                  description: 'Headlines in briefing',
-                  color: colors.tertiary,
-                ),
-                const Divider(height: 1),
-                _ComingSoonTile(
-                  icon: Icons.home,
-                  name: 'Home Assistant',
-                  description: 'Smart home voice control',
-                  color: colors.secondary,
-                ),
-                const Divider(height: 1),
-                _ComingSoonTile(
-                  icon: Icons.music_note,
-                  name: 'Spotify',
-                  description: 'Music control via voice',
-                  color: Theme.of(context).extension<AppColors>()!.success,
-                ),
-                const Divider(height: 1),
-                _ComingSoonTile(
-                  icon: Icons.checklist,
-                  name: 'Todoist',
-                  description: 'Task management via voice',
-                  color: Theme.of(context).colorScheme.error,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Integrations let Aksa access external services to give you '
-            'richer responses and control.',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: colors.onSurfaceVariant,
-            ),
-          ),
         ],
       ),
     );
   }
 }
 
-class _ComingSoonTile extends StatelessWidget {
-  final IconData icon;
-  final String name;
-  final String description;
-  final Color color;
-
-  const _ComingSoonTile({
-    required this.icon,
-    required this.name,
-    required this.description,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      leading: Icon(icon, color: color),
-      title: Text(name),
-      subtitle: Text(description),
-      trailing: SizedBox(
-        width: 90,
-        height: 36,
-        child: FilledButton.tonal(
-          onPressed: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('$name integration coming soon')),
-            );
-          },
-          style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            textStyle: Theme.of(context).textTheme.labelSmall,
-          ),
-          child: const Text('Connect'),
-        ),
-      ),
-    );
-  }
-}

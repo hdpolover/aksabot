@@ -899,36 +899,11 @@ class _MemoryCard extends StatelessWidget {
 
   Future<void> _showEditDialog(BuildContext context) async {
     final bloc = context.read<MemoriesBloc>();
-    final controller = TextEditingController(text: memory.fact);
 
     final result = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit memory'),
-        content: TextField(
-          controller: controller,
-          maxLines: 4,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 'Memory fact',
-            border: OutlineInputBorder(),
-          ),
-          textCapitalization: TextCapitalization.sentences,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+      builder: (ctx) => _EditMemoryDialog(initialText: memory.fact),
     );
-
-    controller.dispose();
 
     if (result != null && result.isNotEmpty && result != memory.fact) {
       bloc.add(UpdateMemory(memory.id, fact: result));
@@ -941,5 +916,60 @@ class _MemoryCard extends StatelessWidget {
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
     return '${d.day} ${months[d.month - 1]} ${d.year}';
+  }
+}
+
+// ── Edit memory dialog ────────────────────────────────────────────────────────
+
+/// Owns its TextEditingController so dispose() is tied to the widget lifecycle,
+/// not the caller — avoids "controller used after dispose" during exit animation.
+class _EditMemoryDialog extends StatefulWidget {
+  final String initialText;
+  const _EditMemoryDialog({required this.initialText});
+
+  @override
+  State<_EditMemoryDialog> createState() => _EditMemoryDialogState();
+}
+
+class _EditMemoryDialogState extends State<_EditMemoryDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialText);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Edit memory'),
+      content: TextField(
+        controller: _controller,
+        maxLines: 4,
+        autofocus: true,
+        decoration: const InputDecoration(
+          hintText: 'Memory fact',
+          border: OutlineInputBorder(),
+        ),
+        textCapitalization: TextCapitalization.sentences,
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: const Text('Save'),
+        ),
+      ],
+    );
   }
 }

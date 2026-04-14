@@ -9,8 +9,7 @@ import '../../../scheduler/domain/repositories/scheduler_repository.dart';
 import '../../domain/repositories/devices_repository.dart';
 
 /// Stats & Diagnostics — usage stats, connection test, audio pipeline,
-/// device logs, and factory reset. Merged from the former DeviceStatsPage
-/// and DiagnosticsPage which duplicated the same stats data.
+/// device logs, and factory reset.
 class DeviceStatsPage extends StatefulWidget {
   final String deviceId;
   const DeviceStatsPage({super.key, required this.deviceId});
@@ -35,7 +34,7 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
 
   // Connection test
   bool _testing = false;
-  Map<String, _TestResult>? _testResults;
+  List<_TestResult>? _testResults;
 
   @override
   void initState() {
@@ -61,11 +60,10 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
         _isLoading = false;
       }),
       (stats) => setState(() {
-        final s = stats;
-        _conversationsToday = s['conversationsToday'] as int? ?? 0;
-        _totalConversations = s['totalConversations'] as int? ?? 0;
-        _totalMemories = s['totalMemories'] as int? ?? 0;
-        _poolSize = s['poolSize'] as int? ?? 0;
+        _conversationsToday = stats['conversationsToday'] as int? ?? 0;
+        _totalConversations = stats['totalConversations'] as int? ?? 0;
+        _totalMemories = stats['totalMemories'] as int? ?? 0;
+        _poolSize = stats['poolSize'] as int? ?? 0;
         _isLoading = false;
       }),
     );
@@ -101,39 +99,53 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
     final sw = Stopwatch()..start();
     final apiResult = await _checkBackendApi(sw);
     final deviceResult = await _checkDeviceOnline();
+    final wsResult = await _checkWebSocket();
 
     if (!mounted) return;
     setState(() {
       _testing = false;
-      _testResults = {
-        'Backend API': apiResult,
-        'WebSocket (lastSeen)': deviceResult,
-      };
+      _testResults = [
+        _TestResult(label: 'Backend API', result: apiResult),
+        _TestResult(label: 'Device connection', result: deviceResult),
+        _TestResult(label: 'WebSocket gateway', result: wsResult),
+      ];
     });
   }
 
-  Future<_TestResult> _checkBackendApi(Stopwatch sw) async {
+  Future<_CheckResult> _checkBackendApi(Stopwatch sw) async {
     try {
       sw.reset();
       await _apiClient.get('/auth/me');
-      return _TestResult(true, '${sw.elapsedMilliseconds}ms');
+      return _CheckResult(true, '${sw.elapsedMilliseconds}ms');
     } catch (_) {
-      return const _TestResult(false, 'unreachable');
+      return const _CheckResult(false, 'unreachable');
     }
   }
 
-  Future<_TestResult> _checkDeviceOnline() async {
+  Future<_CheckResult> _checkDeviceOnline() async {
     final result = await _devicesRepo.getDevice(widget.deviceId);
     return result.fold(
-      (_) => const _TestResult(false, 'fetch failed'),
+      (_) => const _CheckResult(false, 'fetch failed'),
       (device) {
-        if (device.lastSeenAt == null) return const _TestResult(false, 'never seen');
+        if (device.lastSeenAt == null) return const _CheckResult(false, 'never seen');
         final diff = DateTime.now().difference(device.lastSeenAt!);
         final ago = _formatAgo(diff);
         return device.isOnline
-            ? _TestResult(true, 'online ($ago)')
-            : _TestResult(false, 'offline ($ago ago)');
+            ? _CheckResult(true, 'online · seen $ago ago')
+            : _CheckResult(false, 'offline · seen $ago ago');
       },
+    );
+  }
+
+  Future<_CheckResult> _checkWebSocket() async {
+    // Check if the device has an active WebSocket session by re-fetching device
+    // and verifying it's online (backend marks online via active WS session).
+    final result = await _devicesRepo.getDevice(widget.deviceId);
+    return result.fold(
+      (_) => const _CheckResult(false, 'could not verify'),
+      (device) => device.isOnline
+          ? const _CheckResult(true, 'session active')
+          : const _CheckResult(false, 'no active session'),
     );
   }
 
@@ -171,214 +183,344 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                     children: [
-                      // ── Usage ──────────────────────────────────────────
-                      Text('Usage', style: theme.textTheme.titleMedium),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _StatCard(
-                              value: '$_conversationsToday',
-                              label: 'Today',
-                              icon: Icons.chat_bubble_outline_rounded,
-                              color: colors.primary,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _StatCard(
-                              value: '$_totalConversations',
-                              label: 'All time',
-                              icon: Icons.history_rounded,
-                              color: colors.primary,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _StatCard(
-                              value: '$_totalMemories',
-                              label: 'Memories',
-                              icon: Icons.psychology_rounded,
-                              color: colors.tertiary,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _StatCard(
-                              value: '$_poolSize',
-                              label: 'Pool entries',
-                              icon: Icons.inventory_2_outlined,
-                              color: colors.tertiary,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Card(
-                        clipBehavior: Clip.antiAlias,
-                        child: ListTile(
-                          title: const Text('Response pool'),
-                          subtitle: Text(
-                            'Pre-generated bot messages — refill adds more',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colors.onSurfaceVariant,
-                            ),
-                          ),
-                          trailing: FilledButton.tonal(
-                            onPressed: _isRefilling ? null : _refillPool,
-                            style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
-                            ),
-                            child: Text(_isRefilling ? 'Refilling...' : 'Refill'),
-                          ),
-                        ),
-                      ),
+                      _buildUsageSection(theme, colors),
                       const SizedBox(height: 24),
-
-                      // ── Connection Test ────────────────────────────────
-                      Text('Connection Test', style: theme.textTheme.titleMedium),
-                      const SizedBox(height: 8),
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (_testResults != null)
-                                ..._testResults!.entries.map(
-                                  (e) => Padding(
-                                    padding: const EdgeInsets.only(bottom: 8),
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          e.value.passed
-                                              ? Icons.check_circle
-                                              : Icons.cancel,
-                                          color: e.value.passed
-                                              ? Theme.of(context)
-                                                  .extension<AppColors>()!
-                                                  .success
-                                              : colors.error,
-                                          size: 20,
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(child: Text(e.key)),
-                                        Text(
-                                          e.value.detail,
-                                          style: theme.textTheme.bodySmall
-                                              ?.copyWith(
-                                            color: colors.onSurfaceVariant,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              FilledButton.tonal(
-                                onPressed: _testing ? null : _runTest,
-                                child: Text(_testing ? 'Testing...' : 'Run Test'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                      _buildConnectionSection(theme, colors),
                       const SizedBox(height: 24),
-
-                      // ── Audio Pipeline ─────────────────────────────────
-                      Text('Audio Pipeline', style: theme.textTheme.titleMedium),
-                      const SizedBox(height: 8),
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              FilledButton.tonal(
-                                onPressed: () {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Audio pipeline test not yet implemented',
-                                      ),
-                                    ),
-                                  );
-                                },
-                                child: const Text(
-                                  'Test Mic \u2192 STT \u2192 LLM \u2192 TTS \u2192 Speaker',
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Last test: not run',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: colors.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                      _buildAudioPipelineSection(theme, colors),
                       const SizedBox(height: 24),
-
-                      // ── Device Logs ────────────────────────────────────
-                      Text('Device Logs', style: theme.textTheme.titleMedium),
-                      const SizedBox(height: 8),
-                      Card(
-                        child: Container(
-                          height: 160,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: colors.surfaceContainerLow,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: SingleChildScrollView(
-                            child: Text(
-                              'Logs are streamed from the ESP32 over WebSocket.\n'
-                              'Live log viewer requires Phase 5 firmware.',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                fontFamily: 'monospace',
-                                color: colors.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      FilledButton.tonal(
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Log export not yet implemented'),
-                            ),
-                          );
-                        },
-                        child: const Text('Export Logs'),
-                      ),
+                      _buildDeviceLogsSection(theme, colors),
                       const SizedBox(height: 32),
-
-                      // ── Danger Zone ────────────────────────────────────
-                      OutlinedButton.icon(
-                        onPressed: () => _confirmFactoryReset(context),
-                        icon: const Icon(Icons.restart_alt),
-                        label: const Text('Factory Reset Device'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: colors.error,
-                          side: BorderSide(color: colors.error),
-                          minimumSize: const Size(double.infinity, 48),
-                        ),
-                      ),
+                      _buildDangerZone(colors),
                     ],
                   ),
                 ),
     );
   }
 
+  // ── Usage ──────────────────────────────────────────────────────────────────
+
+  Widget _buildUsageSection(ThemeData theme, ColorScheme colors) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Usage', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                value: '$_conversationsToday',
+                label: 'Today',
+                icon: Icons.chat_bubble_outline_rounded,
+                color: colors.primary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                value: '$_totalConversations',
+                label: 'All time',
+                icon: Icons.history_rounded,
+                color: colors.primary,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                value: '$_totalMemories',
+                label: 'Memories',
+                icon: Icons.psychology_rounded,
+                color: colors.tertiary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                value: '$_poolSize',
+                label: 'Pool entries',
+                icon: Icons.inventory_2_outlined,
+                color: colors.tertiary,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: ListTile(
+            leading: Icon(
+              Icons.auto_awesome_outlined,
+              color: colors.tertiary,
+              size: 20,
+            ),
+            title: const Text('Response pool'),
+            subtitle: Text(
+              'Pre-generated bot messages — refill adds more',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.onSurfaceVariant,
+              ),
+            ),
+            trailing: FilledButton.tonal(
+              onPressed: _isRefilling ? null : _refillPool,
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+              ),
+              child: Text(_isRefilling ? 'Refilling…' : 'Refill'),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Connection test ────────────────────────────────────────────────────────
+
+  Widget _buildConnectionSection(ThemeData theme, ColorScheme colors) {
+    final appColors = theme.extension<AppColors>()!;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Connection Test', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_testResults != null) ...[
+                  ..._testResults!.map(
+                    (t) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Row(
+                        children: [
+                          Icon(
+                            t.result.passed
+                                ? Icons.check_circle_rounded
+                                : Icons.cancel_rounded,
+                            color: t.result.passed
+                                ? appColors.success
+                                : colors.error,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              t.label,
+                              style: theme.textTheme.bodyMedium,
+                            ),
+                          ),
+                          Text(
+                            t.result.detail,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: t.result.passed
+                                  ? appColors.success
+                                  : colors.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 16),
+                ],
+                FilledButton.tonal(
+                  onPressed: _testing ? null : _runTest,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 44),
+                  ),
+                  child: _testing
+                      ? const SizedBox(
+                          height: 16,
+                          width: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(
+                          _testResults != null ? 'Run Again' : 'Run Test',
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Audio pipeline ─────────────────────────────────────────────────────────
+
+  Widget _buildAudioPipelineSection(ThemeData theme, ColorScheme colors) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Audio Pipeline', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.mic_none_rounded,
+                      size: 18,
+                      color: colors.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Mic → STT → LLM → TTS → Speaker',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colors.onSurface,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        size: 16,
+                        color: colors.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Full end-to-end test requires the device to be online. '
+                          'Available once firmware is live.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.tonal(
+                  onPressed: null,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 44),
+                  ),
+                  child: const Text('Test Pipeline'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Device logs ────────────────────────────────────────────────────────────
+
+  Widget _buildDeviceLogsSection(ThemeData theme, ColorScheme colors) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Device Logs', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Card(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                height: 160,
+                margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: colors.surfaceContainerLowest,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: colors.outlineVariant),
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.fiber_manual_record,
+                            size: 8,
+                            color: colors.onSurfaceVariant.withValues(alpha: 0.4),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'No logs available',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontFamily: 'monospace',
+                              color: colors.onSurfaceVariant,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '// Logs stream from the device over WebSocket.\n'
+                        '// Live log viewer requires the device to be\n'
+                        '// online with firmware v5+.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace',
+                          color: colors.onSurfaceVariant.withValues(alpha: 0.6),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: OutlinedButton.icon(
+                  onPressed: null,
+                  icon: const Icon(Icons.download_outlined, size: 18),
+                  label: const Text('Export Logs'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 44),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Danger zone ────────────────────────────────────────────────────────────
+
+  Widget _buildDangerZone(ColorScheme colors) {
+    return OutlinedButton.icon(
+      onPressed: () => _confirmFactoryReset(context),
+      icon: const Icon(Icons.restart_alt_rounded),
+      label: const Text('Factory Reset Device'),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: colors.error,
+        side: BorderSide(color: colors.error),
+        minimumSize: const Size(double.infinity, 48),
+      ),
+    );
+  }
+
   Future<void> _performFactoryReset(BuildContext context) async {
-    // Show loading indicator
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -399,7 +541,6 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
       },
       (_) {
         ScaffoldMessenger.of(context).clearSnackBars();
-        // Navigate back to home — device no longer exists
         context.go('/home');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -440,7 +581,7 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
   }
 }
 
-// ---------------------------------------------------------------------------
+// ── Private widgets ────────────────────────────────────────────────────────
 
 class _StatCard extends StatelessWidget {
   final String value;
@@ -487,7 +628,13 @@ class _StatCard extends StatelessWidget {
 }
 
 class _TestResult {
+  final String label;
+  final _CheckResult result;
+  const _TestResult({required this.label, required this.result});
+}
+
+class _CheckResult {
   final bool passed;
   final String detail;
-  const _TestResult(this.passed, this.detail);
+  const _CheckResult(this.passed, this.detail);
 }
