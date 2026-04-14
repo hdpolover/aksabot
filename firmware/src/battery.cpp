@@ -1,7 +1,6 @@
 #include "battery.h"
 #include "config.h"
 #include <Arduino.h>
-#include <driver/adc.h>
 
 namespace battery {
 
@@ -14,7 +13,7 @@ static constexpr float BATTERY_SCALE    = 2.0f;
 
 static constexpr float  ADC_REF_VOLTS   = 3.3f;
 static constexpr int    ADC_MAX         = 4095;
-static constexpr float  USB_VOLTAGE_MIN = 4100.0f;  // mV — above this, assume USB power
+static constexpr float  USB_VOLTAGE_MIN = 4300.0f;  // mV — safely above 4.2V LiPo max
 
 // ── Piecewise LiPo discharge curve ────────────────────────────────────────────
 struct CurvePoint { uint16_t mv; uint8_t pct; };
@@ -31,7 +30,7 @@ static constexpr int kCurveLen = sizeof(kCurve) / sizeof(kCurve[0]);
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
-static uint8_t  lastPercent = 0;
+static uint8_t  lastPercent = 255;  // 255 = unknown until first read
 static uint16_t lastMv      = 0;
 static bool     usbPowered  = false;
 
@@ -60,7 +59,7 @@ static uint8_t voltageToPercent(uint16_t mv) {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 void init() {
-    analogSetPinAttenuation(BATTERY_ADC, ADC_11db);
+    analogSetPinAttenuation(BATTERY_ADC, ADC_11db);  // Arduino ESP32 name for 11/12 dB attenuation
     Serial.println("[Battery] Init");
 }
 
