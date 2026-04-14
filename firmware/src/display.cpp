@@ -229,17 +229,22 @@ static void drawGlow(LGFX_Sprite& s, int x, int y, int maxR, uint16_t color, uin
 
 // ── Eye rendering ─────────────────────────────────────
 
-// V2 eye — rounded rectangle style shared across expressions.
+// V2/V3 eye — rounded rectangle style shared across expressions.
 //
-// scaleY      — blink scale (1=open, 0=closed), same contract as drawEyeOpen
+// scaleY      — blink scale (1=open, 0=closed)
 // driftX/Y    — gaze drift: shifts the whole rect (no pupil)
-// squintBot   — 0=flat bottom (idle), 1=bottom lid fully risen (big grin).
-//               The top stays fixed; only the bottom half shrinks.
-// eyeW/eyeH   — per-expression eye dimensions (defaults: 54×30)
+// squintBot   — 0=flat bottom, 1=bottom lid fully risen
+// eyeW/eyeH   — per-expression eye dimensions
+// tiltLeft    — top-left corner offset px (+=raised, i.e. smaller screen Y)
+// tiltRight   — top-right corner offset px (+=raised)
+//
+// For the left eye:  pass tiltLeft=tiltOuter, tiltRight=tiltInner
+// For the right eye: pass tiltLeft=tiltInner, tiltRight=tiltOuter
 static void drawEyeV2(LGFX_Sprite& s, int cx, int cy,
                       float scaleY, float driftX, float driftY,
                       float squintBot = 0.0f,
-                      int eyeW = 68, int eyeH = 38) {
+                      int eyeW = 68, int eyeH = 38,
+                      int tiltLeft = 0, int tiltRight = 0) {
     static const int CR     = 8;
     static const int MAX_DX = 10;
     static const int MAX_DY = 5;
@@ -250,9 +255,8 @@ static void drawEyeV2(LGFX_Sprite& s, int cx, int cy,
     int ex = cx + ox;
     int ey = cy + oy;
 
-    // Top half-height: driven by blink
+    // Half-heights driven by blink + squint
     int hhTop = (int)((eyeH / 2) * scaleY);
-    // Bottom half-height: additionally closes upward with squintBot
     int hhBot = (int)(hhTop * (1.0f - squintBot));
     int totalH = hhTop + hhBot;
 
@@ -261,10 +265,42 @@ static void drawEyeV2(LGFX_Sprite& s, int cx, int cy,
         return;
     }
 
+    // Scale tilt with blink so the angled shape collapses naturally
+    int tl = (int)(tiltLeft  * scaleY);
+    int tr = (int)(tiltRight * scaleY);
+
+    // Base top (flat, no tilt)
+    int baseTop = ey - hhTop;
+    // Actual per-corner tops — raised corner has smaller Y (higher on screen)
+    int leftTopY  = baseTop - tl;
+    int rightTopY = baseTop - tr;
+    int botY      = ey + hhBot;
+
+    // Body: the rect that covers the region below the LOWER of the two corners
+    int bodyTopY = max(leftTopY, rightTopY);
+
     int actualCR = CR;
-    if (actualCR > hhBot)  actualCR = (hhBot  > 1) ? hhBot  - 1 : 1;
-    if (actualCR > hhTop)  actualCR = (hhTop  > 1) ? hhTop  - 1 : 1;
-    s.fillRoundRect(ex - eyeW / 2, ey - hhTop, eyeW, totalH, actualCR, EYE_COL);
+    int bodyH = botY - bodyTopY;
+    if (actualCR > hhBot)   actualCR = (hhBot   > 1) ? hhBot   - 1 : 1;
+    if (actualCR > bodyH/2) actualCR = (bodyH/2 > 1) ? bodyH/2 - 1 : 1;
+
+    s.fillRoundRect(ex - eyeW / 2, bodyTopY, eyeW, bodyH, actualCR, EYE_COL);
+
+    // Wedge: fills the triangular raised area above bodyTopY on one side
+    if (leftTopY < rightTopY) {
+        // Left corner is higher — fill upper-left wedge
+        // Triangle: apex at top-left, base along bodyTopY spanning full width
+        s.fillTriangle(ex - eyeW / 2, leftTopY,
+                       ex - eyeW / 2, bodyTopY,
+                       ex + eyeW / 2, bodyTopY,
+                       EYE_COL);
+    } else if (rightTopY < leftTopY) {
+        // Right corner is higher — fill upper-right wedge
+        s.fillTriangle(ex + eyeW / 2, rightTopY,
+                       ex + eyeW / 2, bodyTopY,
+                       ex - eyeW / 2, bodyTopY,
+                       EYE_COL);
+    }
 }
 
 static void drawEyeOpen(LGFX_Sprite& s, int cx, int cy, const EyeShape& eye,
@@ -825,8 +861,10 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
                 lw = (int)(lw * 1.20f); lh = (int)(lh * 1.20f);
                 rw = (int)(rw * 0.80f); rh = (int)(rh * 0.80f);
             }
-            drawEyeV2(s, leftEyeX,  eyeY, leftScale,  dx, dy, squint, lw, lh);
-            drawEyeV2(s, rightEyeX, eyeY, rightScale, dx, dy, squint, rw, rh);
+            drawEyeV2(s, leftEyeX,  eyeY, leftScale,  dx, dy, squint, lw, lh,
+                       es.tiltOuter, es.tiltInner);
+            drawEyeV2(s, rightEyeX, eyeY, rightScale, dx, dy, squint, rw, rh,
+                       es.tiltInner, es.tiltOuter);
 
             if (es.hasBrows || drawPeakBrows) {
                 int br = es.eyeH / 2;
