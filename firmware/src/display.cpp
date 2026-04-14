@@ -426,9 +426,8 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
         }
         case face::Expression::LISTENING: {
             if (nova) {
-                // Small rounded rect dot — attentive pause
-                s.fillRoundRect(CX - 8, my - 9, 16, 18, 4, pal.mouth);
-                s.fillRoundRect(CX - 4, my - 5, 8, 10, 3, blendRGB565(pal.accent, pal.bg, 40));
+                // Small rectangular dot — clearly square, attentive pause
+                s.fillRoundRect(CX - 9, my - 5, 18, 11, 2, pal.mouth);
             } else {
                 s.fillEllipse(CX, my, 7, 9, pal.mouth);
                 s.fillEllipse(CX, my, 4, 6, blendRGB565(pal.accent, pal.bg, 40));
@@ -479,14 +478,12 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
                 }
             } else {
                 if (nova) {
-                    // D-shaped grin: filled cavity + thick arc upper lip + teeth strip
-                    // Grin cavity (the "inside" of the open mouth)
-                    s.fillRoundRect(CX - 30, my + 4, 60, 18, 4, pal.mouth);
-                    // Thick smile arc closing the top (upper lip)
-                    thickBezier(s, CX - 34, my + 2, CX, my + 24, CX + 34, my + 2, 5, pal.mouth);
-                    // Teeth strip — bright horizontal bar at top of cavity
-                    s.fillRect(CX - 22, my + 6, 44, 5,
-                               blendRGB565(TFT_WHITE, pal.mouth, 200));
+                    // Open grin: rectangular border + punched black void + teeth hint
+                    s.fillRoundRect(CX - 32, my, 64, 22, 4, pal.mouth);
+                    s.fillRect(CX - 32, my, 64, 4, pal.mouth);        // square off top edge
+                    s.fillRect(CX - 24, my + 5, 48, 13, pal.bg);     // punch open void
+                    s.fillRect(CX - 22, my + 5, 44, 3,               // teeth strip
+                               blendRGB565(TFT_WHITE, pal.mouth, 210));
                 } else {
                     thickBezier(s, CX - 26, my, CX, my + 16, CX + 26, my, 3, pal.mouth);
                     thickBezier(s, CX - 16, my + 2, CX, my + 10, CX + 16, my + 2, 2,
