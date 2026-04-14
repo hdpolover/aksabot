@@ -6,26 +6,35 @@
 
 extern LGFX tft;
 
-// Colors (RGB565)
-static const uint16_t BG      = TFT_BLACK;
-static const uint16_t WHITE   = TFT_WHITE;
-static const uint16_t CYAN    = TFT_WHITE;
-static const uint16_t GREEN   = 0x07E0;
-static const uint16_t RED     = TFT_RED;
-static const uint16_t YELLOW  = TFT_YELLOW;
-static const uint16_t DIM     = 0x8C71;  // brighter gray for readability
+// ── Color palette ─────────────────────────────────────────
+// Previously CYAN was mistakenly set to TFT_WHITE. All screens now use
+// real cyan as intended. BG is near-black with a subtle blue tint.
+static const uint16_t BG       = TFT_BLACK; // pure black
+static const uint16_t WHITE    = TFT_WHITE;
+static const uint16_t CYAN     = 0x07FF;   // bright cyan
+static const uint16_t CYAN_DIM = 0x05EF;   // medium cyan (tagline, accents)
+static const uint16_t GREEN    = 0x07E0;
+static const uint16_t RED      = TFT_RED;
+static const uint16_t YELLOW   = TFT_YELLOW;
+static const uint16_t DIM      = 0x8C71;   // medium gray (secondary text)
+static const uint16_t DIM_DARK = 0x4228;   // dark gray (version, hints)
+
+// Glow gradient — outermost to innermost, just outside the face ring
+static const uint16_t GLOW_1   = 0x0071;   // barely-there dark teal (outer)
+static const uint16_t GLOW_2   = 0x00F3;   // dark teal
+static const uint16_t GLOW_3   = 0x0195;   // medium teal
+static const uint16_t GLOW_4   = 0x0247;   // bright teal (inner edge of glow)
 
 static const int CX = LCD_WIDTH / 2;
 static int hwCheckY = 0;
 
-// ── Helpers ──────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────
 
 static void clearScreen() {
     tft.fillScreen(BG);
 }
 
-// Draw text centered, using FreeSans for good readability
-static void drawCentered(const char* text, int y, uint16_t color, float size = 1.0) {
+static void drawCentered(const char* text, int y, uint16_t color, float size = 1.0f) {
     tft.setTextColor(color);
     tft.setFont(&fonts::FreeSans9pt7b);
     tft.setTextSize(size);
@@ -33,7 +42,6 @@ static void drawCentered(const char* text, int y, uint16_t color, float size = 1
     tft.drawString(text, CX, y);
 }
 
-// Draw small text centered
 static void drawSmall(const char* text, int y, uint16_t color) {
     tft.setTextColor(color);
     tft.setFont(&fonts::Font2);
@@ -58,32 +66,24 @@ static void drawRight(const char* text, int x, int y, uint16_t color) {
     tft.drawString(text, x, y);
 }
 
-// ── Public API ──────────────────────────────────────────
+// ── Public API ────────────────────────────────────────────
 
 void boot_screen::init() {
     clearScreen();
-    tft.setBrightness(180);  // slightly dimmer to reduce washout
+    tft.setBrightness(180);
     tft.setTextSize(1);
 }
 
 void boot_screen::showSplash(const char* version) {
     clearScreen();
 
-    // Robot face logo
-    int logoY = 70;
-    tft.drawRoundRect(CX - 25, logoY, 50, 38, 6, CYAN);
-    tft.fillCircle(CX - 10, logoY + 14, 4, CYAN);
-    tft.fillCircle(CX + 10, logoY + 14, 4, CYAN);
-    tft.drawLine(CX - 8, logoY + 28, CX + 8, logoY + 28, CYAN);
-    tft.drawLine(CX, logoY, CX, logoY - 10, CYAN);
-    tft.fillCircle(CX, logoY - 12, 3, CYAN);
+    drawCentered("Aksabot", 112, WHITE, 1.6f);
+    tft.drawFastHLine(CX - 56, 142, 112, GLOW_4);
+    drawSmall("AI Desk Companion", 152, CYAN_DIM);
 
-    drawCentered("AKSABOT", 120, WHITE, 1.2);
-
-    char versionStr[32];
+    char versionStr[24];
     snprintf(versionStr, sizeof(versionStr), "v%s", version);
-    drawSmall(versionStr, 150, DIM);
-    drawSmall("AI Desk Companion", 170, DIM);
+    drawSmall(versionStr, 174, DIM_DARK);
 
     delay(1500);
 }
@@ -91,45 +91,55 @@ void boot_screen::showSplash(const char* version) {
 void boot_screen::showSplashWithBootCheck(const char* version) {
     clearScreen();
 
-    // Robot face logo (same as showSplash)
-    int logoY = 70;
-    tft.drawRoundRect(CX - 25, logoY, 50, 38, 6, CYAN);
-    tft.fillCircle(CX - 10, logoY + 14, 4, CYAN);
-    tft.fillCircle(CX + 10, logoY + 14, 4, CYAN);
-    tft.drawLine(CX - 8, logoY + 28, CX + 8, logoY + 28, CYAN);
-    tft.drawLine(CX, logoY, CX, logoY - 10, CYAN);
-    tft.fillCircle(CX, logoY - 12, 3, CYAN);
+    // ── Title & tagline ──────────────────────────────────
+    drawCentered("Aksabot", 88, WHITE, 1.6f);
+    tft.drawFastHLine(CX - 56, 118, 112, GLOW_4);
+    drawSmall("AI Desk Companion", 128, CYAN_DIM);
 
-    drawCentered("AKSABOT", 120, WHITE, 1.2);
-
-    char versionStr[32];
+    char versionStr[24];
     snprintf(versionStr, sizeof(versionStr), "v%s", version);
-    drawSmall(versionStr, 150, DIM);
-    drawSmall("AI Desk Companion", 170, DIM);
+    drawSmall(versionStr, 150, DIM_DARK);
 
-    // BOOT button hint
-    drawSmall("Press BOOT for BIOS", 220, DIM);
+    // ── Decoration dots ───────────────────────────────────
+    tft.fillCircle(CX - 18, 200, 2, GLOW_4);
+    tft.fillCircle(CX,      200, 2, GLOW_4);
+    tft.fillCircle(CX + 18, 200, 2, GLOW_4);
 
-    // Poll GPIO 0 for 2 seconds during splash
-    uint32_t start = millis();
-    bool detected = false;
-    while ((millis() - start) < 2000) {
-        if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
-            detected = true;
-            // Visual feedback
-            tft.fillRect(0, 215, LCD_WIDTH, 25, BG);
-            drawSmall("Entering BIOS...", 220, GREEN);
-            delay(500);
-            break;
+    // ── Boot progress bar ─────────────────────────────────
+    const int barX = 30;
+    const int barY = 240;
+    const int barW = LCD_WIDTH - 60;
+    const int barH = 5;
+    tft.drawRoundRect(barX - 1, barY - 1, barW + 2, barH + 2, 3, GLOW_2);
+
+    drawSmall("Hold BOOT for BIOS", 254, DIM_DARK);
+
+    // ── 2-second BIOS window ─────────────────────────────
+    const uint32_t durationMs = 2000;
+    const uint32_t startMs = millis();
+
+    while ((millis() - startMs) < durationMs) {
+        uint32_t elapsed = millis() - startMs;
+
+        int fillW = (int)((elapsed * barW) / durationMs);
+        if (fillW > 0) {
+            tft.fillRoundRect(barX, barY, fillW, barH, 2, CYAN);
         }
+
+        if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
+            tft.fillRoundRect(barX, barY, barW, barH, 2, GREEN);
+            tft.fillRect(0, 250, LCD_WIDTH, 20, BG);
+            drawSmall("Entering BIOS...", 254, GREEN);
+            while ((millis() - startMs) < durationMs) {
+                delay(20);
+            }
+            return;
+        }
+
         delay(20);
     }
 
-    if (!detected) {
-        // Normal boot — brief pause then continue
-        uint32_t elapsed = millis() - start;
-        if (elapsed < 1500) delay(1500 - elapsed);
-    }
+    tft.fillRoundRect(barX, barY, barW, barH, 2, CYAN);
 }
 
 void boot_screen::showHardwareCheck(const char* component, uint8_t status) {
@@ -168,28 +178,14 @@ void boot_screen::showHardwareCheck(const char* component, uint8_t status) {
 void boot_screen::showFirstBoot() {
     clearScreen();
 
-    // Robot icon — larger than splash, with "arms" to feel friendly
-    int logoY = 42;
-    tft.drawRoundRect(CX - 28, logoY, 56, 42, 7, CYAN);
-    tft.fillCircle(CX - 11, logoY + 14, 5, CYAN);
-    tft.fillCircle(CX + 11, logoY + 14, 5, CYAN);
-    tft.drawLine(CX - 9, logoY + 30, CX + 9, logoY + 30, CYAN);
-    // Antenna
-    tft.drawLine(CX, logoY, CX, logoY - 10, CYAN);
-    tft.fillCircle(CX, logoY - 13, 3, CYAN);
-    // Arms
-    tft.drawLine(CX - 28, logoY + 16, CX - 40, logoY + 26, CYAN);
-    tft.fillCircle(CX - 41, logoY + 27, 3, CYAN);
-    tft.drawLine(CX + 28, logoY + 16, CX + 40, logoY + 26, CYAN);
-    tft.fillCircle(CX + 41, logoY + 27, 3, CYAN);
+    drawCentered("Aksabot", 92, WHITE, 1.6f);
+    tft.drawFastHLine(CX - 56, 122, 112, GLOW_4);
+    drawSmall("Your AI desk companion", 132, CYAN_DIM);
 
-    drawCentered("Hello! I'm Aksabot", 100, WHITE);
-    drawSmall("Your AI desk companion", 124, CYAN);
+    tft.drawFastHLine(30, 174, LCD_WIDTH - 60, GLOW_3);
 
-    tft.drawFastHLine(30, 148, LCD_WIDTH - 60, DIM);
-
-    drawSmall("Open the Aksabot app on your", 160, DIM);
-    drawSmall("phone to get started.", 178, DIM);
+    drawSmall("Open the Aksabot app on your", 186, DIM);
+    drawSmall("phone to get started.", 204, DIM);
 
     delay(2500);
 }
@@ -197,7 +193,7 @@ void boot_screen::showFirstBoot() {
 void boot_screen::showProvisioningPrompt(const char* apName) {
     clearScreen();
 
-    // Bluetooth icon
+    // Bluetooth icon (simplified diamond shape)
     int iconY = 40;
     int s = 9;
     tft.drawLine(CX, iconY, CX + s, iconY + s*2, CYAN);
@@ -213,19 +209,16 @@ void boot_screen::showProvisioningPrompt(const char* apName) {
     drawCentered("Setup Required", 132, WHITE);
 
     if (apName && strlen(apName) > 0) {
-        // Both BLE and SoftAP available
         drawSmall("Open the Aksabot app", 155, DIM);
         drawSmall("— or connect to Wi-Fi —", 173, DIM);
         char apLine[48];
         snprintf(apLine, sizeof(apLine), "\"%s\"", apName);
         drawSmall(apLine, 191, CYAN);
     } else {
-        // BLE only
         drawSmall("Open the Aksabot app", 158, DIM);
         drawSmall("to connect this device", 178, DIM);
     }
 
-    // Animated dots slot (updated by tickProvisioningAnimation)
     drawSmall("Waiting...", 225, DIM);
 }
 
@@ -239,19 +232,18 @@ void boot_screen::showProvisioningConnected() {
     tft.drawFastHLine(CX - 8, phoneY + 40, 16, GREEN);
     tft.fillCircle(CX, phoneY + 44, 2, GREEN);
 
-    // Checkmark next to phone
+    // Checkmark
     tft.drawLine(CX + 22, phoneY + 18, CX + 28, phoneY + 26, GREEN);
     tft.drawLine(CX + 28, phoneY + 26, CX + 40, phoneY + 12, GREEN);
 
     drawCentered("Phone Connected", 100, WHITE);
     drawSmall("Setting up your Aksabot...", 128, DIM);
 
-    tft.drawFastHLine(30, 152, LCD_WIDTH - 60, DIM);
+    tft.drawFastHLine(30, 152, LCD_WIDTH - 60, GLOW_3);
 
-    drawSmall("Select your Wi-Fi network", 164, CYAN);
+    drawSmall("Select your Wi-Fi network", 164, CYAN_DIM);
     drawSmall("in the app to continue.", 184, DIM);
 
-    // Animated dots slot
     drawSmall("Waiting for Wi-Fi...", 225, DIM);
 }
 
@@ -269,11 +261,9 @@ void boot_screen::tickProvisioningAnimation(uint32_t nowMs) {
     lastMs = nowMs;
     phase = (phase + 1) % 3;
 
-    // Three cycling dots just below the "Waiting..." label to show life
     int dotY = 245;
     int spacing = 14;
     for (int i = 0; i < 3; i++) {
-        // Dim all three then highlight the active one
         uint16_t col = (i == phase) ? CYAN : DIM;
         tft.fillCircle(CX + (i - 1) * spacing, dotY, 4, col);
     }
@@ -282,7 +272,7 @@ void boot_screen::tickProvisioningAnimation(uint32_t nowMs) {
 void boot_screen::showConnecting(const char* ssid) {
     clearScreen();
 
-    // WiFi icon
+    // WiFi concentric arc icon
     int iconY = 75;
     tft.drawCircle(CX, iconY + 25, 22, CYAN);
     tft.drawCircle(CX, iconY + 25, 15, CYAN);
@@ -317,15 +307,21 @@ void boot_screen::showConnectionFailed(const char* reason) {
 void boot_screen::showReady() {
     clearScreen();
 
-    // Checkmark
-    int cy = 95;
-    tft.drawLine(CX - 14, cy, CX - 4, cy + 14, GREEN);
-    tft.drawLine(CX - 4, cy + 14, CX + 18, cy - 8, GREEN);
-    tft.drawLine(CX - 13, cy, CX - 3, cy + 14, GREEN);
-    tft.drawLine(CX - 3, cy + 14, CX + 19, cy - 8, GREEN);
+    // Glowing green checkmark circle
+    tft.fillCircle(CX, 90, 36, 0x0240);   // dark green glow
+    tft.fillCircle(CX, 90, 30, 0x03E0);   // medium green glow
+    tft.fillCircle(CX, 90, 26, BG);        // face interior
+    tft.drawCircle(CX, 90, 26, GREEN);
+    tft.drawCircle(CX, 90, 25, GREEN);     // 2px ring
 
-    drawCentered("Ready!", 125, WHITE, 1.2);
-    drawSmall("Hold screen to talk", 158, DIM);
+    // Checkmark inside the circle
+    for (int i = -1; i <= 1; i++) {
+        tft.drawLine(CX - 13, 90 + i, CX - 3, 103 + i, GREEN);
+        tft.drawLine(CX - 3,  103 + i, CX + 16, 80 + i, GREEN);
+    }
+
+    drawCentered("Ready!", 134, WHITE, 1.2f);
+    drawSmall("Hold screen to talk", 166, CYAN_DIM);
 
     delay(1500);
 }
@@ -333,10 +329,9 @@ void boot_screen::showReady() {
 void boot_screen::showRebootingForSetup() {
     clearScreen();
 
-    // Sync / refresh icon — two arcs forming a circular arrow
+    // Circular arrow / sync icon
     int iconCY = 80;
     int r = 22;
-    // Arc: top-left quadrant
     for (int a = 120; a <= 360; a += 3) {
         float rad = a * 3.14159f / 180.0f;
         int x = CX + (int)(r * cosf(rad));
@@ -345,25 +340,23 @@ void boot_screen::showRebootingForSetup() {
         tft.drawPixel(x + 1, y, CYAN);
         tft.drawPixel(x, y + 1, CYAN);
     }
-    // Arrowhead at the end of the arc (pointing clockwise)
-    tft.drawLine(CX + r - 2, iconCY + 8, CX + r + 7, iconCY,     CYAN);
+    // Arrowhead
+    tft.drawLine(CX + r - 2, iconCY + 8, CX + r + 7, iconCY,      CYAN);
     tft.drawLine(CX + r - 2, iconCY + 8, CX + r - 2, iconCY + 16, CYAN);
 
-    drawCentered("Entering Setup Mode", 118, WHITE, 1.0);
+    drawCentered("Entering Setup Mode", 118, WHITE, 1.0f);
     drawSmall("Requested from the app.", 148, DIM);
     drawSmall("Rebooting in a moment...", 168, DIM);
 }
 
 bool boot_screen::showBiosCountdown() {
-    // Draw the countdown UI
     clearScreen();
 
-    // Gear icon (simple representation)
+    // Gear icon
     int gearY = 70;
     tft.drawCircle(CX, gearY, 18, DIM);
     tft.drawCircle(CX, gearY, 12, DIM);
     tft.fillCircle(CX, gearY, 6, DIM);
-    // Gear teeth
     for (int a = 0; a < 360; a += 45) {
         float rad = a * PI / 180.0f;
         int x1 = CX + (int)(16 * cosf(rad));
@@ -376,14 +369,13 @@ bool boot_screen::showBiosCountdown() {
     drawCentered("Hold for BIOS", 105, WHITE);
     drawSmall("Release to continue boot", 130, DIM);
 
-    // Progress bar background
+    // Progress bar
     const int barX = 30;
     const int barY = 165;
     const int barW = LCD_WIDTH - 60;
     const int barH = 8;
     tft.drawRoundRect(barX - 1, barY - 1, barW + 2, barH + 2, 3, DIM);
 
-    // 2-second countdown, polling touch every 20ms
     const uint32_t durationMs = 2000;
     const uint32_t startMs = millis();
     bool held = false;
@@ -391,26 +383,22 @@ bool boot_screen::showBiosCountdown() {
     while ((millis() - startMs) < durationMs) {
         uint32_t elapsed = millis() - startMs;
 
-        // Update progress bar (drains left to right)
+        // Drain left-to-right
         int fillW = barW - (int)((elapsed * barW) / durationMs);
         if (fillW < 0) fillW = 0;
         tft.fillRoundRect(barX, barY, fillW, barH, 2, CYAN);
-        // Clear the emptied portion
         if (fillW < barW) {
             tft.fillRect(barX + fillW, barY, barW - fillW, barH, BG);
         }
 
-        // Poll touch
         touch::tick(millis());
         touch::processSerial(millis());
 
         if (touch::isTouched()) {
             held = true;
-            // Visual feedback — change bar color and text
             tft.fillRoundRect(barX, barY, fillW, barH, 2, GREEN);
             tft.fillRect(0, 128, LCD_WIDTH, 20, BG);
             drawSmall("Entering BIOS...", 130, GREEN);
-            // Wait for the bar to finish with green
             while ((millis() - startMs) < durationMs) {
                 elapsed = millis() - startMs;
                 fillW = barW - (int)((elapsed * barW) / durationMs);
@@ -433,24 +421,23 @@ bool boot_screen::showBiosCountdown() {
 void boot_screen::showSetupComplete(const char* ssid) {
     clearScreen();
 
-    // Circle with checkmark — completion feel
+    // Circle with checkmark
     int cy = 80;
     tft.drawCircle(CX, cy + 5, 34, GREEN);
-    tft.drawCircle(CX, cy + 5, 33, GREEN);  // double-stroke
+    tft.drawCircle(CX, cy + 5, 33, GREEN);
     for (int i = -1; i <= 1; i++) {
         tft.drawLine(CX - 16, cy + 5 + i, CX - 5, cy + 20 + i, GREEN);
         tft.drawLine(CX - 5, cy + 20 + i, CX + 18, cy - 8 + i, GREEN);
     }
 
-    drawCentered("All Set!", 132, WHITE, 1.2);
+    drawCentered("All Set!", 132, WHITE, 1.2f);
 
-    // SSID line — truncate if too long
     char ssidLine[36];
     snprintf(ssidLine, sizeof(ssidLine), "\"%s\"", ssid);
     drawSmall(ssidLine, 162, CYAN);
     drawSmall("Connected to the internet", 182, DIM);
 
-    tft.drawFastHLine(30, 206, LCD_WIDTH - 60, DIM);
+    tft.drawFastHLine(30, 206, LCD_WIDTH - 60, GLOW_3);
     drawSmall("Starting Aksabot...", 216, DIM);
 
     delay(2500);

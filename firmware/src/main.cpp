@@ -33,6 +33,7 @@
 #include "wake_word.h"
 #include "gesture.h"
 #include "ui_audio.h"
+#include <freertos/idf_additions.h>
 #include "emotion_audio.h"
 #include "sfx_audio.h"
 
@@ -784,9 +785,11 @@ static void onTouchEvent(touch::Event event) {
             bool wasActive    = (appState.botState == BotState::SPEAKING ||
                                  appState.botState == BotState::THINKING);
 
-            if (appState.botState == BotState::IDLE || wasHandsFree || wasActive) {
-                // Play before mic opens so the chime isn't captured
-                ui_audio::play(ui_audio::Clip::HOLD_START);
+            if (appState.botState == BotState::IDLE || appState.botState == BotState::OFFLINE || wasHandsFree || wasActive) {
+                // Show LISTENING face immediately — instant visual feedback.
+                // botState stays unchanged so ogg_player::playFile() still allows
+                // the chime (it gates on LISTENING state). Mic opens after.
+                face::setExpression(face::Expression::LISTENING, 100);
 
                 // Tear down whatever was in progress before starting PTT
                 if (wasActive) {
@@ -809,6 +812,11 @@ static void onTouchEvent(touch::Event event) {
                     vad::init();
                     Serial.println("[Main] Overriding hands-free → push-to-talk");
                 }
+
+                // Chime plays here — after teardown, before mic opens.
+                // Face already shows LISTENING; botState is still old state so
+                // ogg_player::playFile() permits playback (it blocks on LISTENING).
+                ui_audio::play(ui_audio::Clip::HOLD_START);
 
                 appState.listenTrigger = ListenTrigger::TOUCH;
                 appState.botState      = BotState::LISTENING;
@@ -844,12 +852,16 @@ static void onTouchEvent(touch::Event event) {
                 echoRecording = false;
                 audio_io::stopMic();
                 if (appState.wsConnected) {
-                    ui_audio::play(ui_audio::Clip::RECORDING_STOP);
-                    resilience_audio::playClip(resilience_audio::Clip::THINKING);
+                    // Change state BEFORE any blocking audio plays.
+                    // Core 0's audioCaptureLoop checks botState to gate encoding.
+                    // If state stays LISTENING during playback, Core 0 reads zeros
+                    // from the flushed DMA and calls opus_encode() on pure silence —
+                    // SILK's EC_CLZ32 asserts (b32 != 0) and calls abort().
                     appState.botState = BotState::THINKING;
                     syncFaceToState();
                     ws_client::sendEvent("audio:end");
                     Serial.println("[Main] Recording stopped, waiting for response...");
+                    // No SFX on release — silence feels cleaner here.
                 } else {
                     // Echo mode — play back recorded audio
                     appState.botState = BotState::SPEAKING;
@@ -1229,6 +1241,16 @@ static void audioCaptureLoop(void* param) {
             stackLogged = true;
         }
 
+        // State guard — re-check before encoding. HOLD_END (Core 1) may have
+        // changed botState to THINKING between when Core 0 read this frame and now.
+        // stopMic() flushes the DMA with zeros; encoding zero-energy audio causes
+        // SILK's EC_CLZ32 to assert (b32 != 0) and call abort(). Defense-in-depth:
+        // the primary fix is HOLD_END changing state before blocking audio plays,
+        // but this guard covers the tiny window between stopMic() and state change.
+        if (appState.botState != BotState::LISTENING) {
+            continue;
+        }
+
         // Backend mode — encode and send via WebSocket
         int opusBytes = opus_codec::encode(pcmBuffer, opusBuffer, OPUS_MAX_FRAME_BYTES);
         if (opusBytes > 0 && appState.wsConnected) {
@@ -1284,7 +1306,11 @@ void setup() {
     pcmBuffer = (int16_t*)heap_caps_malloc(OPUS_FRAME_SAMPLES * 2 * sizeof(int16_t), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
     opusBuffer = (uint8_t*)ps_malloc(OPUS_MAX_FRAME_BYTES);
     playbackBuffer = (int16_t*)ps_malloc(OPUS_FRAME_SAMPLES * sizeof(int16_t));
-    playbackQueue = xQueueCreate(PLAYBACK_QUEUE_SIZE, sizeof(PlaybackFrame));
+    // Allocate the playback queue in PSRAM — 40 × 644 bytes = ~25KB.
+    // xQueueCreate uses internal SRAM by default; this single queue was the
+    // largest consumer of internal SRAM and left too little for AES DMA buffers.
+    playbackQueue = xQueueCreateWithCaps(PLAYBACK_QUEUE_SIZE, sizeof(PlaybackFrame),
+                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
     // Pre-allocate display sprite buffer in PSRAM BEFORE WiFi grabs memory.
     // WiFi RX buffers eat ~100KB of PSRAM; sprite needs 150KB. If we wait
@@ -1362,6 +1388,11 @@ void setup() {
         Serial.println("[Main] FATAL: Opus init failed");
         while (true) { delay(1000); }
     }
+
+    // Play boot sound after opus_codec::init() — decoder must be initialized
+    // before ogg_player::playData() is called (it calls opus_codec::decode()
+    // internally; without the decoder the SFX would play silently).
+    resilience_audio::playClip(resilience_audio::Clip::BOOT);
 
     vad::init();
     ota_update::init();
@@ -1520,7 +1551,6 @@ void setup() {
             appState.botState = BotState::IDLE;
             syncFaceToState();
             updateStatusBar();
-            resilience_audio::playClip(resilience_audio::Clip::BOOT);
 
             if (MDNS.begin("aksabot")) {
                 MDNS.addService("aksabot", "tcp", 80);

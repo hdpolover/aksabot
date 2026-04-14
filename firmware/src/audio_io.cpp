@@ -177,9 +177,18 @@ void audio_io::flushSpeaker() {
 
 void audio_io::setVolume(uint8_t percent) {
     if (percent > 100) percent = 100;
-    // Perceptual volume curve: sqrt maps linear slider to perceived loudness.
-    // Applied in PCM so all audio sources (TTS, SFX, resilience) scale together.
-    // ES8311 hardware level is fixed at HW_VOLUME_FIXED — only this scale changes.
-    s_volumeScale = (percent == 0) ? 0.0f : sqrtf((float)percent / 100.0f);
-    Serial.printf("[Audio] Volume %d%% → scale %.3f\n", percent, s_volumeScale);
+    // Exponential (dB) curve — industry standard for audio volume control.
+    // Maps 1–100% linearly across 40 dB so every slider step is a perceptually
+    // equal loudness jump: 100% = 0 dB (full), 50% ≈ −20 dB, 10% ≈ −36 dB.
+    // Applied in software PCM so all audio sources (TTS, SFX, resilience) scale together.
+    if (percent == 0) {
+        s_volumeScale = 0.0f;
+    } else {
+        float db = ((float)percent / 100.0f - 1.0f) * 40.0f;
+        s_volumeScale = powf(10.0f, db / 20.0f);
+    }
+    Serial.printf("[Audio] Volume %d%% → %.1f dB → scale %.4f\n",
+                  percent,
+                  (percent == 0) ? -99.0f : ((float)percent / 100.0f - 1.0f) * 40.0f,
+                  s_volumeScale);
 }

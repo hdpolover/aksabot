@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include <freertos/semphr.h>
 #include <freertos/queue.h>
+#include <freertos/idf_additions.h>
 #include <mbedtls/platform.h>
 #include <esp_heap_caps.h>
 
@@ -18,12 +19,14 @@
 // Fix: override mbedtls_calloc/free at runtime. Allocations ≥4KB go to PSRAM
 // (8MB free), so the large SSL buffers never touch fragmented internal SRAM.
 static void* mbedtls_psram_calloc(size_t count, size_t size) {
-    size_t total = count * size;
-    if (total >= 4096) {
-        void* p = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (p) return p;
-        // PSRAM failed — fall through to internal heap (last resort)
-    }
+    // Route ALL mbedTLS allocations to PSRAM (8MB available).
+    // Previous threshold of 4096 still let small structures (<4KB) drain internal SRAM —
+    // after ~40s of WS connection, AES allocation fails and the session crashes.
+    // With threshold=0 all mbedTLS memory comes from PSRAM, leaving internal SRAM
+    // free for DMA, ISR stacks, and NimBLE structures.
+    void* p = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p) return p;
+    // PSRAM failed (extremely unlikely) — fall back to internal heap as last resort
     return heap_caps_calloc(count, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 }
 
@@ -167,10 +170,14 @@ void ws_client::init(JsonCallback onJson, BinaryCallback onBinary) {
     // Redirect mbedTLS heap to PSRAM before any SSL context is created.
     // Must be called before the first connect() — cannot be changed mid-session.
     mbedtls_platform_set_calloc_free(mbedtls_psram_calloc, mbedtls_psram_free);
-    Serial.println("[WS] mbedTLS allocator → PSRAM (large allocs ≥4KB)");
+    Serial.println("[WS] mbedTLS allocator → PSRAM (all allocs)");
 
     wsMutex = xSemaphoreCreateMutex();
-    frameQueue = xQueueCreate(WS_FRAME_QUEUE_SIZE, sizeof(WsFrame));
+    // Allocate the frame queue in PSRAM — 20 × 520 bytes = ~10KB.
+    // xQueueCreate uses internal SRAM by default; moving this queue to PSRAM
+    // frees critical DMA-accessible internal SRAM for hardware AES operations.
+    frameQueue = xQueueCreateWithCaps(WS_FRAME_QUEUE_SIZE, sizeof(WsFrame),
+                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
     client.onMessage(onMessage);
     client.onEvent(onEvent);

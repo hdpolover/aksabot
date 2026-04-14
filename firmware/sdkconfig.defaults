@@ -23,3 +23,12 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 
 # Fix 4 — Allow WiFi stack and LwIP to use PSRAM, freeing ~30KB of internal heap.
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# Fix 5 — Disable hardware AES accelerator so AES uses software implementation.
+# Hardware AES (default) calls heap_caps_malloc(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
+# for each TLS record — bypassing the mbedTLS PSRAM allocator entirely.
+# During active TTS streaming, these DMA allocations (up to 16KB per record)
+# exhaust internal SRAM and cause MBEDTLS_ERR_SSL_INTERNAL_ERROR → WS disconnect.
+# Software AES routes through mbedTLS allocator (our PSRAM hook) instead.
+# Throughput cost is negligible for <1KB WebSocket frames.
+CONFIG_MBEDTLS_HARDWARE_AES=n
