@@ -975,8 +975,8 @@ static void onTouchEvent(touch::Event event) {
                     appState.botState = BotState::THINKING;
                     syncFaceToState();
                     ws_client::sendEvent("audio:end");
+                    ui_audio::play(ui_audio::Clip::RECORDING_STOP);
                     Serial.println("[Main] Recording stopped, waiting for response...");
-                    // No SFX on release — silence feels cleaner here.
                 } else {
                     // Echo mode — play back recorded audio
                     appState.botState = BotState::SPEAKING;

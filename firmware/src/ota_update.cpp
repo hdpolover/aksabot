@@ -18,6 +18,7 @@ static char errorMsg[64] = {};
 static uint8_t progress = 0;
 static char expectedHash[65] = {};  // 64 hex chars + null
 static char stagedVersion[32] = {};
+static volatile bool cancelRequested = false;
 
 // ── Helpers ────────────────────────────────────────────
 
@@ -83,6 +84,7 @@ bool ota_update::start(const char* url, const char* expectedSha256, const char* 
     strncpy(stagedVersion, version, sizeof(stagedVersion) - 1);
     state = State::DOWNLOADING;
     progress = 0;
+    cancelRequested = false;
 
     Serial.printf("[OTA] Starting download: %s (version %s)\n", url, version);
 
@@ -126,6 +128,15 @@ bool ota_update::start(const char* url, const char* expectedSha256, const char* 
     uint8_t lastReportedPct = 255;  // Force first callback at 0%
 
     while (http.connected() && totalRead < contentLength) {
+        if (cancelRequested) {
+            outFile.close();
+            http.end();
+            SD.remove(OTA_PATH);
+            state = State::IDLE;
+            Serial.println("[OTA] Download cancelled");
+            return false;
+        }
+
         size_t available = httpStream->available();
         if (available == 0) {
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -200,11 +211,13 @@ uint8_t ota_update::getProgress() {
 
 void ota_update::cancel() {
     if (state == State::DOWNLOADING) {
-        // TODO: Cancel in-progress HTTP download
+        // Signal the download loop to abort on next iteration (~10ms latency)
+        cancelRequested = true;
+        return;  // Loop will clean up and reset state
     }
     state = State::IDLE;
     progress = 0;
-    SD.remove(OTA_PATH);
+    if (SD.exists(OTA_PATH)) SD.remove(OTA_PATH);
     Serial.println("[OTA] Cancelled");
 }
 

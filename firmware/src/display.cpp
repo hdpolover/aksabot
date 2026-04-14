@@ -1192,23 +1192,30 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
 void renderClock(const display::StatusBar& status) {
     tft.fillScreen(COL_BG);
 
-    // Large time — use LovyanGFX native font
     tft.setTextDatum(lgfx::middle_center);
-    tft.setTextSize(5);
-    tft.setTextColor(COL_FACE);
 
-    // Get current time (placeholder — needs RTC or NTP)
-    uint32_t sec = millis() / 1000;
-    uint8_t h = (sec / 3600) % 24;
-    uint8_t m = (sec / 60) % 60;
+    // Live time — seeded by context:sync, ticks locally via millis()
     char timeBuf[8];
-    snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", h, m);
+    if (syncedAtMs > 0) {
+        uint32_t elapsedMin = (millis() - syncedAtMs) / 60000;
+        uint32_t totalMin   = (syncedMinutes + elapsedMin) % (24 * 60);
+        uint8_t  lh         = (uint8_t)(totalMin / 60);
+        uint8_t  lm         = (uint8_t)(totalMin % 60);
+        snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", lh, lm);
+    } else {
+        strncpy(timeBuf, "--:--", sizeof(timeBuf));
+    }
+
+    tft.setFont(&fonts::Font0);
+    tft.setTextSize(6);
+    tft.setTextColor(COL_FACE);
     tft.drawString(timeBuf, CX, CY - 20);
 
-    // Date placeholder
+    // Date from last context:sync
     tft.setTextSize(2);
     tft.setTextColor(COL_DIM);
-    tft.drawString("Aksabot", CX, CY + 30);
+    const char* dateStr = (contextDataAvailable && latestContext.date[0]) ? latestContext.date : "---";
+    tft.drawString(dateStr, CX, CY + 30);
 }
 
 void renderPomodoro(const display::PomodoroData& data) {
