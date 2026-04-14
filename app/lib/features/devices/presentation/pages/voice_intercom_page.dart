@@ -23,9 +23,9 @@ import '../../domain/repositories/devices_repository.dart';
 ///
 /// **Live Intercom** — tap to start streaming; PCM audio is forwarded
 /// in real time via the /intercom WebSocket to the device.
-/// Includes a temporary volume slider that overrides the device's
-/// global volume setting for the duration of the session, then
-/// restores it automatically when done.
+/// Walkie-talkie: when the device user holds the screen, the app
+/// pauses its own stream, shows a "device listening" view, then plays
+/// back the device's audio reply.
 class VoiceIntercomPage extends StatefulWidget {
   final String deviceId;
   const VoiceIntercomPage({super.key, required this.deviceId});
@@ -43,8 +43,8 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
   final _datasource = sl<DevicesRemoteDatasource>();
 
   // ── Device / volume ───────────────────────────────────────────
-  int _originalVolume = 80;  // restored after intercom
-  int _intercomVolume = 80;  // slider value during intercom
+  int _originalVolume = 80;
+  int _intercomVolume = 80;
   Timer? _volumeDebounce;
 
   // ── Voice Message state ────────────────────────────────────────
@@ -57,7 +57,14 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
   // ── Live Intercom state ───────────────────────────────────────
   bool _liveActive = false;
   bool _liveConnecting = false;
-  bool _deviceTalking = false;  // device is sending a walkie-talkie reply
+
+  /// Device is holding its screen and recording a walkie-talkie reply.
+  /// PCM streaming is paused while this is true.
+  bool _deviceListening = false;
+
+  /// The device's reply WAV is currently being played back on this device.
+  bool _deviceReplying = false;
+
   WebSocketChannel? _wsChannel;
   StreamSubscription<dynamic>? _wsSub;
   StreamSubscription<Uint8List>? _pcmSub;
@@ -70,6 +77,11 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
     super.initState();
     _tab = TabController(length: 2, vsync: this);
     _loadDevice();
+
+    // Track when the reply audio finishes playing
+    _replyPlayer.onPlayerComplete.listen((_) {
+      if (mounted) setState(() => _deviceReplying = false);
+    });
   }
 
   @override
@@ -102,10 +114,10 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
 
   void _onVolumeChanged(double value) {
     setState(() => _intercomVolume = value.round());
-    // Debounce: only send 300ms after the user stops dragging.
     _volumeDebounce?.cancel();
     _volumeDebounce = Timer(const Duration(milliseconds: 300), () {
-      _datasource.sendVolumeOverride(widget.deviceId, _intercomVolume)
+      _datasource
+          .sendVolumeOverride(widget.deviceId, _intercomVolume)
           .catchError((_) {});
     });
   }
@@ -220,15 +232,15 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
         return;
       }
 
-      // Push the intercom volume before opening the stream.
-      // If it's already at original, this is a no-op on the device.
-      await _datasource.sendVolumeOverride(widget.deviceId, _intercomVolume)
+      await _datasource
+          .sendVolumeOverride(widget.deviceId, _intercomVolume)
           .catchError((_) {});
 
       final wsBase = ApiConstants.baseUrl
           .replaceFirst('https://', 'wss://')
           .replaceFirst('http://', 'ws://');
-      final uri = Uri.parse('$wsBase/intercom?token=${Uri.encodeComponent(token)}');
+      final uri =
+          Uri.parse('$wsBase/intercom?token=${Uri.encodeComponent(token)}');
 
       _wsChannel = WebSocketChannel.connect(uri);
       _wsSub = _wsChannel!.stream.listen(
@@ -248,39 +260,61 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
   }
 
   void _onWsMessage(dynamic msg) {
-    // Binary message = WAV audio reply from device (walkie-talkie)
+    // Binary = WAV audio reply from device (walkie-talkie)
     if (msg is List<int>) {
       _replyPlayer.play(BytesSource(Uint8List.fromList(msg)));
+      if (mounted) setState(() => _deviceReplying = true);
       return;
     }
 
     try {
       final json = jsonDecode(msg as String) as Map<String, dynamic>;
       final event = json['event'] as String?;
-      if (event == 'intercom:ready') {
-        _beginPcmStream();
-      } else if (event == 'intercom:device:talking') {
-        if (mounted) setState(() => _deviceTalking = true);
-      } else if (event == 'intercom:device:done') {
-        if (mounted) setState(() => _deviceTalking = false);
-      } else if (event == 'error') {
-        final message = (json['data'] as Map?)?['message'] ?? 'Intercom error';
-        _showSnack(message.toString());
-        _stopLive();
+
+      switch (event) {
+        case 'intercom:ready':
+          _beginPcmStream();
+
+        case 'intercom:device:talking':
+          // Device user held the screen — pause our PCM stream and show
+          // the "device listening" view so it's clear roles have flipped.
+          if (mounted) {
+            setState(() {
+              _deviceListening = true;
+              _deviceReplying = false;
+            });
+          }
+
+        case 'intercom:device:done':
+          // Device finished recording — resume our stream.
+          // WAV binary arrives just before this event, so _deviceReplying
+          // is already true and plays in the background.
+          if (mounted) setState(() => _deviceListening = false);
+
+        case 'error':
+          final message =
+              (json['data'] as Map?)?['message'] ?? 'Intercom error';
+          _showSnack(message.toString());
+          _stopLive();
       }
     } catch (_) {}
   }
 
   void _beginPcmStream() {
-    _recorder.startStream(
+    _recorder
+        .startStream(
       const RecordConfig(
         encoder: AudioEncoder.pcm16bits,
         sampleRate: 16000,
         numChannels: 1,
       ),
-    ).then((stream) {
+    )
+        .then((stream) {
       _pcmSub = stream.listen((chunk) {
-        if (_wsChannel != null && _liveActive) {
+        // Pause forwarding while the device is recording its own reply.
+        // Dropping chunks here is intentional — the device isn't playing
+        // during its listen phase, so the gap is unnoticed.
+        if (_wsChannel != null && _liveActive && !_deviceListening) {
           _wsChannel!.sink.add(chunk);
         }
       });
@@ -322,15 +356,16 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
     _wsSub = null;
 
     await _recorder.stop();
+    await _replyPlayer.stop();
 
-    // Restore original volume — fire and forget.
     _restoreVolume();
 
     if (notify && mounted) {
       setState(() {
         _liveActive = false;
         _liveConnecting = false;
-        _deviceTalking = false;
+        _deviceListening = false;
+        _deviceReplying = false;
       });
     }
   }
@@ -340,7 +375,8 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
   void _showSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), duration: AppConstants.snackBarDuration),
+      SnackBar(
+          content: Text(message), duration: AppConstants.snackBarDuration),
     );
   }
 
@@ -386,7 +422,8 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
           _LiveIntercomTab(
             active: _liveActive,
             connecting: _liveConnecting,
-            deviceTalking: _deviceTalking,
+            deviceListening: _deviceListening,
+            deviceReplying: _deviceReplying,
             duration: _liveDuration,
             intercomVolume: _intercomVolume.toDouble(),
             originalVolume: _originalVolume,
@@ -490,7 +527,8 @@ class _VoiceMessageTab extends StatelessWidget {
 class _LiveIntercomTab extends StatelessWidget {
   final bool active;
   final bool connecting;
-  final bool deviceTalking;
+  final bool deviceListening;
+  final bool deviceReplying;
   final Duration duration;
   final double intercomVolume;
   final int originalVolume;
@@ -502,7 +540,8 @@ class _LiveIntercomTab extends StatelessWidget {
   const _LiveIntercomTab({
     required this.active,
     required this.connecting,
-    required this.deviceTalking,
+    required this.deviceListening,
+    required this.deviceReplying,
     required this.duration,
     required this.intercomVolume,
     required this.originalVolume,
@@ -514,6 +553,16 @@ class _LiveIntercomTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // While the device is listening or playing back its reply, swap the
+    // entire centre section to make the role-flip obvious.
+    if (deviceListening || deviceReplying) {
+      return _DeviceReplyView(
+        deviceListening: deviceListening,
+        deviceReplying: deviceReplying,
+        cs: cs,
+      );
+    }
+
     final tt = Theme.of(context).textTheme;
 
     return Padding(
@@ -522,16 +571,12 @@ class _LiveIntercomTab extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
-            deviceTalking
-                ? 'Device is talking back…'
-                : active
-                    ? 'Live — device is hearing you'
-                    : connecting
-                        ? 'Connecting…'
-                        : 'Tap to start live intercom',
-            style: tt.titleMedium?.copyWith(
-              color: deviceTalking ? cs.tertiary : cs.onSurfaceVariant,
-            ),
+            active
+                ? 'Live — device is hearing you'
+                : connecting
+                    ? 'Connecting…'
+                    : 'Tap to start live intercom',
+            style: tt.titleMedium?.copyWith(color: cs.onSurfaceVariant),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: AppConstants.spacingMd),
@@ -574,8 +619,6 @@ class _LiveIntercomTab extends StatelessWidget {
               ),
             ),
 
-          // Volume override — shown whenever the tab is active (not just during
-          // live session) so the user can set it before starting.
           _VolumeOverrideSlider(
             volume: intercomVolume,
             originalVolume: originalVolume,
@@ -584,6 +627,105 @@ class _LiveIntercomTab extends StatelessWidget {
             cs: cs,
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Device reply / listening view ─────────────────────────────────────────────
+
+/// Full-screen overlay shown when the device has flipped the walkie-talkie
+/// direction: either recording its own reply (listening) or playing it back.
+class _DeviceReplyView extends StatefulWidget {
+  final bool deviceListening;
+  final bool deviceReplying;
+  final ColorScheme cs;
+
+  const _DeviceReplyView({
+    required this.deviceListening,
+    required this.deviceReplying,
+    required this.cs,
+  });
+
+  @override
+  State<_DeviceReplyView> createState() => _DeviceReplyViewState();
+}
+
+class _DeviceReplyViewState extends State<_DeviceReplyView>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _pulse;
+  late Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _scale = Tween(begin: 1.0, end: 1.15).animate(
+      CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final cs = widget.cs;
+
+    final isListening = widget.deviceListening;
+    final color = isListening ? cs.secondary : cs.tertiary;
+    final icon =
+        isListening ? Icons.hearing_rounded : Icons.volume_up_rounded;
+    final label = isListening ? 'Device is listening…' : 'Playing reply…';
+    final sub = isListening
+        ? 'Your mic is paused. Release the device screen when done.'
+        : 'Your mic will resume automatically.';
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppConstants.spacingXxl),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AnimatedBuilder(
+              animation: _scale,
+              builder: (_, child) =>
+                  Transform.scale(scale: _scale.value, child: child),
+              child: Container(
+                width: AppConstants.iconMassive * 1.5,
+                height: AppConstants.iconMassive * 1.5,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: color, width: 2.5),
+                ),
+                child: Icon(icon, color: color, size: AppConstants.iconXxl),
+              ),
+            ),
+            const SizedBox(height: AppConstants.spacingXxl),
+            Text(
+              label,
+              style: tt.titleLarge?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppConstants.spacingMd),
+            Text(
+              sub,
+              style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -621,7 +763,8 @@ class _VolumeOverrideSlider extends StatelessWidget {
       children: [
         Row(
           children: [
-            Icon(_volumeIcon(volume), size: AppConstants.iconMd, color: cs.primary),
+            Icon(_volumeIcon(volume),
+                size: AppConstants.iconMd, color: cs.primary),
             const SizedBox(width: AppConstants.spacingMd),
             Expanded(
               child: Column(
@@ -632,14 +775,17 @@ class _VolumeOverrideSlider extends StatelessWidget {
                     children: [
                       Text(
                         'Intercom volume',
-                        style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                        style: tt.bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
                       ),
                       Text(
                         '${volume.round()}',
                         style: tt.bodyMedium?.copyWith(
                           color: cs.primary,
                           fontWeight: FontWeight.w600,
-                          fontFeatures: [const FontFeature.tabularFigures()],
+                          fontFeatures: [
+                            const FontFeature.tabularFigures()
+                          ],
                         ),
                       ),
                     ],
@@ -647,8 +793,10 @@ class _VolumeOverrideSlider extends StatelessWidget {
                   SliderTheme(
                     data: SliderTheme.of(context).copyWith(
                       trackHeight: 3,
-                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                      thumbShape:
+                          const RoundSliderThumbShape(enabledThumbRadius: 7),
+                      overlayShape:
+                          const RoundSliderOverlayShape(overlayRadius: 14),
                     ),
                     child: Slider(
                       value: volume,
