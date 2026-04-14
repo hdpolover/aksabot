@@ -36,6 +36,7 @@
 #include <freertos/idf_additions.h>
 #include "emotion_audio.h"
 #include "sfx_audio.h"
+#include "battery.h"
 
 // Global application state
 AppState appState;
@@ -135,7 +136,15 @@ static void updateStatusBar() {
     sb.wifiConnected = appState.wifiConnected;
     sb.wsConnected = appState.wsConnected;
     sb.wifiRssi = WiFi.RSSI();
-    sb.batteryPercent = 255;  // USB-powered
+    {
+        static uint32_t lastBatReadMs = 0;
+        static uint8_t  cachedBatPct  = 255;
+        if (millis() - lastBatReadMs > 30000 || lastBatReadMs == 0) {
+            cachedBatPct  = battery::readPercent();
+            lastBatReadMs = millis();
+        }
+        sb.batteryPercent = cachedBatPct;
+    }
     sb.focusModeActive = false;
     sb.pomodoroActive = false;
     sb.blePresent = (appState.presenceState == PresenceState::PRESENT ||
@@ -1512,6 +1521,7 @@ void setup() {
     vad::init();
     ota_update::init();
     status_led::init();
+    battery::init();
 
     // Load brightness from NVS and pass to power manager
     boot_screen::setStep(8, BOOT_STEPS, "Power Manager");
