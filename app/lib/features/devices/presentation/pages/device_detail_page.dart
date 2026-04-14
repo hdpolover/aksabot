@@ -206,6 +206,16 @@ class DeviceDashboardBody extends StatelessWidget {
           iconFg: cs.onSecondary,
           onTap: () => _showPushImageSheet(context, id),
         ),
+        const SizedBox(height: AppConstants.spacingMd),
+        _WideCard(
+          icon: Icons.surround_sound_rounded,
+          label: 'Voice Intercom',
+          description: 'Send a voice message or go live',
+          cardBg: cs.tertiaryContainer,
+          iconBg: cs.tertiary,
+          iconFg: cs.onTertiary,
+          onTap: () => context.push('/devices/$id/intercom'),
+        ),
         const SizedBox(height: AppConstants.spacingXxl),
 
         // ── Bot ────────────────────────────────────────────────────────────

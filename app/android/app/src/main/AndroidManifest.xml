@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
+    <!-- Microphone for voice messages and live intercom -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <!-- Camera and media for image push feature -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />

@@ -1453,6 +1453,27 @@ export class AudioGateway
 
   // ── Transport helpers ─────────────────────────────────────────
 
+  /** Send a pre-encoded framed-Opus buffer to a device as a full response,
+   *  wrapped in response:start / response:end.
+   *  Returns true if the device was reachable. */
+  async sendVoiceMessage(deviceId: string, framedOpus: Buffer): Promise<boolean> {
+    const socket = this.deviceToSocket.get(deviceId);
+    if (!socket || socket.readyState !== 1) return false;
+    this.sendToDevice(deviceId, 'response:start', { type: 'voice_message' });
+    await this.sendFramedOpusToDevice(deviceId, framedOpus);
+    this.sendToDevice(deviceId, 'response:end', { fullText: '', cacheKeys: [] });
+    return true;
+  }
+
+  /** Send a single raw Opus frame to a device without framing headers.
+   *  Used by IntercomGateway for real-time streaming — caller manages
+   *  response:start / response:end lifecycle events. */
+  sendOpusFrameToDevice(deviceId: string, opusFrame: Buffer): void {
+    const socket = this.deviceToSocket.get(deviceId);
+    if (!socket || socket.readyState !== 1) return;
+    socket.send(opusFrame);
+  }
+
   sendToDevice(deviceId: string, event: string, data: any) {
     const socket = this.deviceToSocket.get(deviceId);
     if (!socket || socket.readyState !== 1) return;

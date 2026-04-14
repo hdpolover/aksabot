@@ -19,7 +19,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
+import { diskStorage, memoryStorage } from 'multer';
 import { extname, join } from 'path';
 import { existsSync, createReadStream, mkdirSync, unlink, statSync } from 'fs';
 import { randomUUID } from 'crypto';
@@ -33,8 +33,8 @@ import { CurrentUser } from '../../core/common/decorators/current-user.decorator
 import { Public } from '../../core/common/decorators/public.decorator';
 import type { RequestUser } from '../../core/common/decorators/current-user.decorator';
 import { AudioGateway } from '../gateway/audio.gateway';
-import { TTS_PROVIDER } from '../ai/interfaces/tokens';
-import type { ITtsProvider } from '../ai/interfaces';
+import { TTS_PROVIDER, AUDIO_CODEC } from '../ai/interfaces/tokens';
+import type { ITtsProvider, IAudioCodec } from '../ai/interfaces';
 import { DevicesService } from './devices.service';
 import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
@@ -54,6 +54,7 @@ export class DevicesController {
     private readonly devicesService: DevicesService,
     private readonly gateway: AudioGateway,
     @Inject(TTS_PROVIDER) private readonly tts: ITtsProvider,
+    @Inject(AUDIO_CODEC) private readonly codec: IAudioCodec,
   ) {}
 
   @Post()
@@ -151,6 +152,43 @@ export class DevicesController {
       stability: dto.voice_stability,
     };
     const playing = await this.gateway.sendVoicePreviewToDevice(id, voiceOpts, dto.text);
+    return { playing };
+  }
+
+  /** Accept a pre-recorded voice message (raw 16kHz/mono/16-bit PCM or WAV),
+   *  encode it to Opus, and send it to the device for playback.
+   *  WAV files are automatically stripped of their 44-byte header.
+   *  Returns { playing: true } if the device was online, { playing: false } otherwise. */
+  @Post(':id/voice-message')
+  @RateLimit({ limit: 10, windowSeconds: 60, keyType: 'user' })
+  @UseInterceptors(
+    FileInterceptor('audio', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB — ~5 min of 16kHz PCM
+    }),
+  )
+  async voiceMessage(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    await this.devicesService.findById(id, user.userId);
+
+    if (!file) {
+      throw new NotFoundException('No audio file provided');
+    }
+
+    // Strip WAV header if present — locate "data" chunk to get raw PCM
+    let pcm = file.buffer;
+    if (pcm.length > 44 && pcm.subarray(0, 4).toString('ascii') === 'RIFF') {
+      const dataIdx = pcm.indexOf(Buffer.from('data'));
+      pcm = dataIdx !== -1 && dataIdx + 8 <= pcm.length
+        ? pcm.subarray(dataIdx + 8)  // skip "data" marker + 4-byte chunk size
+        : pcm.subarray(44);          // fallback: standard 44-byte header
+    }
+
+    const framedOpus = this.codec.encode(pcm);
+    const playing = await this.gateway.sendVoiceMessage(id, framedOpus);
     return { playing };
   }
 

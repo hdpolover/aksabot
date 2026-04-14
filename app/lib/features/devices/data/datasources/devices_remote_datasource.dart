@@ -157,6 +157,30 @@ class DevicesRemoteDatasource {
     }
   }
 
+  /// Send a pre-recorded voice message (raw PCM or WAV bytes) to the device.
+  /// Returns true if the device was online and played the audio.
+  Future<bool> sendVoiceMessage(String id, Uint8List audioBytes) async {
+    try {
+      final formData = FormData.fromMap({
+        'audio': MultipartFile.fromBytes(audioBytes, filename: 'voice.wav'),
+      });
+      final response = await _client.dio.post(
+        '/devices/$id/voice-message',
+        data: formData,
+      );
+      final data = response.data['data'] ?? response.data;
+      return (data is Map && data['playing'] == true);
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      String message = 'Voice message failed';
+      if (data is Map) {
+        final msg = data['message'];
+        if (msg is String) message = msg;
+      }
+      throw ServerException(message, statusCode: e.response?.statusCode);
+    }
+  }
+
   /// Upload a compressed JPEG image to the backend and push it to the device.
   Future<void> pushImage(
     String id,

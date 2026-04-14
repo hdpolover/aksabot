@@ -38,6 +38,10 @@ abstract class DevicesRepository {
     String? text,
   });
 
+  /// Send a pre-recorded voice message (raw PCM or WAV) to the device.
+  /// Returns true if the device was online and played the audio.
+  Future<Either<Failure, bool>> sendVoiceMessage(String id, Uint8List audioBytes);
+
   /// Upload a compressed image to the backend and push it to the device display.
   /// [imageBytes] must be JPEG-encoded. [durationMs] controls auto-return time.
   Future<Either<Failure, void>> pushImage(

@@ -55,6 +55,10 @@ dependencies:
   # Audio playback (voice preview)
   audioplayers: ^6.1.0
 
+  # Audio recording + live intercom
+  record: ^5.1.2
+  web_socket_channel: ^3.0.1
+
   # Image push to device
   image_picker: ^1.1.2
   flutter_image_compress: ^2.3.0

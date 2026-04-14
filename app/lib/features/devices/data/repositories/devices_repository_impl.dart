@@ -170,6 +170,16 @@ class DevicesRepositoryImpl implements DevicesRepository {
   }
 
   @override
+  Future<Either<Failure, bool>> sendVoiceMessage(String id, Uint8List audioBytes) async {
+    try {
+      final playing = await _datasource.sendVoiceMessage(id, audioBytes);
+      return Right(playing);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
+
+  @override
   Future<Either<Failure, void>> pushImage(
     String id,
     Uint8List imageBytes, {

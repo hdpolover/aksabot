@@ -22,6 +22,7 @@ import '../../features/memories/presentation/pages/memories_page.dart';
 import '../../features/scheduler/presentation/pages/reminders_page.dart';
 import '../../features/scheduler/presentation/pages/pomodoro_page.dart';
 import '../../features/scheduler/presentation/pages/focus_mode_page.dart';
+import '../../features/devices/presentation/pages/voice_intercom_page.dart';
 import 'shell_scaffold.dart';
 
 GoRouter createRouter(AuthBloc authBloc) {
@@ -180,6 +181,12 @@ List<RouteBase> _deviceSubRoutes() {
     GoRoute(
       path: 'integrations',
       builder: (context, state) => IntegrationsPage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'intercom',
+      builder: (context, state) => VoiceIntercomPage(
         deviceId: state.pathParameters['deviceId']!,
       ),
     ),
