@@ -13,6 +13,7 @@ import { Device } from '../../core/database/entities';
 import { AUDIO_CODEC } from '../ai/interfaces/tokens';
 import type { IAudioCodec } from '../ai/interfaces';
 import { AudioGateway } from './audio.gateway';
+import { IntercomSessionService } from './intercom-session.service';
 
 interface ClientState {
   userId: string;
@@ -43,6 +44,7 @@ export class IntercomGateway implements OnGatewayConnection, OnGatewayDisconnect
     private readonly jwtService: JwtService,
     @InjectRepository(Device) private readonly devicesRepo: Repository<Device>,
     private readonly audioGateway: AudioGateway,
+    private readonly intercomSessions: IntercomSessionService,
     @Inject(AUDIO_CODEC) private readonly codec: IAudioCodec,
   ) {}
 
@@ -86,6 +88,9 @@ export class IntercomGateway implements OnGatewayConnection, OnGatewayDisconnect
     const state = this.clients.get(client);
     if (state?.started && state.deviceId) {
       this.flushAndStop(state);
+    }
+    if (state?.deviceId) {
+      this.intercomSessions.unregister(state.deviceId);
     }
     if (state) {
       this.logger.log(`Intercom disconnected: user ${state.userId}`);
@@ -147,6 +152,9 @@ export class IntercomGateway implements OnGatewayConnection, OnGatewayDisconnect
     state.started = true;
     state.pcmBuffer = Buffer.alloc(0);
 
+    // Register so AudioGateway can push device replies back to this client
+    this.intercomSessions.register(data.deviceId, client);
+
     this.audioGateway.sendToDevice(data.deviceId, 'response:start', { type: 'intercom' });
     client.send(JSON.stringify({ event: 'intercom:ready' }));
 
@@ -178,6 +186,7 @@ export class IntercomGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   private flushAndStop(state: ClientState) {
     if (!state.started || !state.deviceId) return;
+    this.intercomSessions.unregister(state.deviceId);
 
     // Flush any partial frame — pad with silence so the encoder gets a full frame
     if (state.pcmBuffer.length > 0) {

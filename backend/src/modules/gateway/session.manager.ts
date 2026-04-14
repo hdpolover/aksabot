@@ -15,6 +15,10 @@ export interface DeviceSession {
   audioFormat: 'opus' | 'pcm16';
   /** Language the device is configured to use. Drives STT primary language + LLM response language. */
   language: 'en' | 'id';
+  /** Walkie-talkie: true while device is sending a voice reply back to the app. */
+  intercomReply: boolean;
+  /** Accumulated raw Opus frames from the device during an intercom reply. */
+  intercomFrames: Buffer[];
 }
 
 @Injectable()
@@ -36,6 +40,8 @@ export class SessionManager {
       idleTimer: null,
       audioFormat: 'opus',
       language,
+      intercomReply: false,
+      intercomFrames: [],
     };
     this.sessions.set(deviceId, session);
     return session;

@@ -22,9 +22,10 @@ enum class PresenceState {
 
 /// How the current LISTENING session was triggered.
 enum class ListenTrigger : uint8_t {
-    TOUCH,       // Push-to-talk (touch hold)
-    WAKE_WORD,   // "Hey Aksa" wake word detection
-    GESTURE,     // APDS-9960 hand wave
+    TOUCH,            // Push-to-talk (touch hold)
+    WAKE_WORD,        // "Hey Aksa" wake word detection
+    GESTURE,          // APDS-9960 hand wave
+    INTERCOM_REPLY,   // Walkie-talkie reply during active intercom session
 };
 
 // Global state (accessed from multiple FreeRTOS tasks)

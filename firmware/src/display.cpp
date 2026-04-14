@@ -26,7 +26,13 @@ static bool sleeping = false;
 static uint8_t brightness = 70;       // Current/target brightness for the HW
 static uint8_t userBrightness = 70;   // User-set brightness (survives sleep)
 static bool transcriptEnabled = false;
-static char transcriptText[128] = {};
+static char transcriptText[384] = {};
+
+// Transcript auto-scroll state
+static int  transcriptScrollLine     = 0;   // first visible line index
+static int  transcriptTotalLines     = 0;   // total wrapped lines (updated by renderer)
+static uint32_t transcriptScrollMs   = 0;   // last scroll-advance timestamp
+static const uint32_t TRANSCRIPT_SCROLL_INTERVAL_MS = 2500;
 
 // Auto-return timer
 static bool autoReturnActive = false;
@@ -1201,27 +1207,28 @@ void renderStatus(const display::StatusBar& status) {
     tft.setTextDatum(lgfx::top_left);  // restore default
 }
 
-/// Draw transcript overlay into a target (sprite or tft).
+/// Draw transcript overlay into a target (sprite or tft), with auto-scroll support.
 void renderTranscriptOverlay(LGFX_Sprite& target, const char* text) {
-    const int padX = 8;
-    const int padY = 5;
-    const int lineH = 14;
-    const int maxLines = 3;
+    const int padX          = 8;
+    const int padY          = 5;
+    const int lineH         = 14;
+    const int visibleLines  = 3;
+    const int maxTotalLines = 16;   // word-wrap cap — ~384 chars / ~24 chars avg word
     const int maxCharsPerLine = 36;
 
     target.setFont(&fonts::Font2);
     target.setTextSize(1);
     target.setTextDatum(lgfx::top_left);
 
-    // Word-wrap text into lines
-    char lines[maxLines][42];
-    int lineCount = 0;
-    memset(lines, 0, sizeof(lines));
+    // Word-wrap entire text into allLines[]
+    char allLines[maxTotalLines][42];
+    int  totalLines = 0;
+    memset(allLines, 0, sizeof(allLines));
 
     const char* p = text;
     int col = 0;
 
-    while (*p && lineCount < maxLines) {
+    while (*p && totalLines < maxTotalLines) {
         while (*p == ' ') p++;
         if (!*p) break;
 
@@ -1230,28 +1237,41 @@ void renderTranscriptOverlay(LGFX_Sprite& target, const char* text) {
         int wordLen = p - wordStart;
 
         if (col + (col > 0 ? 1 : 0) + wordLen > maxCharsPerLine) {
-            lineCount++;
+            totalLines++;
             col = 0;
-            if (lineCount >= maxLines) break;
+            if (totalLines >= maxTotalLines) break;
         }
 
-        if (col > 0) lines[lineCount][col++] = ' ';
+        if (col > 0) allLines[totalLines][col++] = ' ';
 
-        int copyLen = (col + wordLen < (int)sizeof(lines[0]) - 1) ? wordLen : ((int)sizeof(lines[0]) - 1 - col);
-        memcpy(&lines[lineCount][col], wordStart, copyLen);
+        int copyLen = (col + wordLen < (int)sizeof(allLines[0]) - 1)
+                      ? wordLen
+                      : ((int)sizeof(allLines[0]) - 1 - col);
+        memcpy(&allLines[totalLines][col], wordStart, copyLen);
         col += copyLen;
-        lines[lineCount][col] = '\0';
+        allLines[totalLines][col] = '\0';
     }
-    if (col > 0) lineCount++;
+    if (col > 0) totalLines++;
 
-    int barH = padY * 2 + lineCount * lineH;
+    // Cache total line count so tick() knows when to stop scrolling
+    transcriptTotalLines = totalLines;
+
+    // Clamp scroll offset (guard against stale value after text change)
+    int maxScroll = totalLines - visibleLines;
+    if (maxScroll < 0) maxScroll = 0;
+    if (transcriptScrollLine > maxScroll) transcriptScrollLine = maxScroll;
+
+    int drawCount = totalLines - transcriptScrollLine;
+    if (drawCount > visibleLines) drawCount = visibleLines;
+
+    int barH = padY * 2 + drawCount * lineH;
     int barY = LCD_HEIGHT - barH;
 
     target.fillRect(0, barY, LCD_WIDTH, barH, COL_STATUS_BG);
 
     target.setTextColor(COL_FACE);
-    for (int i = 0; i < lineCount; i++) {
-        target.drawString(lines[i], padX, barY + padY + i * lineH);
+    for (int i = 0; i < drawCount; i++) {
+        target.drawString(allLines[transcriptScrollLine + i], padX, barY + padY + i * lineH);
     }
 }
 
@@ -1524,6 +1544,18 @@ void display::tick(uint32_t nowMs) {
 
     if (sleeping) return;
 
+    // Transcript auto-scroll — advance one line every TRANSCRIPT_SCROLL_INTERVAL_MS
+    // while there are off-screen lines remaining.
+    if (transcriptEnabled && transcriptText[0] != '\0') {
+        int maxScroll = transcriptTotalLines - 3;  // 3 = visibleLines
+        if (maxScroll > 0 && transcriptScrollLine < maxScroll) {
+            if (nowMs - transcriptScrollMs >= TRANSCRIPT_SCROLL_INTERVAL_MS) {
+                transcriptScrollLine++;
+                transcriptScrollMs = nowMs;
+            }
+        }
+    }
+
     // Auto-return timer — must run in every mode including IMAGE.
     // Previously this was inside the rate-limited block below, which IMAGE mode
     // never reached, so the timer never fired and images stayed forever.
@@ -1613,9 +1645,49 @@ void display::setTranscriptOverlay(bool enabled) {
     transcriptEnabled = enabled;
 }
 
+/// Strip markdown syntax characters from `src` into `dst` (max `dstSize` bytes).
+/// Removes: * _ ` ~ (formatting), leading # (headers), > (blockquotes).
+/// Keeps the text content — only drops the surrounding symbols.
+static void stripMarkdown(const char* src, char* dst, size_t dstSize) {
+    const char* r = src;
+    char* w = dst;
+    char* end = dst + dstSize - 1;  // leave room for '\0'
+
+    // Skip leading "# " header markers (e.g. "## Title" → "Title")
+    while (*r == '#') r++;
+    if (r > src && *r == ' ') r++;  // consume the space after hashes
+
+    while (*r && w < end) {
+        char c = *r;
+
+        // Skip blockquote marker at line start ("> ")
+        if (c == '>' && (r == src || *(r - 1) == '\n')) {
+            r++;
+            if (*r == ' ') r++;  // consume the space after >
+            continue;
+        }
+
+        // Skip markdown formatting symbols: * _ ` ~
+        if (c == '*' || c == '_' || c == '`' || c == '~') {
+            r++;
+            continue;
+        }
+
+        *w++ = c;
+        r++;
+    }
+
+    // Trim trailing whitespace
+    while (w > dst && *(w - 1) == ' ') w--;
+
+    *w = '\0';
+}
+
 void display::setTranscriptText(const char* text) {
-    strncpy(transcriptText, text, sizeof(transcriptText) - 1);
-    transcriptText[sizeof(transcriptText) - 1] = '\0';
+    stripMarkdown(text, transcriptText, sizeof(transcriptText));
+    // Reset scroll to top whenever text changes (new sentence / STT update)
+    transcriptScrollLine = 0;
+    transcriptScrollMs   = millis();
 }
 
 void display::setBrightness(uint8_t level) {

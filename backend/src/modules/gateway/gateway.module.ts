@@ -11,6 +11,7 @@ import { MemoriesModule } from '../memories/memories.module';
 import { SchedulerModule } from '../scheduler/scheduler.module';
 import { AudioGateway } from './audio.gateway';
 import { IntercomGateway } from './intercom.gateway';
+import { IntercomSessionService } from './intercom-session.service';
 import { SessionManager } from './session.manager';
 import { ConversationPersistence } from './conversation.persistence';
 import { VoiceCommandService } from './voice-command.service';
@@ -23,7 +24,7 @@ import { VoiceCommandService } from './voice-command.service';
     MemoriesModule,
     forwardRef(() => SchedulerModule),
   ],
-  providers: [AudioGateway, IntercomGateway, SessionManager, ConversationPersistence, VoiceCommandService],
+  providers: [AudioGateway, IntercomGateway, IntercomSessionService, SessionManager, ConversationPersistence, VoiceCommandService],
   exports: [AudioGateway, SessionManager],
 })
 export class GatewayModule {}

@@ -801,6 +801,20 @@ static void onTouchEvent(touch::Event event) {
 
     switch (event) {
         case touch::Event::HOLD_START: {
+            // Walkie-talkie: in INTERCOM state, hold to talk back to the app.
+            // Does NOT trigger the AI pipeline — audio is routed to the app directly.
+            if (appState.botState == BotState::INTERCOM) {
+                face::setExpression(face::Expression::LISTENING, 100);
+                appState.listenTrigger = ListenTrigger::INTERCOM_REPLY;
+                appState.botState      = BotState::LISTENING;
+                ui_audio::play(ui_audio::Clip::HOLD_START);
+                if (appState.wsConnected) {
+                    ws_client::sendEvent("intercom:reply:start");
+                }
+                Serial.println("[Main] Intercom walkie-talkie: recording reply");
+                break;
+            }
+
             // Accept in four situations:
             //   1. IDLE          — normal push-to-talk start
             //   2. LISTENING (hands-free) — override wake-word/gesture session with PTT
@@ -877,8 +891,17 @@ static void onTouchEvent(touch::Event event) {
             if (appState.botState == BotState::LISTENING) {
                 echoRecording = false;
                 audio_io::stopMic();
-                if (appState.wsConnected) {
-                    // Change state BEFORE any blocking audio plays.
+
+                if (appState.listenTrigger == ListenTrigger::INTERCOM_REPLY) {
+                    // Walkie-talkie reply done — backend decodes and pushes to app.
+                    if (appState.wsConnected) {
+                        ws_client::sendEvent("intercom:reply:end");
+                    }
+                    appState.botState = BotState::INTERCOM;
+                    syncFaceToState();  // back to CALM face
+                    Serial.println("[Main] Intercom walkie-talkie: reply finished");
+                } else if (appState.wsConnected) {
+                    // Normal PTT: Change state BEFORE any blocking audio plays.
                     // Core 0's audioCaptureLoop checks botState to gate encoding.
                     // If state stays LISTENING during playback, Core 0 reads zeros
                     // from the flushed DMA and calls opus_encode() on pure silence —

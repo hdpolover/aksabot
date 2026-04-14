@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:record/record.dart';
@@ -13,7 +14,6 @@ import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/storage_keys.dart';
 import '../../../../core/di/injection.dart';
 import '../../data/datasources/devices_remote_datasource.dart';
-import '../../domain/entities/device_entity.dart';
 import '../../domain/repositories/devices_repository.dart';
 
 /// Two-mode voice intercom page.
@@ -43,7 +43,6 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
   final _datasource = sl<DevicesRemoteDatasource>();
 
   // ── Device / volume ───────────────────────────────────────────
-  Device? _device;
   int _originalVolume = 80;  // restored after intercom
   int _intercomVolume = 80;  // slider value during intercom
   Timer? _volumeDebounce;
@@ -58,11 +57,13 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
   // ── Live Intercom state ───────────────────────────────────────
   bool _liveActive = false;
   bool _liveConnecting = false;
+  bool _deviceTalking = false;  // device is sending a walkie-talkie reply
   WebSocketChannel? _wsChannel;
   StreamSubscription<dynamic>? _wsSub;
   StreamSubscription<Uint8List>? _pcmSub;
   Duration _liveDuration = Duration.zero;
   Timer? _liveTimer;
+  final _replyPlayer = AudioPlayer();
 
   @override
   void initState() {
@@ -78,6 +79,7 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
     _liveTimer?.cancel();
     _volumeDebounce?.cancel();
     _recorder.dispose();
+    _replyPlayer.dispose();
     _stopLive(notify: false);
     super.dispose();
   }
@@ -89,7 +91,6 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
       (device) {
         final vol = (device.settingsJson['volume'] as num?)?.toInt() ?? 80;
         setState(() {
-          _device = device;
           _originalVolume = vol;
           _intercomVolume = vol;
         });
@@ -247,11 +248,22 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
   }
 
   void _onWsMessage(dynamic msg) {
+    // Binary message = WAV audio reply from device (walkie-talkie)
+    if (msg is List<int>) {
+      _replyPlayer.play(BytesSource(Uint8List.fromList(msg)));
+      return;
+    }
+
     try {
       final json = jsonDecode(msg as String) as Map<String, dynamic>;
-      if (json['event'] == 'intercom:ready') {
+      final event = json['event'] as String?;
+      if (event == 'intercom:ready') {
         _beginPcmStream();
-      } else if (json['event'] == 'error') {
+      } else if (event == 'intercom:device:talking') {
+        if (mounted) setState(() => _deviceTalking = true);
+      } else if (event == 'intercom:device:done') {
+        if (mounted) setState(() => _deviceTalking = false);
+      } else if (event == 'error') {
         final message = (json['data'] as Map?)?['message'] ?? 'Intercom error';
         _showSnack(message.toString());
         _stopLive();
@@ -318,6 +330,7 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
       setState(() {
         _liveActive = false;
         _liveConnecting = false;
+        _deviceTalking = false;
       });
     }
   }
@@ -373,6 +386,7 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
           _LiveIntercomTab(
             active: _liveActive,
             connecting: _liveConnecting,
+            deviceTalking: _deviceTalking,
             duration: _liveDuration,
             intercomVolume: _intercomVolume.toDouble(),
             originalVolume: _originalVolume,
@@ -476,6 +490,7 @@ class _VoiceMessageTab extends StatelessWidget {
 class _LiveIntercomTab extends StatelessWidget {
   final bool active;
   final bool connecting;
+  final bool deviceTalking;
   final Duration duration;
   final double intercomVolume;
   final int originalVolume;
@@ -487,6 +502,7 @@ class _LiveIntercomTab extends StatelessWidget {
   const _LiveIntercomTab({
     required this.active,
     required this.connecting,
+    required this.deviceTalking,
     required this.duration,
     required this.intercomVolume,
     required this.originalVolume,
@@ -506,12 +522,16 @@ class _LiveIntercomTab extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
-            active
-                ? 'Live — device is hearing you'
-                : connecting
-                    ? 'Connecting…'
-                    : 'Tap to start live intercom',
-            style: tt.titleMedium?.copyWith(color: cs.onSurfaceVariant),
+            deviceTalking
+                ? 'Device is talking back…'
+                : active
+                    ? 'Live — device is hearing you'
+                    : connecting
+                        ? 'Connecting…'
+                        : 'Tap to start live intercom',
+            style: tt.titleMedium?.copyWith(
+              color: deviceTalking ? cs.tertiary : cs.onSurfaceVariant,
+            ),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: AppConstants.spacingMd),
@@ -533,6 +553,26 @@ class _LiveIntercomTab extends StatelessWidget {
           ),
 
           const SizedBox(height: AppConstants.spacingXxl),
+
+          if (active)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppConstants.spacingMd),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.touch_app_rounded,
+                    size: AppConstants.iconSm,
+                    color: cs.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: AppConstants.spacingXs),
+                  Text(
+                    'Hold device screen to talk back',
+                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
 
           // Volume override — shown whenever the tab is active (not just during
           // live session) so the user can set it before starting.

@@ -18,7 +18,9 @@ import { MoodJournalService } from '../scheduler/mood-journal.service';
 import { VoiceCommandService } from './voice-command.service';
 import { SessionManager } from './session.manager';
 import { ConversationPersistence } from './conversation.persistence';
-import type { SttResult } from '../ai/interfaces';
+import type { SttResult, IAudioCodec } from '../ai/interfaces';
+import { AUDIO_CODEC } from '../ai/interfaces/tokens';
+import { IntercomSessionService } from './intercom-session.service';
 import { REDIS_CLIENT } from '../../core/cache/redis.provider';
 
 interface WsMessage {
@@ -56,6 +58,8 @@ export class AudioGateway
     private readonly voiceCommands: VoiceCommandService,
     private readonly sessions: SessionManager,
     private readonly persistence: ConversationPersistence,
+    private readonly intercomSessions: IntercomSessionService,
+    @Inject(AUDIO_CODEC) private readonly codec: IAudioCodec,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
@@ -717,6 +721,14 @@ export class AudioGateway
             this.logger.error(`onReconnectBack error: ${err.message}`),
           );
           break;
+        case 'intercom:reply:start':
+          this.onIntercomReplyStart(deviceId);
+          break;
+        case 'intercom:reply:end':
+          this.onIntercomReplyEnd(deviceId).catch((err) =>
+            this.logger.error(`onIntercomReplyEnd error: ${err.message}`),
+          );
+          break;
         case 'ota:progress':
           this.onOtaProgress(deviceId, msg.data ?? {}).catch((err) =>
             this.logger.error(`onOtaProgress error: ${err.message}`),
@@ -870,6 +882,14 @@ export class AudioGateway
 
   private onAudioChunk(deviceId: string, data: Buffer) {
     const session = this.sessions.get(deviceId);
+
+    // Walkie-talkie: device is sending a voice reply back to the app.
+    // Accumulate raw Opus frames instead of routing to the STT pipeline.
+    if (session?.intercomReply) {
+      session.intercomFrames.push(Buffer.from(data));
+      return;
+    }
+
     if (!session?.sttStream) return;
 
     // Reset watchdog — audio is still flowing
@@ -1472,6 +1492,73 @@ export class AudioGateway
     const socket = this.deviceToSocket.get(deviceId);
     if (!socket || socket.readyState !== 1) return;
     socket.send(opusFrame);
+  }
+
+  // ── Walkie-talkie: device → app ───────────────────────────────────────────
+
+  /** Device started a walkie-talkie reply. Begin accumulating Opus frames. */
+  private onIntercomReplyStart(deviceId: string): void {
+    const session = this.sessions.get(deviceId);
+    if (!session) return;
+    session.intercomReply = true;
+    session.intercomFrames = [];
+    this.intercomSessions.sendJsonToApp(deviceId, 'intercom:device:talking', {});
+    this.logger.log(`[${deviceId}] Walkie-talkie reply started`);
+  }
+
+  /** Device finished its reply. Decode accumulated Opus → PCM → WAV → push to app. */
+  private async onIntercomReplyEnd(deviceId: string): Promise<void> {
+    const session = this.sessions.get(deviceId);
+    if (!session?.intercomReply) return;
+
+    session.intercomReply = false;
+    const frames = session.intercomFrames;
+    session.intercomFrames = [];
+
+    if (frames.length === 0) {
+      this.intercomSessions.sendJsonToApp(deviceId, 'intercom:device:done', {});
+      return;
+    }
+
+    // Decode each raw Opus frame → 640 bytes of 16kHz/mono/16-bit PCM
+    const pcmChunks: Buffer[] = [];
+    for (const frame of frames) {
+      try {
+        pcmChunks.push(this.codec.decode(frame));
+      } catch {
+        // Skip corrupt frames — a few missing frames are tolerable
+      }
+    }
+
+    const pcm = Buffer.concat(pcmChunks);
+    const wav = this.buildWav(pcm);
+
+    this.intercomSessions.sendBinaryToApp(deviceId, wav);
+    this.intercomSessions.sendJsonToApp(deviceId, 'intercom:device:done', {});
+    this.logger.log(`[${deviceId}] Walkie-talkie reply forwarded to app (${frames.length} frames, ${pcm.length} PCM bytes)`);
+  }
+
+  /** Wrap raw 16kHz/mono/16-bit PCM in a standard 44-byte WAV header. */
+  private buildWav(pcm: Buffer, sampleRate = 16000): Buffer {
+    const channels = 1;
+    const bitsPerSample = 16;
+    const byteRate = sampleRate * channels * (bitsPerSample / 8);
+    const blockAlign = channels * (bitsPerSample / 8);
+    const header = Buffer.alloc(44);
+    header.write('RIFF', 0);
+    header.writeUInt32LE(36 + pcm.length, 4);
+    header.write('WAVE', 8);
+    header.write('fmt ', 12);
+    header.writeUInt32LE(16, 16);           // PCM chunk size
+    header.writeUInt16LE(1, 20);            // PCM format
+    header.writeUInt16LE(channels, 22);
+    header.writeUInt32LE(sampleRate, 24);
+    header.writeUInt32LE(byteRate, 28);
+    header.writeUInt16LE(blockAlign, 32);
+    header.writeUInt16LE(bitsPerSample, 34);
+    header.write('data', 36);
+    header.writeUInt32LE(pcm.length, 40);
+    return Buffer.concat([header, pcm]);
   }
 
   sendToDevice(deviceId: string, event: string, data: any) {
