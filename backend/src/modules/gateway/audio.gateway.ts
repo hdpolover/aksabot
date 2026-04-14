@@ -5,8 +5,7 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import type { IncomingMessage } from 'http';
-import { writeFileSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { existsSync, createReadStream, mkdirSync, unlink } from 'fs';
 import type WebSocket from 'ws';
 import type Redis from 'ioredis';
 import { AuthService } from '../auth/auth.service';
@@ -135,7 +134,6 @@ export class AudioGateway
     );
 
     // Greeting: wait 5s for device to settle, then send TTS greeting
-    // Longer delay to let SSL stabilize before sending audio frames
     setTimeout(() => {
       this.sendConnectionGreeting(device.id).catch((err) =>
         this.logger.warn(`Connection greeting failed: ${err.message}`),
@@ -179,78 +177,45 @@ export class AudioGateway
     this.logger.log(`Device ${deviceId} disconnected`);
   }
 
-  // ── Connection greeting (TTS audio on first connect of the day) ──
+  // ── Connection greeting (TTS audio on connect) ──────────────────
 
   private async sendConnectionGreeting(deviceId: string) {
-    // Check if device is still connected (may have disconnected during the delay)
     const socket = this.deviceToSocket.get(deviceId);
     if (!socket || socket.readyState !== 1) return;
 
     const session = this.sessions.get(deviceId);
     if (!session || session.state !== 'idle') return;
 
-    // Claim the speaking slot synchronously before any await so no other
-    // proactive pipeline can sneak in and send a concurrent response:start.
     session.state = 'speaking';
 
     try {
       const greetingText = await this.proactive.checkGreeting(deviceId);
       if (!greetingText) return;
 
-      this.logger.log(`Sending greeting to ${deviceId}: "${greetingText.slice(0, 60)}..."`);
-
-      // Split greeting into sentences — each sentence becomes a separate TTS + binary
-      // frame, matching the conversation pipeline. Large single frames crash the ESP32.
       const sentences = this.splitSentences(greetingText);
-
-      // Debug: save audio files so we can verify TTS output
-      const debugDir = join(process.cwd(), 'debug-audio');
-      try { mkdirSync(debugDir, { recursive: true }); } catch {}
-      const ts = Date.now();
-
       this.sendToDevice(deviceId, 'response:start', { type: 'greeting' });
-      this.logger.log(`Sent response:start to ${deviceId}`);
 
-      let sentenceIdx = 0;
       for (const sentence of sentences) {
-        // Re-check connection before each synthesis (TTS can take seconds)
         const sock = this.deviceToSocket.get(deviceId);
-        if (!sock || sock.readyState !== 1) {
-          this.logger.warn(`Device ${deviceId} disconnected during greeting TTS`);
-          return;
-        }
+        if (!sock || sock.readyState !== 1) return;
 
         const device = await this.persistence.getDevice(deviceId);
         const s = device?.settingsJson ?? {};
         const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability, language: (s.language as 'en' | 'id' | undefined) ?? 'en' };
-        const { opusAudio, pcmAudio } = await this.aiService.synthesizeWithCache(sentence, undefined, voiceOpts);
-
-        // Save debug files
-        if (pcmAudio.length > 0) {
-          const wavBuf = this.pcmToWav(pcmAudio, 16000, 1, 16);
-          writeFileSync(join(debugDir, `greeting-${ts}-s${sentenceIdx}.wav`), wavBuf);
-          this.logger.debug(`Saved WAV: greeting-${ts}-s${sentenceIdx}.wav (${wavBuf.length} bytes)`);
-        }
-        writeFileSync(join(debugDir, `greeting-${ts}-s${sentenceIdx}.opus`), opusAudio);
-        this.logger.debug(`Saved Opus: greeting-${ts}-s${sentenceIdx}.opus (${opusAudio.length} bytes)`);
-
-        this.sendToDevice(deviceId, 'response:text', { text: sentence, isFinal: false });
-        const framesSent = await this.sendFramedOpusToDevice(deviceId, opusAudio);
-        this.logger.log(`Sent sentence ${sentenceIdx} to ${deviceId}: "${sentence.slice(0, 40)}..." (${framesSent} opus frames, ${opusAudio.length} bytes)`);
-        sentenceIdx++;
+        const cleanSentence = this.stripLlmTags(sentence);
+        if (!cleanSentence) continue;
+        const { opusAudio } = await this.aiService.synthesizeWithCache(cleanSentence, undefined, voiceOpts);
+        this.sendToDevice(deviceId, 'response:text', { text: cleanSentence, isFinal: false });
+        await this.sendFramedOpusToDevice(deviceId, opusAudio);
       }
 
-      this.sendToDevice(deviceId, 'response:end', {
-        fullText: greetingText,
-        cacheKeys: [],
-      });
-      this.logger.log(`Sent response:end to ${deviceId} — greeting complete`);
+      this.sendToDevice(deviceId, 'response:end', { fullText: greetingText, cacheKeys: [] });
+      this.logger.log(`Greeting sent to ${deviceId}: "${greetingText.slice(0, 60)}..."`);
     } finally {
       const s = this.sessions.get(deviceId);
       if (s && s.state === 'speaking') s.state = 'idle';
     }
 
-    // Start idle personality chat timer after greeting
     this.proactive.startIdleChat(deviceId).catch((err) =>
       this.logger.warn(`Idle chat start failed: ${err.message}`),
     );
@@ -340,13 +305,15 @@ export class AudioGateway
           stability: s.voice_stability,
           language: (s.language as 'en' | 'id' | undefined) ?? 'en',
         };
+        const cleanSentence = this.stripLlmTags(sentence);
+        if (!cleanSentence) continue;
         const { opusAudio } = await this.aiService.synthesizeWithCache(
-          sentence,
+          cleanSentence,
           undefined,
           voiceOpts,
         );
         this.sendToDevice(deviceId, 'response:text', {
-          text: sentence,
+          text: cleanSentence,
           isFinal: false,
         });
         await this.sendFramedOpusToDevice(deviceId, opusAudio);
@@ -417,13 +384,15 @@ export class AudioGateway
         const wbDevice = await this.persistence.getDevice(deviceId);
         const wbSettings = wbDevice?.settingsJson ?? {};
         const wbVoice = { voice: wbSettings.voice_preset, speed: wbSettings.voice_speed, stability: wbSettings.voice_stability, language: (wbSettings.language as 'en' | 'id' | undefined) ?? 'en' };
+        const cleanSentence = this.stripLlmTags(sentence);
+        if (!cleanSentence) continue;
         const { opusAudio } = await this.aiService.synthesizeWithCache(
-          sentence,
+          cleanSentence,
           undefined,
           wbVoice,
         );
         this.sendToDevice(deviceId, 'response:text', {
-          text: sentence,
+          text: cleanSentence,
           isFinal: false,
         });
         await this.sendFramedOpusToDevice(deviceId, opusAudio);
@@ -530,10 +499,12 @@ export class AudioGateway
         const sock = this.deviceToSocket.get(deviceId);
         if (!sock || sock.readyState !== 1) return;
 
+        const cleanSentence = this.stripLlmTags(sentence);
+        if (!cleanSentence) continue;
         const { opusAudio } = await this.aiService.synthesizeWithCache(
-          sentence, undefined, voiceOpts,
+          cleanSentence, undefined, voiceOpts,
         );
-        this.sendToDevice(deviceId, 'response:text', { text: sentence, isFinal: false });
+        this.sendToDevice(deviceId, 'response:text', { text: cleanSentence, isFinal: false });
         await this.sendFramedOpusToDevice(deviceId, opusAudio);
       }
 
@@ -604,10 +575,12 @@ export class AudioGateway
         const sock = this.deviceToSocket.get(deviceId);
         if (!sock || sock.readyState !== 1) return;
 
+        const cleanSentence = this.stripLlmTags(sentence);
+        if (!cleanSentence) continue;
         const { opusAudio } = await this.aiService.synthesizeWithCache(
-          sentence, undefined, voiceOpts,
+          cleanSentence, undefined, voiceOpts,
         );
-        this.sendToDevice(deviceId, 'response:text', { text: sentence, isFinal: false });
+        this.sendToDevice(deviceId, 'response:text', { text: cleanSentence, isFinal: false });
         await this.sendFramedOpusToDevice(deviceId, opusAudio);
       }
 
@@ -626,6 +599,20 @@ export class AudioGateway
   private splitSentences(text: string): string[] {
     const parts = text.split(/(?<=[.!?])\s+/);
     return parts.map((s) => s.trim()).filter((s) => s.length > 0);
+  }
+
+  /**
+   * Strip [sfx:xxx] and [emotion] tags the LLM injects (per system prompt instructions)
+   * before passing text to TTS. The main processTranscript pipeline handles these via
+   * extractEmotion(), but all proactive/reconnect paths synthesize raw LLM output
+   * directly and must strip tags here.
+   */
+  private stripLlmTags(sentence: string): string {
+    return sentence
+      .replace(/\[\s*sfx:\w+\s*\]/gi, '')
+      .replace(/\[\s*\w+\s*\]/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
   }
 
   /** Convert raw PCM buffer to WAV for debug playback. */

@@ -232,13 +232,6 @@ class _RemindersContent extends StatelessWidget {
                 child: Column(
                   children: [
                     _DailyToggleTile(
-                      icon: Icons.wb_sunny_outlined,
-                      label: 'Morning briefing',
-                      enabled: true,
-                      onChanged: (_) {},
-                    ),
-                    const Divider(height: 1),
-                    _DailyToggleTile(
                       icon: Icons.nightlight_outlined,
                       label: 'End of day',
                       subtitle: '18:00',

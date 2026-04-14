@@ -57,67 +57,20 @@ describe('ProactiveService', () => {
     jest.useRealTimers();
   });
 
-  // ── checkGreeting (time-aware) ───────────────────────
+  // ── checkGreeting ────────────────────────────────────
 
   describe('checkGreeting', () => {
-    it('returns a greeting on first call of the day', async () => {
+    it('calls LLM and returns greeting text', async () => {
       const result = await service.checkGreeting(DEVICE_ID);
       expect(result).toBe('Good morning!');
       expect(mockLlm.generate).toHaveBeenCalledTimes(1);
     });
 
-    it('returns a reconnect greeting on subsequent calls within the same day', async () => {
+    it('generates a greeting on each call', async () => {
       await service.checkGreeting(DEVICE_ID);
       const second = await service.checkGreeting(DEVICE_ID);
       expect(second).toBe('Good morning!');
       expect(mockLlm.generate).toHaveBeenCalledTimes(2);
-    });
-
-    it('generates a new greeting the next day', async () => {
-      jest.setSystemTime(ts('2026-04-10T09:00:00'));
-      await service.checkGreeting(DEVICE_ID);
-
-      jest.setSystemTime(ts('2026-04-11T09:00:00'));
-      const result = await service.checkGreeting(DEVICE_ID);
-
-      expect(result).toBe('Good morning!');
-      expect(mockLlm.generate).toHaveBeenCalledTimes(2);
-    });
-
-    it('includes "morning" in prompt before noon', async () => {
-      jest.setSystemTime(ts('2026-04-10T08:00:00'));
-
-      await service.checkGreeting(DEVICE_ID);
-
-      const userContent: string = mockLlm.generate.mock.calls[0][1][0].content;
-      expect(userContent).toContain('morning');
-    });
-
-    it('includes "afternoon" in prompt between 12 and 17', async () => {
-      jest.setSystemTime(ts('2026-04-10T14:00:00'));
-
-      await service.checkGreeting(DEVICE_ID);
-
-      const userContent: string = mockLlm.generate.mock.calls[0][1][0].content;
-      expect(userContent).toContain('afternoon');
-    });
-
-    it('includes "evening" in prompt between 17 and 21', async () => {
-      jest.setSystemTime(ts('2026-04-10T19:00:00'));
-
-      await service.checkGreeting(DEVICE_ID);
-
-      const userContent: string = mockLlm.generate.mock.calls[0][1][0].content;
-      expect(userContent).toContain('evening');
-    });
-
-    it('includes "night" in prompt after 21:00', async () => {
-      jest.setSystemTime(ts('2026-04-10T22:00:00'));
-
-      await service.checkGreeting(DEVICE_ID);
-
-      const userContent: string = mockLlm.generate.mock.calls[0][1][0].content;
-      expect(userContent).toContain('night');
     });
 
     it('passes memory context to LLM when memories exist', async () => {
@@ -315,18 +268,6 @@ describe('ProactiveService', () => {
   // ── clearDevice ───────────────────────────────────────
 
   describe('clearDevice', () => {
-    it('preserves greeting date tracking across disconnect — reconnect greeting same day', async () => {
-      jest.setSystemTime(ts('2026-04-10T09:00:00'));
-      await service.checkGreeting(DEVICE_ID);
-
-      service.clearDevice(DEVICE_ID);
-
-      // Same day — should generate a reconnect greeting (not first-of-day)
-      const result = await service.checkGreeting(DEVICE_ID);
-      expect(result).toBe('Good morning!');
-      expect(mockLlm.generate).toHaveBeenCalledTimes(2);
-    });
-
     it('removes activity tracking so idle nudge is not fired', async () => {
       jest.setSystemTime(ts('2026-04-10T10:00:00'));
       service.recordActivity(DEVICE_ID);
