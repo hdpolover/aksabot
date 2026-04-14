@@ -178,18 +178,18 @@ void audio_io::flushSpeaker() {
 void audio_io::setVolume(uint8_t percent) {
     if (percent > 100) percent = 100;
     // Exponential (dB) curve — industry standard for audio volume control.
-    // Maps 1–100% linearly across 20 dB so the slider feels natural on a desk
-    // speaker: 100% = 0 dB (full), 50% ≈ −10 dB, 20% ≈ −16 dB (quiet but audible).
-    // A 40 dB range made the bottom half of the slider nearly silent on this amp.
+    // Maps 1–100% linearly across 30 dB: 100% = 0 dB (full), 50% ≈ −15 dB,
+    // 20% ≈ −24 dB (soft but audible), 0% = muted.
+    // 40 dB range made 20% inaudible on this amp; 20 dB range made 20% too loud.
     // Applied in software PCM so all audio sources (TTS, SFX, resilience) scale together.
     if (percent == 0) {
         s_volumeScale = 0.0f;
     } else {
-        float db = ((float)percent / 100.0f - 1.0f) * 20.0f;
+        float db = ((float)percent / 100.0f - 1.0f) * 30.0f;
         s_volumeScale = powf(10.0f, db / 20.0f);
     }
     Serial.printf("[Audio] Volume %d%% → %.1f dB → scale %.4f\n",
                   percent,
-                  (percent == 0) ? -99.0f : ((float)percent / 100.0f - 1.0f) * 20.0f,
+                  (percent == 0) ? -99.0f : ((float)percent / 100.0f - 1.0f) * 30.0f,
                   s_volumeScale);
 }
