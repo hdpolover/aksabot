@@ -8,6 +8,8 @@
 #include "state.h"
 #include "sd_storage.h"
 #include "status_led.h"
+#include "face.h"
+#include "display.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
@@ -337,6 +339,107 @@ static bool wifiScreen() {
     return setupRequested;
 }
 
+// ── Sub-screen: Face Preview ─────────────────────────────
+//
+// Cycles through all 17 face expressions interactively.
+// The display task is NOT running during BIOS, so we drive face::tick()
+// and display::tick() manually at ~30fps in a tight loop.
+//
+// Touch zones:
+//   Left  half (x < CX) → previous expression
+//   Right half (x ≥ CX) → next expression
+//   Bottom bar (y ≥ 290) → exit
+
+static void facePreviewScreen() {
+    static const struct { face::Expression expr; const char* name; } kExprs[] = {
+        { face::Expression::IDLE,        "IDLE"        },
+        { face::Expression::LISTENING,   "LISTENING"   },
+        { face::Expression::THINKING,    "THINKING"    },
+        { face::Expression::SPEAKING,    "SPEAKING"    },
+        { face::Expression::CONFUSED,    "CONFUSED"    },
+        { face::Expression::SLEEPING,    "SLEEPING"    },
+        { face::Expression::OFFLINE,     "OFFLINE"     },
+        { face::Expression::ENCOURAGING, "ENCOURAGING" },
+        { face::Expression::CALM,        "CALM"        },
+        { face::Expression::FOCUSED,     "FOCUSED"     },
+        { face::Expression::HAPPY,       "HAPPY"       },
+        { face::Expression::SAD,         "SAD"         },
+        { face::Expression::SHRUG,       "SHRUG"       },
+        { face::Expression::SURPRISED,   "SURPRISED"   },
+        { face::Expression::SHOCKED,     "SHOCKED"     },
+        { face::Expression::ANGRY,       "ANGRY"       },
+        { face::Expression::DISTURBED,   "DISTURBED"   },
+    };
+    const int kCount = sizeof(kExprs) / sizeof(kExprs[0]);
+
+    int idx = 0;
+    face::setExpression(kExprs[idx].expr, 0);
+
+    // Register overlay with display — baked into the sprite before each push,
+    // so there is no race between the sprite push and direct TFT writes.
+    auto updateOverlay = [&]() {
+        char ctr[12];
+        snprintf(ctr, sizeof(ctr), "%d/%d", idx + 1, kCount);
+        display::setBiosOverlay(kExprs[idx].name, ctr, "< PREV", "BACK", "NEXT >");
+    };
+    updateOverlay();
+
+    // Flush any lingering touch
+    lgfx::touch_point_t tp;
+    while (tft.getTouch(&tp, 1) > 0) delay(15);
+    delay(50);
+
+    const uint32_t FRAME_MS = 33;  // ~30fps
+    uint32_t lastFrame = 0;
+
+    for (;;) {
+        uint32_t now = millis();
+
+        // Drive face + display at 30fps — overlay is baked in by display::tick()
+        if (now - lastFrame >= FRAME_MS) {
+            lastFrame = now;
+            display::tick(now);   // calls face::tick() internally + pushes sprite
+        }
+
+        // Poll touch (non-blocking)
+        if (tft.getTouch(&tp, 1) > 0) {
+            int tapX = tp.x;
+            int tapY = (LCD_HEIGHT - 1) - tp.y;
+
+            // Wait for release
+            while (tft.getTouch(&tp, 1) > 0) delay(15);
+            delay(40);
+
+            if (tapY >= 288) {
+                // Bottom bar → exit
+                ui_audio::play(ui_audio::Clip::TAP);
+                break;
+            }
+
+            if (tapX < CX) {
+                // Left half → previous
+                idx = (idx - 1 + kCount) % kCount;
+            } else {
+                // Right half → next
+                idx = (idx + 1) % kCount;
+            }
+            ui_audio::play(ui_audio::Clip::TAP);
+            face::setExpression(kExprs[idx].expr, 150);
+            updateOverlay();  // update name + counter in overlay immediately
+        }
+
+        // Boot button → exit
+        if (bootPressed()) {
+            waitBootRelease();
+            break;
+        }
+
+        delay(5);
+    }
+
+    display::clearBiosOverlay();
+}
+
 // ── Sub-screen: Hardware Test ────────────────────────────
 
 static void hardwareTestScreen() {
@@ -346,14 +449,15 @@ static void hardwareTestScreen() {
         "Echo test",
         "Touch test",
         "LED test",
+        "Face preview",
         "Run all checks",
         "Back",
     };
-    MenuDef menu = { "Hardware Test", items, 7, 30, 28 };
+    MenuDef menu = { "Hardware Test", items, 8, 30, 28 };
 
     for (;;) {
         int sel = menuLoop(menu);
-        if (sel < 0 || sel == 6) return;
+        if (sel < 0 || sel == 7) return;
 
         if (sel == 0) {
             cls();
@@ -469,6 +573,9 @@ static void hardwareTestScreen() {
             if (bootPressed()) waitBootRelease();
         }
         else if (sel == 5) {
+            facePreviewScreen();
+        }
+        else if (sel == 6) {
             // Run all checks
             cls();
             drawHeader("All Checks");

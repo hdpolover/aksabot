@@ -139,6 +139,19 @@ void setFaceStyle(uint8_t styleId);
 /// Returns the current face style ID.
 uint8_t getFaceStyleId();
 
+/// Override the face background color and eye body color at runtime.
+///
+/// bgColor     — 24-bit RGB (0xRRGGBB) for the screen background.
+///               All expressions share the same background, so this is safe
+///               to override without breaking emotional expressiveness.
+/// eyeBodyColor — 24-bit RGB for:
+///               - NOVA: the rounded-rectangle eye fill
+///               - ORBIT: the eye sclera (white of the eye)
+///
+/// Takes effect immediately on the next rendered frame.
+/// Call nvs_store::setFaceBgColor() / setFaceEyeColor() separately to persist.
+void setFaceColors(uint32_t bgColor, uint32_t eyeBodyColor);
+
 /// Set the home mode — the mode the display returns to after wake, reminder
 /// dismiss, and other events that would otherwise hard-reset to FACE.
 /// Also calls setMode() to switch immediately.
@@ -153,5 +166,16 @@ Mode getHomeMode();
 /// Switches back to previous mode after durationMs (default 10s, 0 = permanent).
 /// Path must be absolute from SD root, e.g. "/images/hello.jpg".
 void showImageFromSD(const char* path, uint16_t durationMs = 10000);
+
+/// Paint a two-bar overlay into the sprite every frame, just before the push.
+/// Used by the BIOS face preview so overlay text is baked in — no flicker.
+///   title   — centred in a header bar at the top
+///   counter — right-aligned in the header bar  (e.g. "3/17")
+///   navL/C/R — left / centre / right labels in a nav bar at the bottom
+void setBiosOverlay(const char* title, const char* counter,
+                    const char* navL, const char* navC, const char* navR);
+
+/// Remove the BIOS overlay (normal face rendering resumes).
+void clearBiosOverlay();
 
 }  // namespace display

@@ -20,7 +20,9 @@ static const char* K_PRES_PRESENT  = "pres_present";
 static const char* K_PRES_RSSI     = "pres_rssi";
 static const char* K_PRES_GRACE    = "pres_grace";
 static const char* K_DISP_TRANSCRIPT = "disp_transcript";
-static const char* K_FACE_STYLE   = "face_style";
+static const char* K_FACE_STYLE    = "face_style";
+static const char* K_FACE_BG_COL  = "face_bg_col";   // 24-bit RGB as uint32
+static const char* K_FACE_EYE_COL = "face_eye_col";  // 24-bit RGB as uint32
 static const char* K_IDLE_DISP    = "idle_disp";
 static const char* K_SETUP_DONE   = "setup_done";
 static const char* K_FORCE_PROV   = "force_prov";
@@ -198,6 +200,28 @@ uint8_t nvs_store::getFaceStyle() {
 bool nvs_store::setFaceStyle(uint8_t styleId) {
     if (!initialized) return false;
     return prefs.putUChar(K_FACE_STYLE, styleId) > 0;
+}
+
+// ── Face colors ────────────────────────────────────────
+
+uint32_t nvs_store::getFaceBgColor() {
+    if (!initialized) return 0x000000u;
+    return prefs.getUInt(K_FACE_BG_COL, 0x000000u);
+}
+
+bool nvs_store::setFaceBgColor(uint32_t color) {
+    if (!initialized) return false;
+    return prefs.putUInt(K_FACE_BG_COL, color) > 0;
+}
+
+uint32_t nvs_store::getFaceEyeColor() {
+    if (!initialized) return 0xDADCE6u;
+    return prefs.getUInt(K_FACE_EYE_COL, 0xDADCE6u);
+}
+
+bool nvs_store::setFaceEyeColor(uint32_t color) {
+    if (!initialized) return false;
+    return prefs.putUInt(K_FACE_EYE_COL, color) > 0;
 }
 
 // ── Idle display mode ──────────────────────────────────

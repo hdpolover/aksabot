@@ -28,6 +28,16 @@ static uint8_t userBrightness = 70;   // User-set brightness (survives sleep)
 static bool transcriptEnabled = false;
 static char transcriptText[384] = {};
 
+// BIOS overlay — baked into the sprite each frame before push (flicker-free)
+static struct {
+    bool    enabled = false;
+    char    title[32]  = {};
+    char    counter[12] = {};
+    char    navL[16]   = {};
+    char    navC[16]   = {};
+    char    navR[16]   = {};
+} g_biosOverlay;
+
 // Transcript auto-scroll state
 static int  transcriptScrollLine     = 0;   // first visible line index
 static int  transcriptTotalLines     = 0;   // total wrapped lines (updated by renderer)
@@ -75,6 +85,14 @@ static display::Mode g_homeMode = display::Mode::FACE;
 // Points to one of the built-in presets (ORBIT or NOVA).
 // Changed at runtime via display::setFaceStyle() — loaded from NVS on boot.
 static const face_style::FaceStyleDef* g_faceStyle = &face_style::NOVA;
+
+// ── Runtime face color overrides ──────────────────────
+// Changed via display::setFaceColors() — loaded from NVS on boot.
+// bgColor: 24-bit RGB background (0xRRGGBB). Replaces pal.bg for all expressions.
+// eyeBody565: RGB565 eye fill — used for NOVA rectangles and ORBIT sclera.
+// Default eyeBody is rgb(218,220,230) = 0xDEFC in RGB565.
+static uint32_t g_faceBgColor    = 0x000000u;
+static uint16_t g_faceEyeBody565 = 0xDEFCu;  // rgb(218,220,230)
 
 // ── Rich color system (from face-animations firmware) ─────
 
@@ -245,10 +263,10 @@ static void drawEyeV2(LGFX_Sprite& s, int cx, int cy,
                       float squintBot = 0.0f,
                       int eyeW = 68, int eyeH = 38,
                       int tiltLeft = 0, int tiltRight = 0) {
-    static const int CR     = 8;
+    static const int CR     = 4;
     static const int MAX_DX = 10;
     static const int MAX_DY = 5;
-    static const uint16_t EYE_COL = rgb(218, 220, 230);
+    uint16_t EYE_COL = g_faceEyeBody565;  // runtime-overridable via setFaceColors()
 
     int ox = constrain((int)driftX, -MAX_DX, MAX_DX);
     int oy = constrain((int)driftY, -MAX_DY, MAX_DY);
@@ -297,6 +315,12 @@ static void drawEyeV2(LGFX_Sprite& s, int cx, int cy,
     if (actualCR > bodyH/2) actualCR = (bodyH/2 > 1) ? bodyH/2 - 1 : 1;
 
     s.fillRoundRect(ex - eyeW / 2, bodyTopY, eyeW, bodyH, actualCR, EYE_COL);
+    // Square off the top edge — round only the bottom corners.
+    // Without this, the body rect's rounded top corners create a visible seam
+    // where the tilt wedge (full-width scanlines) meets the narrower first rows
+    // of the rounded rect.
+    if (actualCR > 1)
+        s.fillRect(ex - eyeW / 2, bodyTopY, eyeW, actualCR, EYE_COL);
 
     // Wedge: fills the raised area above bodyTopY using horizontal scanlines.
     // Scanlines give a clean pixel-perfect slant with no diagonal aliasing.
@@ -324,11 +348,11 @@ static void drawEyeOpen(LGFX_Sprite& s, int cx, int cy, const EyeShape& eye,
     int r = eye.r;
     int rh = (int)(r * scaleY);
     if (rh < 4) {
-        thickBezier(s, cx - r, cy, cx, cy + 4, cx + r, cy, 2, TFT_WHITE, 16);
+        thickBezier(s, cx - r, cy, cx, cy + 4, cx + r, cy, 2, g_faceEyeBody565, 16);
         return;
     }
-    if (rh < r) s.fillEllipse(cx, cy, r, rh, TFT_WHITE);
-    else        s.fillSmoothCircle(cx, cy, r, TFT_WHITE);
+    if (rh < r) s.fillEllipse(cx, cy, r, rh, g_faceEyeBody565);
+    else        s.fillSmoothCircle(cx, cy, r, g_faceEyeBody565);
 
     int px = cx + eye.pupilOX + (int)pupilDX;
     int py = cy + eye.pupilOY + (int)pupilDY;
@@ -343,7 +367,7 @@ static void drawEyeOpen(LGFX_Sprite& s, int cx, int cy, const EyeShape& eye,
 
 static void drawEyeClosed(LGFX_Sprite& s, int cx, int cy, int r, bool curveUp) {
     float bend = curveUp ? -5.0f : 4.0f;
-    thickBezier(s, cx - r, cy, cx, cy + bend, cx + r, cy, 2, TFT_WHITE, 20);
+    thickBezier(s, cx - r, cy, cx, cy + bend, cx + r, cy, 2, g_faceEyeBody565, 20);
 }
 
 static void drawEyeX(LGFX_Sprite& s, int cx, int cy, int size, uint16_t color) {
@@ -411,29 +435,19 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             break;
         }
         case face::Expression::THINKING: {
-            // Animated pursed lip — shifts side-to-side like "hmm"
+            // Pursed lip shifted side-to-side — "hmm" look
             float thinkT = breathPhase * 6.28318f;
-            int mxOff = (int)(sinf(thinkT * 1.5f) * 10.0f);
+            int mxOff = (int)(sinf(thinkT * 1.2f) * 9.0f);
             if (nova) {
-                float mOpen = (sinf(thinkT * 2.0f) * 0.5f + 0.5f) * 0.3f;
-                int mw = 18 + (int)(mOpen * 10);
-                int mh = 8 + (int)(mOpen * 12);
-                int cr = mh / 2;
-                s.fillRoundRect(CX + mxOff - mw / 2, my - mh / 2, mw, mh, cr, pal.mouth);
-                if (mh > 10) {
-                    s.fillRoundRect(CX + mxOff - mw / 2 + 3, my - mh / 2 + 3,
-                                    mw - 6, mh - 6, cr,
-                                    blendRGB565(pal.accent, pal.bg, 30));
-                }
+                // Nova: clean flat rectangle — matches rectangular style, no blurry inner
+                int mw = 24;
+                int mh = 5;
+                s.fillRect(CX + mxOff - mw / 2, my - mh / 2, mw, mh, pal.mouth);
             } else {
-                float mOpen = (sinf(thinkT * 2.0f) * 0.5f + 0.5f) * 0.3f;
-                int mw = 8 + (int)(mOpen * 6);
-                int mh = 5 + (int)(mOpen * 8);
+                // Orbit: plain solid ellipse — no blurry inner highlight
+                int mw = 10;
+                int mh = 6;
                 s.fillEllipse(CX + mxOff, my, mw, mh, pal.mouth);
-                if (mh > 6) {
-                    s.fillEllipse(CX + mxOff, my, mw - 3, mh - 3,
-                                  blendRGB565(pal.accent, pal.bg, 30));
-                }
             }
             break;
         }
@@ -793,10 +807,14 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
 
     int exprIdx = (int)fs.expression;
     if (exprIdx < 0 || exprIdx >= EXPR_COUNT) exprIdx = 0;
-    const Palette& pal = PAL[exprIdx];
+    // Copy so we can apply the runtime bg override without modifying the const table.
+    Palette pal = PAL[exprIdx];
+    pal.bg = rgb((g_faceBgColor >> 16) & 0xFF,
+                 (g_faceBgColor >>  8) & 0xFF,
+                  g_faceBgColor        & 0xFF);
     const EyeShape& eye = EYES[exprIdx];
 
-    // Clear with expression-specific background
+    // Clear with (overridable) background
     if (useSprite) s.fillSprite(pal.bg);
     else           tft.fillScreen(pal.bg);
 
@@ -956,20 +974,26 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     }
     skip_face:
 
-    // ── Thinking dots (bottom, bouncing with accent color) ──
+    // ── Thinking dots (bottom, bouncing) ─────────────────
     if (fs.expression == face::Expression::THINKING) {
+        const bool novaThink = (g_faceStyle && g_faceStyle->id == face_style::StyleId::NOVA);
         int baseY = LCD_HEIGHT - 42;
         for (int i = 0; i < 3; i++) {
             int dx = CX - 18 + i * 18;
             bool lit = i < fs.thinkDots;
             // Bounce: active dot jumps up
-            float bounce = lit ? sinf(fs.glowPhase * 4.0f + i * 0.8f) * 6.0f : 0;
-            int dy = baseY - (int)(bounce > 0 ? bounce : 0);
-            int r = lit ? 6 : 4;
-            uint16_t col = lit ? pal.accent : blendRGB565(pal.accent, pal.bg, 60);
-            s.fillSmoothCircle(dx, dy, r, col);
-            if (lit) {
-                drawGlow(s, dx, dy, 14, pal.accent, pal.bg, 60);
+            float bounce = lit ? sinf(fs.glowPhase * 4.0f + i * 0.8f) * 6.0f : 0.0f;
+            int dy = baseY - (int)(bounce > 0.0f ? bounce : 0.0f);
+            // Lit = full accent, unlit = clearly visible but muted (no glow bloat)
+            uint16_t col = lit ? pal.accent : blendRGB565(pal.accent, pal.bg, 80);
+            if (novaThink) {
+                // Nova: crisp filled squares — matches rectangular eye style
+                int sz = lit ? 7 : 5;
+                s.fillRect(dx - sz / 2, dy - sz / 2, sz, sz, col);
+            } else {
+                // Orbit: solid circles — no drawGlow (it was the blur source)
+                int r = lit ? 5 : 3;
+                s.fillSmoothCircle(dx, dy, r, col);
             }
         }
     }
@@ -1095,6 +1119,42 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     // Draw transcript overlay into sprite (before push — avoids flicker)
     if (transcriptEnabled && transcriptText[0] != '\0') {
         renderTranscriptOverlay(s, transcriptText);
+    }
+
+    // BIOS overlay: header bar (top) + nav bar (bottom), baked in before push
+    if (g_biosOverlay.enabled) {
+        const uint16_t HDR = 0x0010;   // dark navy
+        const uint16_t CYN = 0x07FF;   // cyan
+        const uint16_t DIM = 0x8C71;   // grey
+        const uint16_t DIM2 = 0x2104;  // dark grey
+
+        // Header bar
+        s.fillRect(0, 0, LCD_WIDTH, 26, HDR);
+        s.drawFastHLine(0, 26, LCD_WIDTH, CYN);
+        s.setFont(&fonts::FreeSans9pt7b);
+        s.setTextSize(1);
+        s.setTextColor(CYN);
+        s.setTextDatum(lgfx::top_center);
+        s.drawString(g_biosOverlay.title, LCD_WIDTH / 2, 6);
+        s.setFont(&fonts::Font2);
+        s.setTextColor(DIM);
+        s.setTextDatum(lgfx::top_right);
+        s.drawString(g_biosOverlay.counter, LCD_WIDTH - 6, 9);
+
+        // Nav bar
+        s.fillRect(0, 288, LCD_WIDTH, 32, HDR);
+        s.drawFastHLine(0, 288, LCD_WIDTH, DIM2);
+        s.setFont(&fonts::Font2);
+        s.setTextSize(1);
+        s.setTextColor(DIM2);
+        s.setTextDatum(lgfx::top_left);
+        s.drawString(g_biosOverlay.navL, 8, 295);
+        s.setTextColor(DIM);
+        s.setTextDatum(lgfx::top_center);
+        s.drawString(g_biosOverlay.navC, LCD_WIDTH / 2, 295);
+        s.setTextColor(DIM2);
+        s.setTextDatum(lgfx::top_right);
+        s.drawString(g_biosOverlay.navR, LCD_WIDTH - 8, 295);
     }
 
     if (useSprite) sprite.pushSprite(0, 0);
@@ -1411,6 +1471,17 @@ void display::setFaceStyle(uint8_t styleId) {
 
 uint8_t display::getFaceStyleId() {
     return static_cast<uint8_t>(g_faceStyle->id);
+}
+
+void display::setFaceColors(uint32_t bgColor, uint32_t eyeBodyColor) {
+    g_faceBgColor    = bgColor & 0x00FFFFFFu;
+    // Convert 24-bit RGB → RGB565 for the eye body
+    uint8_t r = (eyeBodyColor >> 16) & 0xFF;
+    uint8_t g = (eyeBodyColor >>  8) & 0xFF;
+    uint8_t b =  eyeBodyColor        & 0xFF;
+    g_faceEyeBody565 = rgb(r, g, b);
+    Serial.printf("[Display] Face colors: bg=#%06lX eye=#%06lX (565=0x%04X)\n",
+                  (unsigned long)g_faceBgColor, (unsigned long)eyeBodyColor, g_faceEyeBody565);
 }
 
 // ── Image dimension helpers ──────────────────────────────────────────────────
@@ -1815,3 +1886,18 @@ void display::showGlance() {
 bool display::hasContextData() {
     return contextDataAvailable;
 }
+
+void display::setBiosOverlay(const char* title, const char* counter,
+                             const char* navL, const char* navC, const char* navR) {
+    g_biosOverlay.enabled = true;
+    strncpy(g_biosOverlay.title,   title   ? title   : "", sizeof(g_biosOverlay.title)   - 1);
+    strncpy(g_biosOverlay.counter, counter ? counter : "", sizeof(g_biosOverlay.counter) - 1);
+    strncpy(g_biosOverlay.navL,    navL    ? navL    : "", sizeof(g_biosOverlay.navL)    - 1);
+    strncpy(g_biosOverlay.navC,    navC    ? navC    : "", sizeof(g_biosOverlay.navC)    - 1);
+    strncpy(g_biosOverlay.navR,    navR    ? navR    : "", sizeof(g_biosOverlay.navR)    - 1);
+}
+
+void display::clearBiosOverlay() {
+    g_biosOverlay.enabled = false;
+}
+

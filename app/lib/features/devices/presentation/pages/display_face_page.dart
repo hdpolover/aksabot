@@ -6,9 +6,8 @@ import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../domain/entities/device_entity.dart';
 import '../../domain/repositories/devices_repository.dart';
 
-/// Display & Behavior — face style, idle display mode, idle chat/animations,
-/// and motion settings. Merged from the former DisplayFacePage,
-/// IdlePersonalityPage, and MotionSettingsPage.
+/// Display & Behavior — face style, face colors, idle display mode, idle
+/// chat/animations, and motion settings.
 class DisplayFacePage extends StatefulWidget {
   final String deviceId;
   const DisplayFacePage({super.key, required this.deviceId});
@@ -29,6 +28,10 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
   String _faceStyle = 'nova';
   String _idleDisplayMode = 'face';
 
+  // ── Face colors ───────────────────────────────────────────────────────────
+  Color _bgColor  = const Color(0xFF000000);
+  Color _eyeColor = const Color(0xFFDADCE6);
+
   // ── Idle behavior settings ────────────────────────────────────────────────
   bool _idleChatEnabled = true;
   String _idleChatFrequency = 'normal';
@@ -37,6 +40,8 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
   // Server copies for dirty detection
   String _serverFaceStyle = 'nova';
   String _serverIdleDisplayMode = 'face';
+  Color _serverBgColor  = const Color(0xFF000000);
+  Color _serverEyeColor = const Color(0xFFDADCE6);
   bool _serverChatEnabled = true;
   String _serverChatFrequency = 'normal';
   String _serverAnimationSpeed = 'normal';
@@ -68,6 +73,8 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
 
     final fs = s['face_style'] as String?;
     final idm = s['idle_display_mode'] as String?;
+    final bgHex  = s['face_bg_color']  as String?;
+    final eyeHex = s['face_eye_color'] as String?;
     final chatEnabled = s['idle_chat_enabled'] as bool? ?? true;
     final chatFreq = s['idle_chat_frequency'] as String? ?? 'normal';
     final animSpeed = s['idle_animation_speed'] as String? ?? 'normal';
@@ -75,16 +82,22 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
     final faceStyle = (fs == 'orbit' || fs == 'nova') ? fs! : 'nova';
     final idleMode =
         (idm == 'face' || idm == 'clock' || idm == 'status') ? idm! : 'face';
+    final bgColor  = _hexToColor(bgHex)  ?? const Color(0xFF000000);
+    final eyeColor = _hexToColor(eyeHex) ?? const Color(0xFFDADCE6);
 
     setState(() {
       _faceStyle = faceStyle;
       _idleDisplayMode = idleMode;
+      _bgColor  = bgColor;
+      _eyeColor = eyeColor;
       _idleChatEnabled = chatEnabled;
       _idleChatFrequency = chatFreq;
       _idleAnimationSpeed = animSpeed;
 
       _serverFaceStyle = faceStyle;
       _serverIdleDisplayMode = idleMode;
+      _serverBgColor  = bgColor;
+      _serverEyeColor = eyeColor;
       _serverChatEnabled = chatEnabled;
       _serverChatFrequency = chatFreq;
       _serverAnimationSpeed = animSpeed;
@@ -97,6 +110,8 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
   void _markDirty() {
     final isDirty = _faceStyle != _serverFaceStyle ||
         _idleDisplayMode != _serverIdleDisplayMode ||
+        _bgColor != _serverBgColor ||
+        _eyeColor != _serverEyeColor ||
         _idleChatEnabled != _serverChatEnabled ||
         _idleChatFrequency != _serverChatFrequency ||
         _idleAnimationSpeed != _serverAnimationSpeed;
@@ -111,6 +126,12 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
     if (_faceStyle != _serverFaceStyle) patch['face_style'] = _faceStyle;
     if (_idleDisplayMode != _serverIdleDisplayMode) {
       patch['idle_display_mode'] = _idleDisplayMode;
+    }
+    if (_bgColor != _serverBgColor) {
+      patch['face_bg_color'] = _colorToHex(_bgColor);
+    }
+    if (_eyeColor != _serverEyeColor) {
+      patch['face_eye_color'] = _colorToHex(_eyeColor);
     }
     if (_idleChatEnabled != _serverChatEnabled) {
       patch['idle_chat_enabled'] = _idleChatEnabled;
@@ -149,6 +170,28 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
 
     if (mounted) setState(() => _saving = false);
   }
+
+  // ── Color helpers ─────────────────────────────────────────────────────────
+
+  /// Encodes a Color to a 6-char lowercase hex string (no leading #).
+  static String _colorToHex(Color c) {
+    final r = (c.r * 255).round();
+    final g = (c.g * 255).round();
+    final b = (c.b * 255).round();
+    return '${r.toRadixString(16).padLeft(2, '0')}'
+        '${g.toRadixString(16).padLeft(2, '0')}'
+        '${b.toRadixString(16).padLeft(2, '0')}';
+  }
+
+  /// Parses a 6-char hex string to a Color. Returns null for invalid input.
+  static Color? _hexToColor(String? hex) {
+    if (hex == null || hex.length < 6) return null;
+    final value = int.tryParse(hex.replaceFirst('#', ''), radix: 16);
+    if (value == null) return null;
+    return Color(0xFF000000 | (value & 0xFFFFFF));
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -191,8 +234,12 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               children: [
-                // ── Face preview ──────────────────────────────────────
-                _FacePreview(faceStyle: _faceStyle),
+                // ── Live preview ──────────────────────────────────────
+                _FacePreview(
+                  faceStyle: _faceStyle,
+                  bgColor: _bgColor,
+                  eyeColor: _eyeColor,
+                ),
                 const SizedBox(height: AppConstants.spacingXxl),
 
                 // ── Face Style ────────────────────────────────────────
@@ -219,7 +266,7 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
                             setState(() => _faceStyle = 'nova');
                             _markDirty();
                           },
-                          preview: _EyePreview.rounded(),
+                          preview: _EyePreview.rounded(color: _eyeColor),
                         ),
                         const Divider(height: AppConstants.spacingXxl),
                         _StyleOption(
@@ -232,7 +279,50 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
                             setState(() => _faceStyle = 'orbit');
                             _markDirty();
                           },
-                          preview: _EyePreview.circle(),
+                          preview: _EyePreview.circle(color: _eyeColor),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppConstants.spacingXxl),
+
+                // ── Face Colors ───────────────────────────────────────
+                Text('Face Colors', style: theme.textTheme.titleMedium),
+                const SizedBox(height: AppConstants.spacingXxs),
+                Text(
+                  'Background and eye color — expression-specific colors '
+                  'stay intact to keep Aksa emotionally expressive.',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: colors.onSurfaceVariant),
+                ),
+                const SizedBox(height: AppConstants.spacingMd),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppConstants.spacingLg),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _ColorSwatchRow(
+                          label: 'Background',
+                          selected: _bgColor,
+                          swatches: _kBgSwatches,
+                          onSelect: (c) {
+                            setState(() => _bgColor = c);
+                            _markDirty();
+                          },
+                        ),
+                        const SizedBox(height: AppConstants.spacingLg),
+                        const Divider(height: 1),
+                        const SizedBox(height: AppConstants.spacingLg),
+                        _ColorSwatchRow(
+                          label: 'Eye color',
+                          selected: _eyeColor,
+                          swatches: _kEyeSwatches,
+                          onSelect: (c) {
+                            setState(() => _eyeColor = c);
+                            _markDirty();
+                          },
                         ),
                       ],
                     ),
@@ -411,6 +501,106 @@ class _DisplayFacePageState extends State<DisplayFacePage> {
   }
 }
 
+// ── Color swatch data ─────────────────────────────────────────────────────────
+
+/// Background swatches — all dark, designed for a backlit ILI9341 display.
+const _kBgSwatches = [
+  (Color(0xFF000000), 'Black'),
+  (Color(0xFF001030), 'Navy'),
+  (Color(0xFF0A0018), 'Purple'),
+  (Color(0xFF001A1A), 'Teal'),
+  (Color(0xFF001800), 'Forest'),
+  (Color(0xFF1A0000), 'Crimson'),
+  (Color(0xFF181420), 'Midnight'),
+];
+
+/// Eye body swatches — bright/pastel, high contrast against dark backgrounds.
+const _kEyeSwatches = [
+  (Color(0xFFDADCE6), 'White'),
+  (Color(0xFF00FFFF), 'Cyan'),
+  (Color(0xFFFFB0D0), 'Pink'),
+  (Color(0xFFFFD060), 'Amber'),
+  (Color(0xFF80FF80), 'Lime'),
+  (Color(0xFF80C8FF), 'Sky'),
+  (Color(0xFFC080FF), 'Violet'),
+];
+
+// ── Color swatch row ──────────────────────────────────────────────────────────
+
+class _ColorSwatchRow extends StatelessWidget {
+  final String label;
+  final Color selected;
+  final List<(Color, String)> swatches;
+  final ValueChanged<Color> onSelect;
+
+  const _ColorSwatchRow({
+    required this.label,
+    required this.selected,
+    required this.swatches,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+        const SizedBox(height: AppConstants.spacingMd),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: swatches.map((entry) {
+            final (color, name) = entry;
+            final isSelected = color.toARGB32() == selected.toARGB32();
+
+            return Tooltip(
+              message: name,
+              child: GestureDetector(
+                onTap: () => onSelect(color),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isSelected ? cs.primary : cs.outlineVariant,
+                      width: isSelected ? 3 : 1.5,
+                    ),
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: cs.primary.withValues(alpha: 0.4),
+                              blurRadius: 6,
+                              spreadRadius: 1,
+                            )
+                          ]
+                        : null,
+                  ),
+                  child: isSelected
+                      ? Icon(
+                          Icons.check,
+                          size: 16,
+                          color: color.computeLuminance() > 0.2
+                              ? Colors.black87
+                              : Colors.white,
+                        )
+                      : null,
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+}
+
 // ── Idle mode options ─────────────────────────────────────────────────────────
 
 const _idleModeOptions = [
@@ -428,46 +618,54 @@ const _idleModeOptions = [
 
 class _FacePreview extends StatelessWidget {
   final String faceStyle;
-  const _FacePreview({required this.faceStyle});
+  final Color bgColor;
+  final Color eyeColor;
+
+  const _FacePreview({
+    required this.faceStyle,
+    required this.bgColor,
+    required this.eyeColor,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
     final isNova = faceStyle == 'nova';
 
-    return Card(
-      color: Colors.black,
-      child: SizedBox(
-        height: 120,
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (isNova) ...[
-                    _RoundedEye(color: colors.primary),
-                    const SizedBox(width: 28),
-                    _RoundedEye(color: colors.primary),
-                  ] else ...[
-                    _CircleEye(color: colors.primary),
-                    const SizedBox(width: 28),
-                    _CircleEye(color: colors.primary),
-                  ],
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+      ),
+      height: 120,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isNova) ...[
+                  _RoundedEye(color: eyeColor),
+                  const SizedBox(width: 28),
+                  _RoundedEye(color: eyeColor),
+                ] else ...[
+                  _CircleEye(color: eyeColor),
+                  const SizedBox(width: 28),
+                  _CircleEye(color: eyeColor),
                 ],
+              ],
+            ),
+            const SizedBox(height: 14),
+            Container(
+              width: 36,
+              height: 3,
+              decoration: BoxDecoration(
+                color: eyeColor.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(2),
               ),
-              const SizedBox(height: 14),
-              Container(
-                width: 36,
-                height: 3,
-                decoration: BoxDecoration(
-                  color: colors.primary.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -580,13 +778,13 @@ class _StyleOption extends StatelessWidget {
 
 class _EyePreview extends StatelessWidget {
   final bool rounded;
-  const _EyePreview.rounded() : rounded = true;
-  const _EyePreview.circle() : rounded = false;
+  final Color color;
+
+  const _EyePreview.rounded({required this.color}) : rounded = true;
+  const _EyePreview.circle({required this.color}) : rounded = false;
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
-
     return Container(
       width: 52,
       height: 32,
@@ -672,7 +870,7 @@ class _IdleModeRow extends StatelessWidget {
   }
 }
 
-// ── Radio dot indicator (replaces deprecated Radio groupValue API) ─────────────
+// ── Radio dot indicator ───────────────────────────────────────────────────────
 
 class _RadioDot extends StatelessWidget {
   final bool selected;

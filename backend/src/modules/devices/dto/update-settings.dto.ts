@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
 
 export class UpdateSettingsDto {
   @IsIn(['en', 'id'])
@@ -77,6 +77,16 @@ export class UpdateSettingsDto {
   @IsString()
   @IsOptional()
   idle_display_mode?: string;
+
+  @IsString()
+  @Matches(/^[0-9a-fA-F]{6}$/, { message: 'face_bg_color must be a 6-character hex string' })
+  @IsOptional()
+  face_bg_color?: string;
+
+  @IsString()
+  @Matches(/^[0-9a-fA-F]{6}$/, { message: 'face_eye_color must be a 6-character hex string' })
+  @IsOptional()
+  face_eye_color?: string;
 
   @IsNumber()
   @Min(100)

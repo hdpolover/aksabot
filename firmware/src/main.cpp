@@ -634,6 +634,27 @@ static void onWsJson(const char* event, const char* data) {
                 nvs_store::setFaceStyle(static_cast<uint8_t>(style->id));
                 Serial.printf("[Main] Config: face_style=%s\n", styleName);
             }
+            // Face colors — background and eye body as 6-char hex strings ("rrggbb")
+            {
+                bool colorChanged = false;
+                uint32_t newBg  = nvs_store::getFaceBgColor();
+                uint32_t newEye = nvs_store::getFaceEyeColor();
+                if (!doc["face_bg_color"].isNull()) {
+                    const char* hex = doc["face_bg_color"] | "000000";
+                    newBg = (uint32_t)strtol(hex, nullptr, 16) & 0x00FFFFFFu;
+                    nvs_store::setFaceBgColor(newBg);
+                    colorChanged = true;
+                }
+                if (!doc["face_eye_color"].isNull()) {
+                    const char* hex = doc["face_eye_color"] | "DADCE6";
+                    newEye = (uint32_t)strtol(hex, nullptr, 16) & 0x00FFFFFFu;
+                    nvs_store::setFaceEyeColor(newEye);
+                    colorChanged = true;
+                }
+                if (colorChanged) {
+                    display::setFaceColors(newBg, newEye);
+                }
+            }
             // Show transcript overlay
             if (!doc["display_transcript"].isNull()) {
                 bool show = doc["display_transcript"] | true;
@@ -1395,6 +1416,7 @@ void setup() {
     // ── 3. Display init + splash ───────────────────────────
     display::init();
     display::setFaceStyle(nvs_store::getFaceStyle());  // restore face style from NVS
+    display::setFaceColors(nvs_store::getFaceBgColor(), nvs_store::getFaceEyeColor());
     {
         // Restore idle display mode from NVS
         char idleMode[16];

@@ -69,6 +69,17 @@ bool setDisplayTranscript(bool enabled);
 uint8_t getFaceStyle();
 bool setFaceStyle(uint8_t styleId);
 
+// ── Face colors ───────────────────────────────────────
+
+/// Background color as 24-bit RGB (0xRRGGBB). Default: 0x000000 (black).
+uint32_t getFaceBgColor();
+bool setFaceBgColor(uint32_t color);
+
+/// Eye body color as 24-bit RGB (0xRRGGBB). Default: 0xDADCE6 (soft white).
+/// Applies to NOVA eye rectangles and ORBIT eye sclera.
+uint32_t getFaceEyeColor();
+bool setFaceEyeColor(uint32_t color);
+
 // ── Idle display mode ─────────────────────────────────
 
 /// Returns the stored idle display mode as a string ("face", "clock", "status").
