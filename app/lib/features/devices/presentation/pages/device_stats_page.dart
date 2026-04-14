@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/app_dialog.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../../scheduler/domain/repositories/scheduler_repository.dart';
 import '../../domain/repositories/devices_repository.dart';
@@ -648,33 +649,16 @@ class _DeviceStatsPageState extends State<DeviceStatsPage> {
     );
   }
 
-  void _confirmFactoryReset(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Factory Reset'),
-        content: const Text(
-          'This will erase all device configuration, revoke its token, '
+  Future<void> _confirmFactoryReset(BuildContext context) async {
+    final confirmed = await AppDialog.confirm(
+      context,
+      title: 'Factory Reset',
+      body: 'This will erase all device configuration, revoke its token, '
           'and remove it from your account. This cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-            ),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              await _performFactoryReset(context);
-            },
-            child: const Text('Reset'),
-          ),
-        ],
-      ),
+      confirmLabel: 'Reset',
+      destructive: true,
     );
+    if (confirmed == true && context.mounted) await _performFactoryReset(context);
   }
 }
 

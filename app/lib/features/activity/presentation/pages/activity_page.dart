@@ -10,6 +10,7 @@ import '../../../memories/domain/entities/memory_entity.dart';
 import '../../../memories/presentation/bloc/memories_bloc.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/widgets/app_dialog.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../../../core/widgets/empty_state.dart';
 
@@ -286,28 +287,12 @@ class _ConversationsView extends StatelessWidget {
                         color: Theme.of(context).colorScheme.onError,
                       ),
                     ),
-                    confirmDismiss: (_) => showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('Delete conversation?'),
-                        content: const Text(
-                          'This will permanently remove the conversation and all its messages.',
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.of(ctx).pop(false),
-                            child: const Text('Cancel'),
-                          ),
-                          FilledButton(
-                            style: FilledButton.styleFrom(
-                              backgroundColor:
-                                  Theme.of(context).colorScheme.error,
-                            ),
-                            onPressed: () => Navigator.of(ctx).pop(true),
-                            child: const Text('Delete'),
-                          ),
-                        ],
-                      ),
+                    confirmDismiss: (_) => AppDialog.confirm(
+                      context,
+                      title: 'Delete conversation?',
+                      body: 'This will permanently remove the conversation and all its messages.',
+                      confirmLabel: 'Delete',
+                      destructive: true,
                     ),
                     onDismissed: (_) => context
                         .read<ConversationsBloc>()
@@ -768,27 +753,12 @@ class _DismissibleMemory extends StatelessWidget {
         padding: const EdgeInsets.only(right: AppConstants.spacingXl),
         child: Icon(Icons.delete_outline, color: colors.onError),
       ),
-      confirmDismiss: (_) => showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Delete memory?'),
-          content: Text(
-            memory.fact,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: colors.error),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete'),
-            ),
-          ],
-        ),
+      confirmDismiss: (_) => AppDialog.confirm(
+        context,
+        title: 'Delete memory?',
+        body: memory.fact,
+        confirmLabel: 'Delete',
+        destructive: true,
       ),
       onDismissed: (_) =>
           context.read<MemoriesBloc>().add(DeleteMemory(memory.id)),
@@ -960,6 +930,7 @@ class _EditMemoryDialogState extends State<_EditMemoryDialog> {
         ),
         textCapitalization: TextCapitalization.sentences,
       ),
+      actionsAlignment: MainAxisAlignment.end,
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),

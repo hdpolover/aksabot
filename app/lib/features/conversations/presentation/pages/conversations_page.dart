@@ -5,6 +5,7 @@ import '../../domain/entities/conversation_entity.dart';
 import '../bloc/conversations_bloc.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/widgets/app_dialog.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import 'conversation_detail_page.dart';
 
@@ -83,33 +84,13 @@ class ConversationsPage extends StatelessWidget {
                           color: Theme.of(context).colorScheme.onError,
                         ),
                       ),
-                      confirmDismiss: (_) async {
-                        return await showDialog<bool>(
-                          context: context,
-                          builder: (dialogContext) => AlertDialog(
-                            title: const Text('Delete conversation?'),
-                            content: const Text(
-                                'This will permanently remove the conversation and all its messages.'),
-                            actions: [
-                              TextButton(
-                                onPressed: () =>
-                                    Navigator.of(dialogContext).pop(false),
-                                child: const Text('Cancel'),
-                              ),
-                              FilledButton(
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: Theme.of(context)
-                                      .colorScheme
-                                      .error,
-                                ),
-                                onPressed: () =>
-                                    Navigator.of(dialogContext).pop(true),
-                                child: const Text('Delete'),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+                      confirmDismiss: (_) => AppDialog.confirm(
+                        context,
+                        title: 'Delete conversation?',
+                        body: 'This will permanently remove the conversation and all its messages.',
+                        confirmLabel: 'Delete',
+                        destructive: true,
+                      ),
                       onDismissed: (_) {
                         context
                             .read<ConversationsBloc>()

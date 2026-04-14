@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../domain/entities/memory_entity.dart';
 import '../bloc/memories_bloc.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/widgets/app_dialog.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 
 /// Page displaying a device's extracted memories, grouped by category.
@@ -234,22 +235,12 @@ class _CategorySection extends StatelessWidget {
               color: theme.colorScheme.error,
               child: Icon(Icons.delete, color: theme.colorScheme.onError),
             ),
-            confirmDismiss: (_) => showDialog<bool>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: const Text('Delete memory?'),
-                content: Text(memory.fact),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Cancel'),
-                  ),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    child: const Text('Delete'),
-                  ),
-                ],
-              ),
+            confirmDismiss: (_) => AppDialog.confirm(
+              context,
+              title: 'Delete memory?',
+              body: memory.fact,
+              confirmLabel: 'Delete',
+              destructive: true,
             ),
             onDismissed: (_) =>
                 context.read<MemoriesBloc>().add(DeleteMemory(memory.id)),
@@ -290,6 +281,7 @@ class _CategorySection extends StatelessWidget {
             ),
           ],
         ),
+        actionsAlignment: MainAxisAlignment.end,
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/widgets/app_dialog.dart';
 import '../../../../core/notifications/notification_service.dart';
 import '../../../../core/theme/theme_controller.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -262,26 +263,15 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  void _confirmSignOut(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Sign Out'),
-        content: const Text('Are you sure you want to sign out?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              context.read<AuthBloc>().add(const LogoutRequested());
-            },
-            child: const Text('Sign Out'),
-          ),
-        ],
-      ),
+  Future<void> _confirmSignOut(BuildContext context) async {
+    final confirmed = await AppDialog.confirm(
+      context,
+      title: 'Sign Out',
+      body: 'Are you sure you want to sign out?',
+      confirmLabel: 'Sign Out',
     );
+    if (confirmed == true && context.mounted) {
+      context.read<AuthBloc>().add(const LogoutRequested());
+    }
   }
 }

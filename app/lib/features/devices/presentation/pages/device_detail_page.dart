@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/app_dialog.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../../../core/widgets/status_dot.dart';
 import '../../data/models/device_stats_model.dart';
@@ -94,35 +95,19 @@ class _DeviceDetailView extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(BuildContext context, Device device) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Device'),
-        content: Text('Remove "${device.name}" permanently?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-            ),
-            onPressed: () async {
-              Navigator.of(dialogContext).pop();
-              final bloc = context.read<DevicesBloc>();
-              bloc.add(DeleteDevice(device.id));
-              await bloc.stream.firstWhere(
-                (s) => s is DevicesLoaded || s is DevicesError,
-              );
-              if (context.mounted) context.pop();
-            },
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+  Future<void> _confirmDelete(BuildContext context, Device device) async {
+    final confirmed = await AppDialog.confirm(
+      context,
+      title: 'Delete Device',
+      body: 'Remove "${device.name}" permanently?',
+      confirmLabel: 'Delete',
+      destructive: true,
     );
+    if (confirmed != true || !context.mounted) return;
+    final bloc = context.read<DevicesBloc>();
+    bloc.add(DeleteDevice(device.id));
+    await bloc.stream.firstWhere((s) => s is DevicesLoaded || s is DevicesError);
+    if (context.mounted) context.pop();
   }
 }
 
@@ -161,65 +146,43 @@ class DeviceDashboardBody extends StatelessWidget {
         // ── Right now ──────────────────────────────────────────────────────
         const _SectionLabel('Right now'),
         const SizedBox(height: AppConstants.spacingMd),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        GridView.count(
+          crossAxisCount: 2,
+          crossAxisSpacing: AppConstants.spacingMd,
+          mainAxisSpacing: AppConstants.spacingMd,
+          childAspectRatio: 1.1,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
           children: [
-            Expanded(
-              child: _PrimaryCard(
-                icon: Icons.timer_rounded,
-                label: 'Pomodoro',
-                description: 'Focus sessions',
-                cardBg: ac.warningContainer,
-                iconBg: ac.warning,
-                iconFg: ac.onWarning,
-                onTap: () => context.push('/devices/$id/pomodoro'),
-              ),
+            _GridCard(
+              icon: Icons.notifications_active_rounded,
+              label: 'Reminders',
+              description: 'Health & daily routines',
+              cardBg: ac.successContainer,
+              iconBg: ac.success,
+              iconFg: ac.onSuccess,
+              onTap: () => context.push('/devices/$id/reminders'),
             ),
-            const SizedBox(width: AppConstants.spacingMd),
-            Expanded(
-              child: _PrimaryCard(
-                icon: Icons.center_focus_strong_rounded,
-                label: 'Focus',
-                description: 'Deep work mode',
-                cardBg: cs.primaryContainer,
-                iconBg: cs.primary,
-                iconFg: cs.onPrimary,
-                onTap: () => context.push('/devices/$id/focus'),
-              ),
+            _DisplayModeGridCard(device: device),
+            _GridCard(
+              icon: Icons.image_rounded,
+              label: 'Push Image',
+              description: 'Send a photo to the display',
+              cardBg: cs.secondaryContainer,
+              iconBg: cs.secondary,
+              iconFg: cs.onSecondary,
+              onTap: () => _showPushImageSheet(context, id),
+            ),
+            _GridCard(
+              icon: Icons.surround_sound_rounded,
+              label: 'Voice Intercom',
+              description: 'Send a message or go live',
+              cardBg: cs.tertiaryContainer,
+              iconBg: cs.tertiary,
+              iconFg: cs.onTertiary,
+              onTap: () => context.push('/devices/$id/intercom'),
             ),
           ],
-        ),
-        const SizedBox(height: AppConstants.spacingMd),
-        _WideCard(
-          icon: Icons.notifications_active_rounded,
-          label: 'Reminders',
-          description: 'Health, hydration & daily routines',
-          cardBg: ac.successContainer,
-          iconBg: ac.success,
-          iconFg: ac.onSuccess,
-          onTap: () => context.push('/devices/$id/reminders'),
-        ),
-        const SizedBox(height: AppConstants.spacingMd),
-        _DisplayModeCard(device: device),
-        const SizedBox(height: AppConstants.spacingMd),
-        _WideCard(
-          icon: Icons.image_rounded,
-          label: 'Push Image',
-          description: 'Send a photo to the device display',
-          cardBg: cs.secondaryContainer,
-          iconBg: cs.secondary,
-          iconFg: cs.onSecondary,
-          onTap: () => _showPushImageSheet(context, id),
-        ),
-        const SizedBox(height: AppConstants.spacingMd),
-        _WideCard(
-          icon: Icons.surround_sound_rounded,
-          label: 'Voice Intercom',
-          description: 'Send a voice message or go live',
-          cardBg: cs.tertiaryContainer,
-          iconBg: cs.tertiary,
-          iconFg: cs.onTertiary,
-          onTap: () => context.push('/devices/$id/intercom'),
         ),
         const SizedBox(height: AppConstants.spacingXxl),
 
@@ -242,6 +205,16 @@ class DeviceDashboardBody extends StatelessWidget {
               icon: Icons.bluetooth_searching_rounded,
               label: 'Presence Detection',
               route: '/devices/$id/presence',
+            ),
+            _SettingsRowData(
+              icon: Icons.timer_rounded,
+              label: 'Pomodoro',
+              route: '/devices/$id/pomodoro',
+            ),
+            _SettingsRowData(
+              icon: Icons.center_focus_strong_rounded,
+              label: 'Focus Mode',
+              route: '/devices/$id/focus',
             ),
           ],
         ),
@@ -809,10 +782,15 @@ class _SectionLabel extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Primary cards (Pomodoro, Focus) — 2-col, prominent
+// ---------------------------------------------------------------------------
+// Wide card (Reminders) — full-width, horizontal layout
 // ---------------------------------------------------------------------------
 
-class _PrimaryCard extends StatelessWidget {
+// ---------------------------------------------------------------------------
+// Grid card — compact vertical layout for the 2×2 "Right now" grid
+// ---------------------------------------------------------------------------
+
+class _GridCard extends StatelessWidget {
   final IconData icon;
   final String label;
   final String description;
@@ -821,7 +799,7 @@ class _PrimaryCard extends StatelessWidget {
   final Color iconFg;
   final VoidCallback onTap;
 
-  const _PrimaryCard({
+  const _GridCard({
     required this.icon,
     required this.label,
     required this.description,
@@ -855,7 +833,7 @@ class _PrimaryCard extends StatelessWidget {
                 ),
                 child: Icon(icon, color: iconFg, size: AppConstants.iconMd),
               ),
-              const SizedBox(height: AppConstants.spacingMd),
+              const Spacer(),
               Text(
                 label,
                 style: theme.textTheme.titleSmall?.copyWith(
@@ -866,8 +844,10 @@ class _PrimaryCard extends StatelessWidget {
               Text(
                 description,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -878,98 +858,12 @@ class _PrimaryCard extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Wide card (Reminders) — full-width, horizontal layout
+// Display mode toggle grid card
 // ---------------------------------------------------------------------------
 
-class _WideCard extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String description;
-  final Color cardBg;
-  final Color iconBg;
-  final Color iconFg;
-  final VoidCallback onTap;
-
-  const _WideCard({
-    required this.icon,
-    required this.label,
-    required this.description,
-    required this.cardBg,
-    required this.iconBg,
-    required this.iconFg,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return Material(
-      color: cardBg,
-      borderRadius: BorderRadius.circular(AppConstants.radiusLg),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppConstants.spacingLg,
-            vertical: AppConstants.spacingMd,
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: iconBg,
-                  borderRadius: BorderRadius.circular(AppConstants.radiusMd),
-                ),
-                child: Icon(icon, color: iconFg, size: AppConstants.iconMd),
-              ),
-              const SizedBox(width: AppConstants.spacingMd),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: AppConstants.spacingXxs),
-                    Text(
-                      description,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: AppConstants.spacingMd),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: cs.onSurfaceVariant,
-                size: AppConstants.iconLg,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Display mode toggle card — shows "Clock Mode" or "Face Mode" depending on
-// the device's current idle_display_mode setting, and toggles on tap.
-// ---------------------------------------------------------------------------
-
-class _DisplayModeCard extends StatelessWidget {
+class _DisplayModeGridCard extends StatelessWidget {
   final Device device;
-  const _DisplayModeCard({required this.device});
+  const _DisplayModeGridCard({required this.device});
 
   @override
   Widget build(BuildContext context) {
@@ -977,10 +871,10 @@ class _DisplayModeCard extends StatelessWidget {
     final currentMode = device.settingsJson['idle_display_mode'] as String? ?? 'face';
     final isClockMode = currentMode == 'clock';
 
-    return _WideCard(
+    return _GridCard(
       icon: isClockMode ? Icons.face_rounded : Icons.access_time_rounded,
       label: isClockMode ? 'Face Mode' : 'Clock Mode',
-      description: isClockMode ? 'Switch display back to animated face' : 'Switch display to live clock',
+      description: isClockMode ? 'Switch back to animated face' : 'Switch to live clock',
       cardBg: cs.surfaceContainerHighest,
       iconBg: cs.onSurfaceVariant,
       iconFg: cs.surface,
@@ -1124,14 +1018,16 @@ class _PowerControlRow extends StatelessWidget {
               label: 'Sleep',
               subtitle: 'Turn off display and enter low-power mode',
               color: cs.tertiary,
-              onTap: () => _confirmAction(
-                context,
-                title: 'Sleep Device?',
-                body: 'The display will turn off and the device will enter low-power mode. Wake it by tapping the screen.',
-                confirmLabel: 'Sleep',
-                icon: Icons.bedtime_rounded,
-                action: () => _sendCommand(context, 'sleep'),
-              ),
+              onTap: () async {
+                final confirmed = await AppDialog.confirm(
+                  context,
+                  icon: Icons.bedtime_rounded,
+                  title: 'Sleep Device?',
+                  body: 'The display will turn off and the device will enter low-power mode. Wake it by tapping the screen.',
+                  confirmLabel: 'Sleep',
+                );
+                if (confirmed == true && context.mounted) _sendCommand(context, 'sleep');
+              },
             ),
             Divider(height: 1, indent: 56, color: cs.outlineVariant.withValues(alpha: 0.5)),
             _PowerAction(
@@ -1139,14 +1035,16 @@ class _PowerControlRow extends StatelessWidget {
               label: 'Restart',
               subtitle: 'Soft reboot — reconnects in ~15 seconds',
               color: cs.error,
-              onTap: () => _confirmAction(
-                context,
-                title: 'Restart Device?',
-                body: 'The device will reboot and reconnect in about 15 seconds.',
-                confirmLabel: 'Restart',
-                icon: Icons.restart_alt_rounded,
-                action: () => _sendCommand(context, 'restart'),
-              ),
+              onTap: () async {
+                final confirmed = await AppDialog.confirm(
+                  context,
+                  icon: Icons.restart_alt_rounded,
+                  title: 'Restart Device?',
+                  body: 'The device will reboot and reconnect in about 15 seconds.',
+                  confirmLabel: 'Restart',
+                );
+                if (confirmed == true && context.mounted) _sendCommand(context, 'restart');
+              },
             ),
           ],
         ),
@@ -1170,37 +1068,6 @@ class _PowerControlRow extends StatelessWidget {
     );
   }
 
-  void _confirmAction(
-    BuildContext context, {
-    required String title,
-    required String body,
-    required String confirmLabel,
-    required IconData icon,
-    required VoidCallback action,
-  }) {
-    final cs = Theme.of(context).colorScheme;
-    showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        icon: Icon(icon, color: cs.primary),
-        title: Text(title),
-        content: Text(body),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              action();
-            },
-            child: Text(confirmLabel),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _PowerAction extends StatelessWidget {

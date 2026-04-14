@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/widgets/app_dialog.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../../../core/widgets/empty_state.dart';
 import '../../../devices/domain/entities/device_entity.dart';
@@ -139,29 +140,16 @@ class _DeviceHome extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(BuildContext context, Device device) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Device'),
-        content: Text('Remove "${device.name}" permanently?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-            ),
-            onPressed: () {
-              Navigator.of(dialogContext).pop();
-              context.read<DevicesBloc>().add(DeleteDevice(device.id));
-            },
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+  Future<void> _confirmDelete(BuildContext context, Device device) async {
+    final confirmed = await AppDialog.confirm(
+      context,
+      title: 'Delete Device',
+      body: 'Remove "${device.name}" permanently?',
+      confirmLabel: 'Delete',
+      destructive: true,
     );
+    if (confirmed == true && context.mounted) {
+      context.read<DevicesBloc>().add(DeleteDevice(device.id));
+    }
   }
 }
