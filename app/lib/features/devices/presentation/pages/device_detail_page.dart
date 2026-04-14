@@ -574,17 +574,23 @@ class _StatusCardState extends State<_StatusCard> {
         ),
     ];
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppConstants.spacingLg,
-          vertical: AppConstants.spacingMd,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Connection row ───────────────────────────────────────
-            Row(
+    return BlocListener<DevicesBloc, DevicesState>(
+      listener: (context, state) {
+        if (state is DeviceDetailLoaded && state.device.id == widget.device.id) {
+          _fetchStats();
+        }
+      },
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppConstants.spacingLg,
+            vertical: AppConstants.spacingMd,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Connection row ───────────────────────────────────────
+              Row(
               children: [
                 StatusDot(
                   variant: online
@@ -649,6 +655,7 @@ class _StatusCardState extends State<_StatusCard> {
           ],
         ),
       ),
+    ),
     );
   }
 

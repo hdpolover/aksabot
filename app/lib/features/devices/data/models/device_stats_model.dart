@@ -23,19 +23,23 @@ class DeviceStats {
     );
   }
 
+  static const Object _unset = Object();
+
   DeviceStats copyWith({
     int? conversationsToday,
     int? totalConversations,
     int? totalMemories,
     int? poolSize,
-    int? batteryPercent,
+    Object? batteryPercent = _unset,
   }) {
     return DeviceStats(
       conversationsToday: conversationsToday ?? this.conversationsToday,
       totalConversations: totalConversations ?? this.totalConversations,
       totalMemories: totalMemories ?? this.totalMemories,
       poolSize: poolSize ?? this.poolSize,
-      batteryPercent: batteryPercent ?? this.batteryPercent,
+      batteryPercent: identical(batteryPercent, _unset)
+          ? this.batteryPercent
+          : batteryPercent as int?,
     );
   }
 }
