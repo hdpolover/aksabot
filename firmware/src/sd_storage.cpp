@@ -14,6 +14,8 @@ static const char* DIRS[] = {
     "/audio",
     "/audio/resilience",
     "/audio/buffer",
+    "/images",
+    "/images/remote",
     "/ota",
     "/logs",
 };

@@ -169,9 +169,6 @@ static const char* downloadImage(const char* url) {
     const char* ext = (dot && strlen(dot) <= 5) ? dot : ".jpg";
     snprintf(savedPath, sizeof(savedPath), "/images/remote/latest%s", ext);
 
-    // Ensure directory exists
-    SD_MMC.mkdir("/images/remote");
-
     HTTPClient http;
     http.begin(url);
     http.setTimeout(10000);
