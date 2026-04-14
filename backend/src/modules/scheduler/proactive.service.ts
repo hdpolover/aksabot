@@ -260,7 +260,7 @@ export class ProactiveService {
 
     for (const [deviceId, lastTime] of this.lastActivity.entries()) {
       const session = this.sessions.get(deviceId);
-      if (!session || session.state !== 'idle') continue;
+      if (!session || session.state !== 'idle' || this.sessions.isClockMode(deviceId)) continue;
 
       const idleMinutes = (now - lastTime) / 60_000;
       if (idleMinutes >= 180) {
@@ -314,7 +314,7 @@ export class ProactiveService {
 
     for (const [deviceId, startTime] of this.presenceStart.entries()) {
       const session = this.sessions.get(deviceId);
-      if (!session || session.state !== 'idle') continue;
+      if (!session || session.state !== 'idle' || this.sessions.isClockMode(deviceId)) continue;
 
       const deskMinutes = Math.round((now - startTime) / 60_000);
       if (deskMinutes < 90) continue;
@@ -366,7 +366,7 @@ export class ProactiveService {
   async handleEndOfDay() {
     for (const [deviceId] of this.lastActivity.entries()) {
       const session = this.sessions.get(deviceId);
-      if (!session || session.state !== 'idle') continue;
+      if (!session || session.state !== 'idle' || this.sessions.isClockMode(deviceId)) continue;
 
       try {
         const device = await this.devicesRepo.findOne({
@@ -471,8 +471,8 @@ export class ProactiveService {
     this.idleChatTimers.delete(deviceId);
 
     const session = this.sessions.get(deviceId);
-    if (!session || session.state !== 'idle') {
-      this.logger.debug(`Idle chat skipped for ${deviceId} — not idle, rescheduling`);
+    if (!session || session.state !== 'idle' || this.sessions.isClockMode(deviceId)) {
+      this.logger.debug(`Idle chat skipped for ${deviceId} — not idle or clock mode, rescheduling`);
       // Reschedule so idle chat resumes after the current speaking/listening slot.
       // Without this, the timer stays dead until the next user conversation.
       this.startIdleChat(deviceId).catch(() => {});
@@ -582,7 +582,7 @@ export class ProactiveService {
       if (now - lastTime > 3 * 60 * 60_000) continue;
 
       const session = this.sessions.get(deviceId);
-      if (!session || session.state !== 'idle') continue;
+      if (!session || session.state !== 'idle' || this.sessions.isClockMode(deviceId)) continue;
 
       const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
       const settings = device?.settingsJson ?? {};
@@ -624,7 +624,7 @@ export class ProactiveService {
 
     for (const [deviceId, endedAt] of this.lastConversationEndAt.entries()) {
       const session = this.sessions.get(deviceId);
-      if (!session || session.state !== 'idle') continue;
+      if (!session || session.state !== 'idle' || this.sessions.isClockMode(deviceId)) continue;
 
       const silentMinutes = (now - endedAt) / 60_000;
       // React only in the 15–30 min window after a conversation ended
@@ -667,7 +667,7 @@ export class ProactiveService {
       if (Date.now() - lastTime > 4 * 60 * 60_000) continue;
 
       const session = this.sessions.get(deviceId);
-      if (!session || session.state !== 'idle') continue;
+      if (!session || session.state !== 'idle' || this.sessions.isClockMode(deviceId)) continue;
 
       const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
       const settings = device?.settingsJson ?? {};

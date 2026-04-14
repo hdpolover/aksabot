@@ -70,6 +70,12 @@ struct GlanceData {
     bool hasWeather;        // false = time-only glance
 };
 
+/// Register a callback that fires whenever the display mode changes.
+/// Called with the new mode name as a C-string (e.g. "clock", "face").
+/// Pass nullptr to clear. Only one callback is supported.
+using ModeChangeCallback = void(*)(const char* modeName);
+void setOnModeChange(ModeChangeCallback cb);
+
 /// Initialize display hardware and start with face mode.
 void init();
 

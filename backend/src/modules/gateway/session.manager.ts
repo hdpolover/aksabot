@@ -21,6 +21,8 @@ export interface DeviceSession {
   intercomFrames: Buffer[];
   /** Battery level reported by the device. 0-100 = percentage, 255 = USB powered, undefined = unknown. */
   batteryPercent?: number;
+  /** Current display mode reported by the device. 'clock' suppresses proactive events and audio. */
+  displayMode?: string;
 }
 
 @Injectable()
@@ -52,6 +54,16 @@ export class SessionManager {
   setLanguage(deviceId: string, language: 'en' | 'id'): void {
     const session = this.sessions.get(deviceId);
     if (session) session.language = language;
+  }
+
+  setDisplayMode(deviceId: string, mode: string): void {
+    const session = this.sessions.get(deviceId);
+    if (session) session.displayMode = mode;
+  }
+
+  /** Returns true when the device is in clock mode — proactive events and audio should be suppressed. */
+  isClockMode(deviceId: string): boolean {
+    return this.sessions.get(deviceId)?.displayMode === 'clock';
   }
 
   get(deviceId: string): DeviceSession | undefined {

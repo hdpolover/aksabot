@@ -125,6 +125,7 @@ export class SchedulerService implements OnModuleInit {
     if (!session) return; // device not connected
 
     if (session.state !== 'idle') return; // in conversation
+    if (this.sessions.isClockMode(deviceId)) return; // clock mode — do not disturb
     if (this.focusMode.has(deviceId)) return; // focus mode active
     if (this.pomodoroService.isActive(deviceId)) return; // pomodoro active
 

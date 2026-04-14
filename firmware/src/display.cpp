@@ -88,6 +88,27 @@ static const int MOUTH_Y   = CY + 70;
 // ── Home mode — what the display returns to after wake/dismiss ────────────
 static display::Mode g_homeMode = display::Mode::FACE;
 
+// ── Mode-change callback ───────────────────────────────────────────────────
+static display::ModeChangeCallback g_onModeChange = nullptr;
+
+void display::setOnModeChange(ModeChangeCallback cb) {
+    g_onModeChange = cb;
+}
+
+static const char* modeToString(display::Mode m) {
+    switch (m) {
+        case display::Mode::FACE:      return "face";
+        case display::Mode::CLOCK:     return "clock";
+        case display::Mode::POMODORO:  return "pomodoro";
+        case display::Mode::REMINDER:  return "reminder";
+        case display::Mode::COUNTDOWN: return "countdown";
+        case display::Mode::STATUS:    return "status";
+        case display::Mode::GLANCE:    return "glance";
+        case display::Mode::IMAGE:     return "image";
+        default:                       return "face";
+    }
+}
+
 // ── Active face style ─────────────────────────────────
 // Points to one of the built-in presets (ORBIT or NOVA).
 // Changed at runtime via display::setFaceStyle() — loaded from NVS on boot.
@@ -115,6 +136,439 @@ static uint16_t blendRGB565(uint16_t fg, uint16_t bg, uint8_t alpha) {
     uint16_t g = (ffg * alpha + bbg * (255 - alpha)) / 255;
     uint16_t b = (fb * alpha + bb * (255 - alpha)) / 255;
     return (r << 11) | (g << 5) | b;
+}
+
+// ── Clock-mode cat + mouse mascots ───────────────────────────────────────────
+
+// Shared arena bounds (screen minus a small margin)
+static constexpr int ARENA_X0 = 15, ARENA_X1 = 225;
+static constexpr int ARENA_Y0 = 210, ARENA_Y1 = 305;
+
+enum class CatBehavior : uint8_t { WALK, SIT, LOOK_UP, PAW_UP, CHASE };
+
+struct CatState {
+    float    x = 60.0f, y = 260.0f;
+    float    tx = 60.0f, ty = 260.0f;
+    int8_t   facing = 1;
+    CatBehavior behavior = CatBehavior::SIT;
+    uint8_t  frame        = 0;
+    uint8_t  tailPhase    = 0;
+    uint8_t  behaviorTicks = 0;
+    uint8_t  victoryTicks  = 0;   // PAW_UP frames held after a catch
+    uint32_t lastMs       = 0;
+};
+
+struct MouseState {
+    float   x  = 0.0f, y = 0.0f;
+    float   vx = 0.0f, vy = 0.0f;  // velocity (px / tick)
+    int8_t  facing  = 1;
+    uint8_t frame   = 0;
+    uint8_t tailPhase = 0;
+    bool    active  = false;
+    uint8_t dirChangeTicks = 0;  // countdown to next random swerve
+    int     spawnCountdown = 0;  // ticks until next spawn attempt (0 = spawn now)
+};
+
+static CatState  g_cat;
+static MouseState g_mouse;
+static bool       g_catInited = false;
+
+// Returns value in [lo, hi]
+static inline int catRand(int lo, int hi) {
+    return lo + (int)(esp_random() % (uint32_t)(hi - lo + 1));
+}
+
+// ── Mouse helpers ──────────────────────────────────────────────────────────
+
+// Mouse always runs — base speed is 4.2px/tick, panics to 5.8 when cat is close.
+// Cat chase speed is 5.2px/tick — faster than mouse base but mouse zigzags.
+static constexpr float MOUSE_SPEED_BASE  = 4.2f;
+static constexpr float MOUSE_SPEED_PANIC = 5.8f;
+static constexpr float CAT_CHASE_SPEED   = 5.2f;
+static constexpr float CAT_WALK_SPEED    = 2.5f;
+static constexpr float PANIC_DIST        = 60.0f;  // cat distance that triggers panic
+
+// Spawn the mouse at a random arena edge, immediately running inward
+static void mouseSpawn() {
+    int edge = catRand(0, 3);
+    switch (edge) {
+        case 0: g_mouse.x = (float)catRand(ARENA_X0, ARENA_X1); g_mouse.y = (float)ARENA_Y0; break;
+        case 1: g_mouse.x = (float)catRand(ARENA_X0, ARENA_X1); g_mouse.y = (float)ARENA_Y1; break;
+        case 2: g_mouse.x = (float)ARENA_X0; g_mouse.y = (float)catRand(ARENA_Y0, ARENA_Y1); break;
+        default: g_mouse.x = (float)ARENA_X1; g_mouse.y = (float)catRand(ARENA_Y0, ARENA_Y1); break;
+    }
+    // Head toward arena center with some randomness — always at full run speed
+    float dx = (ARENA_X0 + ARENA_X1) / 2.0f - g_mouse.x + (float)catRand(-25, 25);
+    float dy = (ARENA_Y0 + ARENA_Y1) / 2.0f - g_mouse.y + (float)catRand(-12, 12);
+    float d  = sqrtf(dx * dx + dy * dy);
+    g_mouse.vx = (d > 0) ? (dx / d) * MOUSE_SPEED_BASE : MOUSE_SPEED_BASE;
+    g_mouse.vy = (d > 0) ? (dy / d) * MOUSE_SPEED_BASE : 0.0f;
+    g_mouse.facing         = (g_mouse.vx >= 0) ? 1 : -1;
+    g_mouse.active         = true;
+    g_mouse.dirChangeTicks = (uint8_t)catRand(5, 10);
+    g_mouse.frame          = 0;
+    g_mouse.tailPhase      = 0;
+}
+
+// Advance mouse: always running, zigzags randomly, panics when cat is near
+static void mouseTick() {
+    if (!g_mouse.active) return;
+
+    g_mouse.frame++;
+    g_mouse.tailPhase = (g_mouse.tailPhase + 1) & 7;
+
+    float cdx     = g_mouse.x - g_cat.x;
+    float cdy     = g_mouse.y - g_cat.y;
+    float catDist = sqrtf(cdx * cdx + cdy * cdy);
+    bool  panic   = (catDist < PANIC_DIST);
+    float speed   = panic ? MOUSE_SPEED_PANIC : MOUSE_SPEED_BASE;
+
+    // Direction changes: more frequent when panicking
+    if (g_mouse.dirChangeTicks > 0) {
+        g_mouse.dirChangeTicks--;
+    } else {
+        g_mouse.dirChangeTicks = panic ? (uint8_t)catRand(2, 6) : (uint8_t)catRand(5, 10);
+        // Mostly flee from cat, deflected by a random angle
+        float deflect = ((float)catRand(-55, 55)) * (3.14159f / 180.0f);
+        float angle   = (catDist > 1.0f)
+            ? atan2f(cdy, cdx) + deflect
+            : (float)catRand(0, 628) / 100.0f;
+        g_mouse.vx = cosf(angle) * speed;
+        g_mouse.vy = sinf(angle) * speed;
+    }
+
+    // Blend velocity toward current speed magnitude (smooths speed transitions)
+    float vMag = sqrtf(g_mouse.vx * g_mouse.vx + g_mouse.vy * g_mouse.vy);
+    if (vMag > 0.01f) {
+        g_mouse.vx = g_mouse.vx / vMag * speed;
+        g_mouse.vy = g_mouse.vy / vMag * speed;
+    }
+
+    g_mouse.x += g_mouse.vx;
+    g_mouse.y += g_mouse.vy;
+
+    // Bounce off arena walls — reflect and re-randomize direction slightly
+    if (g_mouse.x < ARENA_X0) { g_mouse.x = (float)ARENA_X0; g_mouse.vx =  fabsf(g_mouse.vx); g_mouse.dirChangeTicks = 1; }
+    if (g_mouse.x > ARENA_X1) { g_mouse.x = (float)ARENA_X1; g_mouse.vx = -fabsf(g_mouse.vx); g_mouse.dirChangeTicks = 1; }
+    if (g_mouse.y < ARENA_Y0) { g_mouse.y = (float)ARENA_Y0; g_mouse.vy =  fabsf(g_mouse.vy); g_mouse.dirChangeTicks = 1; }
+    if (g_mouse.y > ARENA_Y1) { g_mouse.y = (float)ARENA_Y1; g_mouse.vy = -fabsf(g_mouse.vy); g_mouse.dirChangeTicks = 1; }
+
+    g_mouse.facing = (g_mouse.vx >= 0) ? 1 : -1;
+}
+
+// ── Cat helpers ────────────────────────────────────────────────────────────
+
+static void catPickNewBehavior() {
+    int r = catRand(0, 99);
+    if (r < 40) {
+        g_cat.behavior = CatBehavior::WALK;
+        g_cat.tx = (float)catRand(ARENA_X0, ARENA_X1);
+        g_cat.ty = (float)catRand(ARENA_Y0, ARENA_Y1);
+        g_cat.behaviorTicks = catRand(20, 50);
+    } else if (r < 60) {
+        g_cat.behavior = CatBehavior::SIT;
+        g_cat.behaviorTicks = catRand(15, 40);
+    } else if (r < 80) {
+        g_cat.behavior = CatBehavior::LOOK_UP;
+        g_cat.behaviorTicks = catRand(10, 25);
+    } else {
+        g_cat.behavior = CatBehavior::PAW_UP;
+        g_cat.behaviorTicks = catRand(8, 20);
+    }
+}
+
+static void catTick(uint32_t now) {
+    if (!g_catInited) {
+        g_catInited   = true;
+        g_cat.lastMs  = now;
+        // First mouse spawn: 5–12 seconds from init
+        g_mouse.spawnCountdown = catRand(62, 150);
+        catPickNewBehavior();
+    }
+    if (now - g_cat.lastMs < 80) return;
+    g_cat.lastMs = now;
+
+    g_cat.frame++;
+    g_cat.tailPhase = (g_cat.tailPhase + 1) & 7;
+
+    // ── Mouse spawn timer ──────────────────────────────────────────────────
+    if (!g_mouse.active) {
+        if (g_mouse.spawnCountdown > 0) {
+            g_mouse.spawnCountdown--;
+        } else {
+            mouseSpawn();
+        }
+    }
+
+    // ── Mouse movement ─────────────────────────────────────────────────────
+    mouseTick();
+
+    // ── Victory pose hold after a catch ───────────────────────────────────
+    if (g_cat.victoryTicks > 0) {
+        g_cat.victoryTicks--;
+        g_cat.behavior = CatBehavior::PAW_UP;
+        if (g_cat.victoryTicks == 0) catPickNewBehavior();
+        return;
+    }
+
+    // ── Chase mode: override normal behavior when mouse is active ─────────
+    if (g_mouse.active) {
+        g_cat.behavior = CatBehavior::CHASE;
+        float dx = g_mouse.x - g_cat.x;
+        float dy = g_mouse.y - g_cat.y;
+        float dist = sqrtf(dx * dx + dy * dy);
+
+        if (dist < 14.0f) {
+            // Caught! Disappear the mouse and strike a victory pose
+            g_mouse.active = false;
+            // Next spawn: 10–20 seconds later
+            g_mouse.spawnCountdown = catRand(125, 250);
+            g_cat.behavior     = CatBehavior::PAW_UP;
+            g_cat.victoryTicks = 12;  // ~1 second
+        } else {
+            g_cat.x += (dx / dist) * CAT_CHASE_SPEED;
+            g_cat.y += (dy / dist) * CAT_CHASE_SPEED;
+            g_cat.facing = (dx >= 0) ? 1 : -1;
+        }
+        return;
+    }
+
+    // ── Normal wandering behavior ──────────────────────────────────────────
+    if (g_cat.behaviorTicks > 0) g_cat.behaviorTicks--;
+    if (g_cat.behaviorTicks == 0) catPickNewBehavior();
+
+    if (g_cat.behavior == CatBehavior::WALK) {
+        float dx = g_cat.tx - g_cat.x;
+        float dy = g_cat.ty - g_cat.y;
+        float dist = sqrtf(dx * dx + dy * dy);
+        if (dist < 2.0f) {
+            g_cat.behavior = CatBehavior::SIT;
+            g_cat.behaviorTicks = catRand(15, 35);
+        } else {
+            g_cat.x += (dx / dist) * CAT_WALK_SPEED;
+            g_cat.y += (dy / dist) * CAT_WALK_SPEED;
+            g_cat.facing = (dx >= 0) ? 1 : -1;
+        }
+    }
+}
+
+// ── Draw helpers ───────────────────────────────────────────────────────────
+
+static void catDraw(LGFX_Sprite& s, uint16_t bgCol) {
+    const uint16_t col    = g_faceEyeBody565;
+    const uint16_t earIn  = blendRGB565(col, bgCol, 110);   // inner ear
+    const uint16_t wCol   = blendRGB565(col, bgCol, 50);    // whisker
+    const bool chasing    = (g_cat.behavior == CatBehavior::CHASE);
+    const bool victory    = (g_cat.behavior == CatBehavior::PAW_UP && g_cat.victoryTicks > 0);
+    const int  fx         = g_cat.facing;
+    const int  cx         = (int)g_cat.x;
+    const int  cy         = (int)g_cat.y;
+
+    // ── Tail ────────────────────────────────────────────────────────────────
+    // Chase: streams straight back, raised. Idle: lazy S-curve sway.
+    if (chasing) {
+        // Tail whips straight back and up when sprinting
+        int tx0 = cx - fx * 11, ty0 = cy;
+        int tx1 = tx0 - fx * 7,  ty1 = ty0 - 5;
+        int tx2 = tx1 - fx * 4,  ty2 = ty1 - 3;
+        s.drawLine(tx0, ty0, tx1, ty1, col);
+        s.drawLine(tx0 + 1, ty0, tx1 + 1, ty1, col);   // double-pixel for thickness
+        s.drawLine(tx1, ty1, tx2, ty2, col);
+        s.fillCircle(tx2, ty2, 2, col);
+    } else {
+        float tp  = (float)g_cat.tailPhase / 8.0f * 3.14159f * 2.0f;
+        float swX = sinf(tp) * 6.0f;
+        float swY = cosf(tp) * 4.0f;
+        int tx0 = cx - fx * 10, ty0 = cy + 3;
+        int tx1 = tx0 - fx * 6 + (int)swX, ty1 = ty0 - 7 + (int)swY;
+        int tx2 = tx1 - fx * 4 + (int)(swX * 0.4f), ty2 = ty1 - 5;
+        s.drawLine(tx0, ty0, tx1, ty1, col);
+        s.drawLine(tx0, ty0 + 1, tx1, ty1 + 1, col);   // double-pixel
+        s.drawLine(tx1, ty1, tx2, ty2, col);
+        s.fillCircle(tx2, ty2, 2, col);
+    }
+
+    // ── Body ────────────────────────────────────────────────────────────────
+    // Chase: stretched low (sprint silhouette). Normal: rounder.
+    if (chasing) {
+        s.fillEllipse(cx, cy + 1, 14, 6, col);   // low, elongated
+    } else {
+        s.fillEllipse(cx, cy, 12, 9, col);
+    }
+
+    // ── Head position depends on pose ───────────────────────────────────────
+    int hx, hy;
+    if (chasing) {
+        hx = cx + fx * 13; hy = cy - 3;   // forward and low — pounce lean
+    } else {
+        hx = cx + fx * 10; hy = cy - 7;   // upright
+    }
+    s.fillCircle(hx, hy, 8, col);
+
+    // ── Ears ────────────────────────────────────────────────────────────────
+    // Near ear (facing side) — tall pointed triangle
+    int nearEarX = hx + fx * 4;
+    int farEarX  = hx - fx * 3;
+    s.fillTriangle(nearEarX,        hy - 10,
+                   nearEarX - fx*4, hy - 2,
+                   nearEarX + fx*2, hy - 2, col);
+    s.fillTriangle(farEarX,         hy - 9,
+                   farEarX  - fx*3, hy - 2,
+                   farEarX  + fx*3, hy - 2, col);
+    // Inner ear
+    s.fillTriangle(nearEarX,        hy - 8,
+                   nearEarX - fx*2, hy - 3,
+                   nearEarX + fx*1, hy - 3, earIn);
+
+    // ── Eyes ────────────────────────────────────────────────────────────────
+    bool lookUp   = (g_cat.behavior == CatBehavior::LOOK_UP);
+    bool blinkNow = (!chasing && (g_cat.frame & 0x1F) == 0);
+    int  neX      = hx + fx * 3;
+    int  feX      = hx - fx * 2;
+    int  eyY      = hy - 1;
+    if (blinkNow) {
+        // Thin closed line
+        s.drawLine(neX - 3, eyY, neX + 3, eyY, bgCol);
+        s.drawLine(feX - 3, eyY, feX + 3, eyY, bgCol);
+    } else if (chasing) {
+        // Wide alert pupils — large circles
+        s.fillCircle(neX, eyY, 3, bgCol);
+        s.fillCircle(feX, eyY, 3, bgCol);
+        // Tiny highlight dot
+        s.fillCircle(neX + 1, eyY - 1, 1, col);
+        s.fillCircle(feX + 1, eyY - 1, 1, col);
+    } else if (lookUp) {
+        s.fillCircle(neX, eyY - 2, 2, bgCol);
+        s.fillCircle(feX, eyY - 2, 2, bgCol);
+    } else if (victory) {
+        // Crescent happy squint — small filled ellipses
+        s.fillEllipse(neX, eyY, 3, 2, bgCol);
+        s.fillEllipse(feX, eyY, 3, 2, bgCol);
+    } else {
+        s.fillCircle(neX, eyY, 2, bgCol);
+        s.fillCircle(feX, eyY, 2, bgCol);
+    }
+
+    // ── Legs ────────────────────────────────────────────────────────────────
+    // Chase uses a gallop: legs splay further and alternate in bigger arcs
+    {
+        bool moving   = (chasing || g_cat.behavior == CatBehavior::WALK);
+        // Chase animates every frame; walk every 2 frames
+        int  legPhase = !moving ? 0 : chasing ? (g_cat.frame & 3) : ((g_cat.frame >> 1) & 3);
+
+        int legRootY = cy + (chasing ? 5 : 8);
+
+        // Front pair
+        int f1x = cx + fx * 6;
+        int f2x = cx + fx * 3;
+        int f1ext = (legPhase == 0) ? 5 : (legPhase == 1) ? 3 : 1;
+        int f2ext = (legPhase == 2) ? 5 : (legPhase == 3) ? 3 : 1;
+        s.drawLine(f1x, legRootY, f1x + fx * (chasing ? 2 : 0), legRootY + 4 + f1ext, col);
+        s.fillCircle(f1x + fx * (chasing ? 2 : 0), legRootY + 4 + f1ext, 2, col);
+        s.drawLine(f2x, legRootY, f2x - fx * (chasing ? 2 : 0), legRootY + 4 + f2ext, col);
+        s.fillCircle(f2x - fx * (chasing ? 2 : 0), legRootY + 4 + f2ext, 2, col);
+
+        // Hind pair
+        int h1x = cx - fx * 4;
+        int h2x = cx - fx * 7;
+        int h1ext = (legPhase == 2) ? 5 : (legPhase == 3) ? 3 : 1;
+        int h2ext = (legPhase == 0) ? 5 : (legPhase == 1) ? 3 : 1;
+        s.drawLine(h1x, legRootY, h1x - fx * (chasing ? 2 : 0), legRootY + 4 + h1ext, col);
+        s.fillCircle(h1x - fx * (chasing ? 2 : 0), legRootY + 4 + h1ext, 2, col);
+        s.drawLine(h2x, legRootY, h2x + fx * (chasing ? 2 : 0), legRootY + 4 + h2ext, col);
+        s.fillCircle(h2x + fx * (chasing ? 2 : 0), legRootY + 4 + h2ext, 2, col);
+    }
+
+    // ── Raised front paw — victory pose ────────────────────────────────────
+    if (g_cat.behavior == CatBehavior::PAW_UP) {
+        int pawX = hx + fx * 6;
+        int pawY = hy + 1;
+        int bob  = ((g_cat.frame >> 2) & 1) ? -2 : 0;
+        s.drawLine(pawX, pawY, pawX + fx * 1, pawY - 6 + bob, col);
+        s.drawLine(pawX + 1, pawY, pawX + fx * 1 + 1, pawY - 6 + bob, col);
+        s.fillCircle(pawX + fx * 1, pawY - 6 + bob, 3, col);
+    }
+
+    // ── Whiskers — 3 per side ───────────────────────────────────────────────
+    int snoutX = hx + fx * 5;
+    int snoutY = hy + 1;
+    s.drawLine(snoutX,        snoutY - 2, snoutX + fx * 7, snoutY - 3, wCol);
+    s.drawLine(snoutX,        snoutY,     snoutX + fx * 7, snoutY,     wCol);
+    s.drawLine(snoutX,        snoutY + 2, snoutX + fx * 7, snoutY + 3, wCol);
+    s.drawLine(snoutX - fx*2, snoutY - 2, snoutX - fx * 8, snoutY - 3, wCol);
+    s.drawLine(snoutX - fx*2, snoutY,     snoutX - fx * 8, snoutY,     wCol);
+    s.drawLine(snoutX - fx*2, snoutY + 2, snoutX - fx * 8, snoutY + 3, wCol);
+}
+
+static void mouseDraw(LGFX_Sprite& s, uint16_t bgCol) {
+    if (!g_mouse.active) return;
+
+    // Mouse is visually distinct — slightly dimmer/smaller than cat
+    const uint16_t col   = blendRGB565(g_faceEyeBody565, bgCol, 175);
+    const uint16_t earIn = blendRGB565(g_faceEyeBody565, bgCol, 65);
+    const int  fx        = g_mouse.facing;
+    const int  cx        = (int)g_mouse.x;
+    const int  cy        = (int)g_mouse.y;
+
+    // Speed magnitude — used to scale body stretch and tail behavior
+    float spd = sqrtf(g_mouse.vx * g_mouse.vx + g_mouse.vy * g_mouse.vy);
+    bool  fast = (spd > 4.5f);
+
+    // ── Tail — streams flat behind when running fast, sways when slower ────
+    {
+        int tx0 = cx - fx * 5, ty0 = cy + 1;
+        if (fast) {
+            // Straight tail pointing back, slight upward angle
+            s.drawLine(tx0, ty0, tx0 - fx * 8, ty0 - 2, col);
+            s.drawLine(tx0 - fx * 8, ty0 - 2, tx0 - fx * 11, ty0 - 4, col);
+        } else {
+            float tp  = (float)g_mouse.tailPhase / 8.0f * 3.14159f * 2.0f;
+            float swX = sinf(tp) * 3.0f;
+            s.drawLine(tx0, ty0, tx0 - fx * 7 + (int)swX, ty0 + 3, col);
+            s.drawLine(tx0 - fx * 7 + (int)swX, ty0 + 3, tx0 - fx * 9, ty0 + 5, col);
+        }
+    }
+
+    // ── Body — slightly stretched horizontally when running fast ───────────
+    int bodyW = fast ? 9 : 7;
+    int bodyH = fast ? 4 : 5;
+    s.fillEllipse(cx, cy, bodyW, bodyH, col);
+
+    // ── Head ─────────────────────────────────────────────────────────────────
+    int hx = cx + fx * 6, hy = cy - 3;
+    s.fillCircle(hx, hy, 5, col);
+
+    // ── Big round ears (mouse trademark) ────────────────────────────────────
+    s.fillCircle(hx + fx * 2, hy - 5, 3, col);
+    s.fillCircle(hx - fx * 2, hy - 5, 3, col);
+    s.fillCircle(hx + fx * 2, hy - 5, 2, earIn);
+    s.fillCircle(hx - fx * 2, hy - 5, 2, earIn);
+
+    // ── Eye — tiny bright dot ────────────────────────────────────────────────
+    s.fillCircle(hx + fx * 2, hy - 1, 1, bgCol);
+
+    // ── Nose ─────────────────────────────────────────────────────────────────
+    s.fillCircle(hx + fx * 4, hy + 1, 1, earIn);
+
+    // ── Running legs — fast cycle animates every frame ───────────────────────
+    {
+        int  legPhase = g_mouse.frame & 3;
+        int  legY     = cy + bodyH;
+        // Front pair
+        int f1x = cx + fx * 3;
+        int f2x = cx + fx * 1;
+        int f1e = (legPhase == 0 || legPhase == 1) ? 3 : 1;
+        int f2e = (legPhase == 2 || legPhase == 3) ? 3 : 1;
+        s.drawLine(f1x, legY, f1x + fx,  legY + f1e, col);
+        s.drawLine(f2x, legY, f2x - fx,  legY + f2e, col);
+        // Hind pair
+        int h1x = cx - fx * 2;
+        int h2x = cx - fx * 4;
+        int h1e = (legPhase == 2 || legPhase == 3) ? 3 : 1;
+        int h2e = (legPhase == 0 || legPhase == 1) ? 3 : 1;
+        s.drawLine(h1x, legY, h1x - fx,  legY + h1e, col);
+        s.drawLine(h2x, legY, h2x + fx,  legY + h2e, col);
+    }
 }
 
 struct Palette {
@@ -1193,14 +1647,21 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
 }
 
 void renderClock(const display::StatusBar& status) {
-    // Only redraw when the displayed minute changes (or on first entry).
-    static uint32_t lastClockMin = 0xFFFFFFFFu;
+    // Tick the cat every ~80ms regardless of minute change.
+    uint32_t nowMs = millis();
+    catTick(nowMs);
 
-    uint32_t elapsedMin = (syncedAtMs > 0) ? (millis() - syncedAtMs) / 60000 : 0;
+    // Redraw when minute changes, on first entry, or on each cat animation tick.
+    static uint32_t lastClockMin    = 0xFFFFFFFFu;
+    static uint32_t lastCatRedrawMs = 0;
+
+    uint32_t elapsedMin = (syncedAtMs > 0) ? (nowMs - syncedAtMs) / 60000 : 0;
     uint32_t totalMin   = (syncedMinutes + elapsedMin) % (24 * 60);
-    if (totalMin == lastClockMin && !g_clockDirty) return;
+    bool catDue = (nowMs - lastCatRedrawMs >= 80);
+    if (totalMin == lastClockMin && !g_clockDirty && !catDue) return;
     lastClockMin = totalMin;
     g_clockDirty = false;
+    if (catDue) lastCatRedrawMs = nowMs;
 
     LGFX_Sprite& s = sprite.getBuffer() ? sprite : (LGFX_Sprite&)tft;
     bool useSprite  = (sprite.getBuffer() != nullptr);
@@ -1237,6 +1698,10 @@ void renderClock(const display::StatusBar& status) {
     s.setTextColor(blendRGB565(g_faceEyeBody565, bgCol, 100));
     const char* dateStr = (contextDataAvailable && latestContext.date[0]) ? latestContext.date : "---";
     s.drawString(dateStr, CX, CY + 30);
+
+    // Cat + mouse mascots
+    mouseDraw(s, bgCol);
+    catDraw(s, bgCol);
 
     if (useSprite) sprite.pushSprite(0, 0);
 }
@@ -1769,6 +2234,7 @@ void display::tick(uint32_t nowMs) {
     if (autoReturnActive && nowMs >= autoReturnAtMs) {
         autoReturnActive = false;
         currentMode = previousMode;
+        if (g_onModeChange) g_onModeChange(modeToString(currentMode));
     }
 
     // IMAGE mode: image drawn directly to TFT hardware — skip sprite rendering
@@ -1814,8 +2280,9 @@ void display::setMode(Mode mode) {
     previousMode = currentMode;
     currentMode = mode;
     autoReturnActive = false;
-    if (mode == Mode::CLOCK) g_clockDirty = true;
+    if (mode == Mode::CLOCK) { g_clockDirty = true; g_catInited = false; }
     if (sleeping) wake();
+    if (g_onModeChange) g_onModeChange(modeToString(mode));
 }
 
 display::Mode display::getMode() {
@@ -1829,6 +2296,7 @@ void display::setModeTemporary(Mode mode, uint16_t durationMs) {
     autoReturnAtMs = millis() + durationMs;
     if (mode == Mode::CLOCK) g_clockDirty = true;
     if (sleeping) wake();
+    if (g_onModeChange) g_onModeChange(modeToString(mode));
 }
 
 void display::updateStatusBar(const StatusBar& status) {

@@ -1496,6 +1496,14 @@ void setup() {
 
     // ── 3. Display init + splash ───────────────────────────
     display::init();
+    // Notify the backend whenever the display mode changes so it can suppress
+    // proactive events and audio in clock mode (or resume them when leaving it).
+    display::setOnModeChange([](const char* modeName) {
+        if (!ws_client::isConnected()) return;
+        char buf[48];
+        snprintf(buf, sizeof(buf), "{\"mode\":\"%s\"}", modeName);
+        ws_client::sendEvent("display:mode", buf);
+    });
     display::setFaceStyle(nvs_store::getFaceStyle());  // restore face style from NVS
     display::setFaceColors(nvs_store::getFaceBgColor(), nvs_store::getFaceEyeColor(), nvs_store::getFaceMouthColor());
     {

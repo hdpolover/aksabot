@@ -194,6 +194,7 @@ export class AudioGateway
 
     const session = this.sessions.get(deviceId);
     if (!session || session.state !== 'idle') return;
+    if (this.sessions.isClockMode(deviceId)) return;
 
     session.state = 'speaking';
 
@@ -292,6 +293,7 @@ export class AudioGateway
 
     const session = this.sessions.get(deviceId);
     if (!session || session.state !== 'idle') return;
+    if (this.sessions.isClockMode(deviceId)) return;
 
     // Claim the speaking slot before any await.
     session.state = 'speaking';
@@ -444,6 +446,7 @@ export class AudioGateway
     // Send as audio response (same flow as connection greeting)
     const session = this.sessions.get(deviceId);
     if (!session || session.state !== 'idle') return;
+    if (this.sessions.isClockMode(deviceId)) return;
 
     // Claim the speaking slot before any await.
     session.state = 'speaking';
@@ -605,6 +608,7 @@ export class AudioGateway
   private async onWakeTouch(deviceId: string) {
     const session = this.sessions.get(deviceId);
     if (!session || session.state !== 'idle') return;
+    if (this.sessions.isClockMode(deviceId)) return;
 
     // Claim the speaking slot before any await.
     session.state = 'speaking';
@@ -686,6 +690,7 @@ export class AudioGateway
   private async onReconnectBack(deviceId: string) {
     const session = this.sessions.get(deviceId);
     if (!session || session.state !== 'idle') return;
+    if (this.sessions.isClockMode(deviceId)) return;
 
     // Skip if a connection greeting is already queued (from handleConnection)
     // Give 3s buffer for the greeting to fire first
@@ -844,6 +849,12 @@ export class AudioGateway
           break;
         case 'device:info':
           this.onDeviceInfo(deviceId, msg.data);
+          break;
+        case 'display:mode':
+          if (msg.data?.mode) {
+            this.sessions.setDisplayMode(deviceId, msg.data.mode as string);
+            this.logger.debug(`Device ${deviceId} display mode → ${msg.data.mode}`);
+          }
           break;
         case 'wake:touch':
           this.onWakeTouch(deviceId).catch((err) =>
