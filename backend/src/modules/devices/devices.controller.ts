@@ -28,6 +28,7 @@ import {
   RateLimitGuard,
 } from '../../core/common/guards/rate-limit.guard';
 import { CurrentUser } from '../../core/common/decorators/current-user.decorator';
+import { Public } from '../../core/common/decorators/public.decorator';
 import type { RequestUser } from '../../core/common/decorators/current-user.decorator';
 import { AudioGateway } from '../gateway/audio.gateway';
 import { TTS_PROVIDER } from '../ai/interfaces/tokens';
@@ -272,6 +273,7 @@ export class DevicesController {
 
   /** Serve a previously uploaded device image. No auth required — the UUID
    *  filename is unguessable and the file is deleted after 5 minutes. */
+  @Public()
   @Get(':id/device-images/:filename')
   async serveDeviceImage(
     @Param('id', ParseUUIDPipe) _id: string,
