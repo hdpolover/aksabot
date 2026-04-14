@@ -691,6 +691,19 @@ export class AudioGateway
             this.logger.error(`onReconnectBack error: ${err.message}`),
           );
           break;
+        // Server-to-device events that the simulator may echo back — safe to ignore
+        case 'display:image':
+        case 'response:start':
+        case 'response:text':
+        case 'response:end':
+        case 'proactive:reminder':
+        case 'proactive:pomodoro':
+        case 'face:expression':
+        case 'config:update':
+        case 'power:sleep':
+        case 'ota:start':
+          this.logger.debug(`Ignoring echoed server event: ${msg.event}`);
+          break;
         default:
           this.logger.warn(`Unknown event: ${msg.event}`);
       }

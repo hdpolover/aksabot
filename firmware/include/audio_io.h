@@ -35,7 +35,8 @@ size_t writeRawStereo(const int16_t* buffer, size_t numSamples);
 /// Flush TX DMA (call before playback to clear stale data).
 void flushSpeaker();
 
-/// Set speaker volume (0-100). Applied to ES8311 codec.
+/// Set speaker volume (0-100). Applied as software PCM scaling in writeSpeaker()
+/// so all audio paths (TTS, SFX, resilience clips) are attenuated uniformly.
 void setVolume(uint8_t percent);
 
 }  // namespace audio_io

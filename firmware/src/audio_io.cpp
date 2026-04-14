@@ -11,6 +11,13 @@
 static i2s_chan_handle_t tx_handle = nullptr;
 static i2s_chan_handle_t rx_handle = nullptr;
 
+// Software volume scale (0.0 – 1.0). Applied to every PCM sample in
+// writeSpeaker() so that ALL audio paths (TTS, SFX, resilience, emotion)
+// are attenuated uniformly. ES8311 is held at a fixed hardware level
+// (HW_VOLUME_FIXED) so the user-facing volume knob maps 1:1 to PCM amplitude.
+static float   s_volumeScale   = 1.0f;
+static const uint8_t HW_VOLUME_FIXED = 75;  // safe max — >82 distorts on this amp
+
 void audio_io::init() {
     // Enable amplifier (FM8002E) — active LOW
     pinMode(AUDIO_EN, OUTPUT);
@@ -74,16 +81,19 @@ void audio_io::init() {
         return;
     }
 
-    // Set volume from NVS + 42dB mic gain.
-    // Raised from 24dB: higher gain gives ~8x more headroom between voice
-    // and the wake word detector's noise floor threshold. Voice peaks at ~3%
-    // of full scale at 42dB so there is no clipping risk on a MEMS mic.
-    uint8_t vol = nvs_store::getVolume();
-    setVolume(vol);  // applies perceptual curve + hardware range mapping
+    // Fix ES8311 hardware output at HW_VOLUME_FIXED — all volume control is
+    // done in software (writeSpeaker scales PCM by s_volumeScale) so that
+    // every audio source (TTS, SFX, resilience clips) respects the same knob.
     es8311_handle_t es_handle = es8311_create(I2C_NUM_0, ES8311_ADDRESS_0);
+    es8311_voice_volume_set(es_handle, HW_VOLUME_FIXED, NULL);
     es8311_microphone_gain_set(es_handle, ES8311_MIC_GAIN_42DB);
 
-    Serial.printf("[Audio] ES8311 codec ready (vol=%d%%, mic=42dB)\n", vol);
+    // Restore user volume as software scale from NVS.
+    uint8_t vol = nvs_store::getVolume();
+    setVolume(vol);
+
+    Serial.printf("[Audio] ES8311 codec ready (hw=%d%%, sw=%d%%, mic=42dB)\n",
+                  HW_VOLUME_FIXED, vol);
 }
 
 size_t audio_io::readMic(int16_t* buffer, size_t maxSamples) {
@@ -110,8 +120,14 @@ size_t audio_io::writeSpeaker(const int16_t* buffer, size_t numSamples) {
     if (numSamples > 320) numSamples = 320;  // safety clamp
 
     for (size_t i = 0; i < numSamples; i++) {
-        speakerStereoBuf[i * 2] = buffer[i];
-        speakerStereoBuf[i * 2 + 1] = buffer[i];
+        // Apply software volume so all audio sources (TTS, SFX, resilience)
+        // are scaled uniformly. Clamp to prevent int16 overflow.
+        int32_t scaled = (int32_t)((float)buffer[i] * s_volumeScale);
+        if (scaled >  32767) scaled =  32767;
+        if (scaled < -32768) scaled = -32768;
+        int16_t s = (int16_t)scaled;
+        speakerStereoBuf[i * 2]     = s;
+        speakerStereoBuf[i * 2 + 1] = s;
     }
 
     size_t bytesWritten = 0;
@@ -161,19 +177,9 @@ void audio_io::flushSpeaker() {
 
 void audio_io::setVolume(uint8_t percent) {
     if (percent > 100) percent = 100;
-
-    uint8_t mapped;
-    if (percent == 0) {
-        mapped = 0;
-    } else {
-        // Perceptual volume curve: sqrt maps linear slider to perceived loudness.
-        // Capped at 75% ES8311 max — hardware testing shows >82% distorts/blasts.
-        // No floor: low app percentages produce genuinely quiet ES8311 values so
-        // the full slider range (10%→24%, 50%→53%, 70%→63%, 100%→75%) feels natural.
-        mapped = (uint8_t)(sqrtf((float)percent / 100.0f) * 75.0f);
-    }
-
-    es8311_handle_t handle = es8311_create(I2C_NUM_0, ES8311_ADDRESS_0);
-    es8311_voice_volume_set(handle, mapped, NULL);
-    Serial.printf("[Audio] Volume %d%% → ES8311 %d%%\n", percent, mapped);
+    // Perceptual volume curve: sqrt maps linear slider to perceived loudness.
+    // Applied in PCM so all audio sources (TTS, SFX, resilience) scale together.
+    // ES8311 hardware level is fixed at HW_VOLUME_FIXED — only this scale changes.
+    s_volumeScale = (percent == 0) ? 0.0f : sqrtf((float)percent / 100.0f);
+    Serial.printf("[Audio] Volume %d%% → scale %.3f\n", percent, s_volumeScale);
 }

@@ -1351,20 +1351,44 @@ void display::showImageFromSD(const char* path, uint16_t durationMs) {
     // Fill screen black before drawing
     tft.fillScreen(TFT_BLACK);
 
-    bool ok = false;
-    if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0) {
-        // LovyanGFX decodes JPEG via built-in TJpgDec or LovyanGFX JPEG decoder.
-        // drawJpgFile(fs, path, x, y, maxWidth, maxHeight, offX, offY, scale)
-        // Passing 0,0 for x/y and LCD_WIDTH/LCD_HEIGHT as maxW/H centers+scales automatically.
-        ok = tft.drawJpgFile(SD_MMC, path, 0, 0, LCD_WIDTH, LCD_HEIGHT);
-    } else if (strcasecmp(ext, ".bmp") == 0) {
-        ok = tft.drawBmpFile(SD_MMC, path, 0, 0);
-    } else if (strcasecmp(ext, ".png") == 0) {
-        ok = tft.drawPngFile(SD_MMC, path, 0, 0, LCD_WIDTH, LCD_HEIGHT);
-    } else {
-        Serial.printf("[Display] showImageFromSD: unsupported format: %s\n", ext);
+    // LovyanGFX's drawXxxFile(fs, path) template has no DataWrapperT specialisation
+    // for fs::SDMMCFS — it only works with SPIFFS/SPI-SD.  Read the file into
+    // PSRAM first, then use the in-memory draw variants.
+    File imgFile = SD_MMC.open(path, FILE_READ);
+    if (!imgFile) {
+        Serial.printf("[Display] showImageFromSD: open failed: %s\n", path);
         return;
     }
+    size_t fileSize = imgFile.size();
+    if (fileSize == 0 || fileSize > 512 * 1024) {
+        Serial.printf("[Display] showImageFromSD: bad size %u for %s\n",
+                      (unsigned)fileSize, path);
+        imgFile.close();
+        return;
+    }
+    uint8_t* buf = (uint8_t*)ps_malloc(fileSize);
+    if (!buf) {
+        Serial.printf("[Display] showImageFromSD: PSRAM alloc failed (%u bytes)\n",
+                      (unsigned)fileSize);
+        imgFile.close();
+        return;
+    }
+    imgFile.read(buf, fileSize);
+    imgFile.close();
+
+    bool ok = false;
+    if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0) {
+        ok = tft.drawJpg(buf, fileSize, 0, 0, LCD_WIDTH, LCD_HEIGHT);
+    } else if (strcasecmp(ext, ".bmp") == 0) {
+        ok = tft.drawBmp(buf, fileSize, 0, 0);
+    } else if (strcasecmp(ext, ".png") == 0) {
+        ok = tft.drawPng(buf, fileSize, 0, 0, LCD_WIDTH, LCD_HEIGHT);
+    } else {
+        Serial.printf("[Display] showImageFromSD: unsupported format: %s\n", ext);
+        free(buf);
+        return;
+    }
+    free(buf);
 
     if (!ok) {
         Serial.printf("[Display] showImageFromSD: draw failed for: %s\n", path);
