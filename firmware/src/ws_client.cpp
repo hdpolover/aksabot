@@ -304,12 +304,12 @@ void ws_client::sendEvent(const char* event, const char* jsonData) {
     char buf[256];
     size_t len = serializeJson(doc, buf, sizeof(buf));
 
-    if (xSemaphoreTake(wsMutex, pdMS_TO_TICKS(100))) {
+    if (xSemaphoreTake(wsMutex, pdMS_TO_TICKS(500))) {
         client.send(buf, len);
         xSemaphoreGive(wsMutex);
         Serial.printf("[WS] Sent: %s\n", buf);
     } else {
-        Serial.printf("[WS] sendEvent timeout — mutex held >100ms (event: %s)\n", event);
+        Serial.printf("[WS] sendEvent timeout — mutex held >500ms (event: %s)\n", event);
     }
 }
 

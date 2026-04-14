@@ -58,6 +58,12 @@ abstract class DevicesRepository {
   /// Waits up to ~3s for the device to respond.
   /// Returns [DeviceLogs] on success, or a failure if the device is offline.
   Future<Either<Failure, DeviceLogs>> fetchLogs(String id);
+
+  /// Put the device into sleep mode (display off, low power). Fire-and-forget.
+  Future<Either<Failure, void>> sleepDevice(String id);
+
+  /// Restart the device (soft reboot). Fire-and-forget.
+  Future<Either<Failure, void>> restartDevice(String id);
 }
 
 class VoiceInputResult {

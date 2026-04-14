@@ -790,6 +790,21 @@ static void onWsJson(const char* event, const char* data) {
         vTaskDelay(pdMS_TO_TICKS(1500));
         esp_restart();
     }
+    // ── Sleep / restart from app ─────────────────────────
+    else if (strcmp(event, "device:sleep") == 0) {
+        Serial.println("[Main] device:sleep received — entering sleep mode");
+        power_manager::recordInteraction();
+        face::setExpression(face::Expression::SLEEPING, 500);
+        vTaskDelay(pdMS_TO_TICKS(800));
+        power_manager::setState(power_manager::PowerState::SLEEPING);
+    }
+    else if (strcmp(event, "device:restart") == 0) {
+        Serial.println("[Main] device:restart received — restarting");
+        power_manager::recordInteraction();
+        face::setExpression(face::Expression::SHRUG, 200);
+        vTaskDelay(pdMS_TO_TICKS(800));
+        esp_restart();
+    }
     // ── Image push from backend ───────────────────────────
     else if (strcmp(event, "display:image") == 0) {
         // Payload (on-the-fly upload): {"url":"http://...","durationMs":10000}
@@ -871,10 +886,32 @@ static void onTouchEvent(touch::Event event) {
             if (appState.botState == BotState::INTERCOM) {
                 face::setExpression(face::Expression::LISTENING, 100);
                 appState.listenTrigger = ListenTrigger::INTERCOM_REPLY;
+
+                // Flush incoming intercom audio immediately.
+                // poll() holds wsMutex for the full duration of client.poll().
+                // During active streaming it may be processing a burst of buffered
+                // frames (can exceed 100ms), which causes sendEvent() to time out.
+                // Stopping playback here prevents more callbacks from queuing up.
+                //
+                // NOTE: do NOT set playbackDone=true here. The audio task (Core 0)
+                // may be mid-loop inside the if(playbackActive) block. If it sees
+                // an empty queue AND playbackDone=true, it calls
+                //   appState.botState = BotState::IDLE  (line ~1237)
+                // which races over the LISTENING we set below — leaving the device
+                // in IDLE and falling through to normal PTT on the next hold.
+                playbackActive    = false;
+                xQueueReset(playbackQueue);
+                stopSpeakerPending = true;  // audio task stops speaker from Core 0
+
                 // Play chime BEFORE setting LISTENING — ogg_player::playFile() blocks on LISTENING.
                 ui_audio::play(ui_audio::Clip::HOLD_START);
                 appState.botState = BotState::LISTENING;
+
                 if (appState.wsConnected) {
+                    // poll() skips when botState==LISTENING, but it may already hold
+                    // wsMutex mid-batch. waitForPollIdle() blocks until that poll()
+                    // call completes and releases the mutex — then sendEvent() wins it.
+                    ws_client::waitForPollIdle(300);
                     ws_client::sendEvent("intercom:reply:start");
                 }
                 Serial.println("[Main] Intercom walkie-talkie: recording reply");

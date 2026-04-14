@@ -215,4 +215,24 @@ class DevicesRepositoryImpl implements DevicesRepository {
       return Left(ServerFailure(e.message, statusCode: e.statusCode));
     }
   }
+
+  @override
+  Future<Either<Failure, void>> sleepDevice(String id) async {
+    try {
+      await _datasource.sleepDevice(id);
+      return const Right(null);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
+
+  @override
+  Future<Either<Failure, void>> restartDevice(String id) async {
+    try {
+      await _datasource.restartDevice(id);
+      return const Right(null);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message, statusCode: e.statusCode));
+    }
+  }
 }

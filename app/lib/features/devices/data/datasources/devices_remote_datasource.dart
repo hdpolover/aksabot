@@ -77,6 +77,14 @@ class DevicesRemoteDatasource {
     await _client.post('/devices/$id/factory-reset', data: {});
   }
 
+  Future<void> sleepDevice(String id) async {
+    await _client.post('/devices/$id/sleep', data: {});
+  }
+
+  Future<void> restartDevice(String id) async {
+    await _client.post('/devices/$id/restart', data: {});
+  }
+
   Future<Map<String, dynamic>> getStats(String id) async {
     final data = await _client.get('/devices/$id/stats');
     return data as Map<String, dynamic>;

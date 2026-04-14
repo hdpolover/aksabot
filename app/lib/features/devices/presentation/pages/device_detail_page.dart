@@ -277,6 +277,8 @@ class DeviceDashboardBody extends StatelessWidget {
         ),
         const SizedBox(height: AppConstants.spacingMd),
         _ReconnectRow(deviceId: id, deviceIsOnline: device.isOnline),
+        const SizedBox(height: AppConstants.spacingMd),
+        _PowerControlRow(deviceId: id, deviceIsOnline: device.isOnline),
       ],
     ),
     );
@@ -1088,6 +1090,182 @@ class _SettingsRowTile extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Power control row — sleep + restart actions
+// ---------------------------------------------------------------------------
+
+class _PowerControlRow extends StatelessWidget {
+  final String deviceId;
+  final bool deviceIsOnline;
+  const _PowerControlRow({
+    required this.deviceId,
+    required this.deviceIsOnline,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      child: Material(
+        color: cs.surfaceContainerHigh,
+        child: Column(
+          children: [
+            _PowerAction(
+              icon: Icons.bedtime_rounded,
+              label: 'Sleep',
+              subtitle: 'Turn off display and enter low-power mode',
+              color: cs.tertiary,
+              onTap: () => _confirmAction(
+                context,
+                title: 'Sleep Device?',
+                body: 'The display will turn off and the device will enter low-power mode. Wake it by tapping the screen.',
+                confirmLabel: 'Sleep',
+                icon: Icons.bedtime_rounded,
+                action: () => _sendCommand(context, 'sleep'),
+              ),
+            ),
+            Divider(height: 1, indent: 56, color: cs.outlineVariant.withValues(alpha: 0.5)),
+            _PowerAction(
+              icon: Icons.restart_alt_rounded,
+              label: 'Restart',
+              subtitle: 'Soft reboot — reconnects in ~15 seconds',
+              color: cs.error,
+              onTap: () => _confirmAction(
+                context,
+                title: 'Restart Device?',
+                body: 'The device will reboot and reconnect in about 15 seconds.',
+                confirmLabel: 'Restart',
+                icon: Icons.restart_alt_rounded,
+                action: () => _sendCommand(context, 'restart'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _sendCommand(BuildContext context, String command) async {
+    final repo = sl<DevicesRepository>();
+    final result = command == 'sleep'
+        ? await repo.sleepDevice(deviceId)
+        : await repo.restartDevice(deviceId);
+    if (!context.mounted) return;
+    result.fold(
+      (failure) => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed: ${failure.message}')),
+      ),
+      (_) => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(command == 'sleep' ? 'Sleep command sent' : 'Restart command sent')),
+      ),
+    );
+  }
+
+  void _confirmAction(
+    BuildContext context, {
+    required String title,
+    required String body,
+    required String confirmLabel,
+    required IconData icon,
+    required VoidCallback action,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(icon, color: cs.primary),
+        title: Text(title),
+        content: Text(body),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              action();
+            },
+            child: Text(confirmLabel),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PowerAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String subtitle;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _PowerAction({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppConstants.spacingLg,
+          vertical: AppConstants.spacingMd,
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(AppConstants.radiusSm),
+              ),
+              child: Icon(icon, color: color, size: AppConstants.iconMd),
+            ),
+            const SizedBox(width: AppConstants.spacingMd),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: cs.outlineVariant,
+              size: AppConstants.iconLg,
+            ),
+          ],
         ),
       ),
     );

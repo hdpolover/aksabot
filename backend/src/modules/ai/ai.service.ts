@@ -126,6 +126,10 @@ export class AiService {
     return this.stt.transcribe(pcmAudio, options);
   }
 
+  generateOnce(systemPrompt: string, messages: { role: 'user' | 'assistant'; content: string }[]) {
+    return this.llm.generate(systemPrompt, messages);
+  }
+
   async refreshWeather(lat: number, lon: number): Promise<void> {
     return this.prompt.refreshWeather(lat, lon);
   }

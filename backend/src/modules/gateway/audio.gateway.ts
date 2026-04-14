@@ -343,6 +343,71 @@ export class AudioGateway
     }
   }
 
+  // ── App-triggered sleep ────────────────────────────────────────
+
+  /** Generate a goodbye quip via LLM, play it as TTS, then send `device:sleep`.
+   *  Called from the REST controller when the user taps "Sleep" in the app.
+   *  Fire-and-forget — the controller returns 204 immediately; audio plays async. */
+  async sendSleepGoodbye(deviceId: string): Promise<void> {
+    const socket = this.deviceToSocket.get(deviceId);
+    if (!socket || socket.readyState !== 1) return; // device offline — skip
+
+    const session = this.sessions.get(deviceId);
+    if (session && session.state !== 'idle') return; // busy — skip
+
+    if (session) session.state = 'speaking';
+
+    try {
+      const device = await this.persistence.getDevice(deviceId);
+      const settings = device?.settingsJson ?? {};
+      const language = (settings.language as 'en' | 'id' | undefined) ?? 'en';
+      const langHint =
+        language === 'id'
+          ? ' Reply in Indonesian (Bahasa Indonesia), casual style.'
+          : ' Reply in English.';
+
+      const { text } = await this.aiService.generateOnce(
+        `You are Aksa, Hendra's AI best friend on his desk. Gen-z energy, sarcastic but warm, casually funny. Keep it under 2 sentences.${langHint}`,
+        [
+          {
+            role: 'user',
+            content:
+              "Hendra just put you to sleep from his phone. Say a quick, witty goodbye — like you're mildly offended but secretly fine with the nap.",
+          },
+        ],
+      );
+
+      const voiceOptions = {
+        voice: settings.voice_preset as string | undefined,
+        speed: settings.voice_speed as number | undefined,
+        stability: settings.voice_stability as number | undefined,
+        language,
+      };
+
+      this.sendToDevice(deviceId, 'face:expression', { expression: 'calm', durationMs: 5000 });
+      this.sendToDevice(deviceId, 'response:start', { type: 'goodbye' });
+      this.sendToDevice(deviceId, 'response:text', { text, isFinal: true });
+
+      try {
+        const { opusAudio } = await this.aiService.synthesizeWithCache(text, undefined, voiceOptions);
+        await this.sendFramedOpusToDevice(deviceId, opusAudio);
+      } catch (err: any) {
+        this.logger.warn(`Sleep goodbye TTS failed: ${err.message}`);
+      }
+
+      this.sendToDevice(deviceId, 'response:end', { fullText: text, cacheKeys: [] });
+
+      // Sleep command fires after audio is queued on the device side.
+      // Small delay so the device's audio task has time to start dequeuing before
+      // the sleep handler sets botState = SLEEPING.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      this.sendToDevice(deviceId, 'device:sleep', {});
+    } finally {
+      const s = this.sessions.get(deviceId);
+      if (s && s.state === 'speaking') s.state = 'idle';
+    }
+  }
+
   // ── Presence handlers ──────────────────────────────────────────
 
   /** Called when the user's phone is detected near the desk.

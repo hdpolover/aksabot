@@ -316,6 +316,32 @@ export class DevicesController {
     this.gateway.sendToDevice(id, 'device:provision', {});
   }
 
+  /** Put an online device into sleep mode (display off, low power).
+   *  If the device is online the gateway generates a goodbye quip via LLM,
+   *  plays it as TTS, then sends `device:sleep`. Fire-and-forget. */
+  @Post(':id/sleep')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async sleepDevice(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    await this.devicesService.findById(id, user.userId);
+    // Run async — controller returns 204 immediately so the app is not blocked
+    void this.gateway.sendSleepGoodbye(id);
+  }
+
+  /** Restart an online device (soft reboot via esp_restart).
+   *  Fire-and-forget — device may be offline. */
+  @Post(':id/restart')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async restartDevice(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    await this.devicesService.findById(id, user.userId);
+    this.gateway.sendToDevice(id, 'device:restart', {});
+  }
+
   /** Factory reset: send WS event so the device erases NVS and reboots,
    *  then delete the device record from the backend.
    *  Fire-and-forget for the WS send (device may be offline). */
