@@ -22,6 +22,10 @@ static display::GlanceData glanceData = {};
 static display::GlanceData latestContext = {};
 static bool contextDataAvailable = false;
 
+// ── Live clock state (seeded by context:sync, ticks locally) ──
+static uint32_t syncedMinutes = 0;  // total minutes since midnight at last sync
+static uint32_t syncedAtMs    = 0;  // millis() captured at sync time
+
 static bool sleeping = false;
 static uint8_t brightness = 70;       // Current/target brightness for the HW
 static uint8_t userBrightness = 70;   // User-set brightness (survives sleep)
@@ -1425,12 +1429,23 @@ void renderGlance(const display::GlanceData& data) {
     if (useSprite) s.fillSprite(COL_BG);
     else           tft.fillScreen(COL_BG);
 
-    // ── Large time ──
+    // ── Large time (live-ticking — seeded by context:sync, advances locally) ──
+    char liveBuf[8];
+    if (syncedAtMs > 0) {
+        uint32_t elapsedMin = (millis() - syncedAtMs) / 60000;
+        uint32_t totalMin   = (syncedMinutes + elapsedMin) % (24 * 60);
+        uint8_t  lh         = (uint8_t)(totalMin / 60);
+        uint8_t  lm         = (uint8_t)(totalMin % 60);
+        snprintf(liveBuf, sizeof(liveBuf), "%02d:%02d", lh, lm);
+    } else {
+        strncpy(liveBuf, data.time, sizeof(liveBuf) - 1);
+        liveBuf[sizeof(liveBuf) - 1] = '\0';
+    }
     s.setTextDatum(lgfx::middle_center);
     s.setFont(&fonts::Font0);
     s.setTextSize(6);
     s.setTextColor(COL_FACE);
-    s.drawString(data.time, CX, 80);
+    s.drawString(liveBuf, CX, 80);
 
     // ── Date ──
     s.setTextSize(2);
@@ -1907,6 +1922,13 @@ void display::wake() {
 void display::updateContextData(const GlanceData& data) {
     latestContext = data;
     contextDataAvailable = true;
+
+    // Seed the live clock — parse "HH:MM" and record millis() right now
+    int h = 0, m = 0;
+    if (sscanf(data.time, "%d:%d", &h, &m) == 2) {
+        syncedMinutes = (uint32_t)(h * 60 + m);
+        syncedAtMs    = millis();
+    }
 }
 
 void display::showGlance() {

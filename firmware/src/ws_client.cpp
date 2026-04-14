@@ -137,6 +137,29 @@ static bool doConnect() {
         return true;
     }
 
+    // Defensively close before attempting a new connection.
+    //
+    // After an abrupt server-side close (heartbeat timeout while LISTENING and not
+    // polling), the static client object retains stale socket state. close() resets
+    // ArduinoWebsockets' internal stream pointer; the vTaskDelay lets lwIP fully
+    // release the old fd before we open a new socket.
+    //
+    // setInsecure() is re-asserted defensively (it persists from init() but this
+    // is explicit documentation of intent).
+    //
+    // Do NOT call addHeader() here. _customHeaders is never cleared by close() or
+    // connect(), so the Authorization header added in init() persists across all
+    // reconnects automatically. Calling addHeader() here duplicates the header on
+    // every reconnect — Node.js joins duplicate same-name headers with a comma, so
+    // the backend receives "DeviceToken abc, DeviceToken abc", fails token validation,
+    // and returns a non-101 HTTP response → "Connect failed" every attempt.
+    client.close();
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    if (strncmp(wsUrlBuf, "wss://", 6) == 0) {
+        client.setInsecure();
+    }
+
     // Pause BLE presence scanning during SSL handshake.
     // The TLS handshake needs ~40KB of heap. BLE scanning runs concurrently
     // and can consume enough heap to push the allocator below that threshold,
@@ -368,9 +391,15 @@ void ws_client::reconnectWithToken() {
         client.setInsecure();
     }
 
-    // Update auth header with new token
-    String authHeader = String("DeviceToken ") + tokenBuf;
-    client.addHeader("Authorization", authHeader.c_str());
+    // Replace the Authorization header with the new token.
+    // clearHeaders() is required before addHeader() — _customHeaders accumulates
+    // entries and is never auto-cleared, so without it we'd send both the old and
+    // new token, which causes Node.js to join them with a comma and fail auth.
+    client.clearHeaders();
+    {
+        String authHeader = String("DeviceToken ") + tokenBuf;
+        client.addHeader("Authorization", authHeader.c_str());
+    }
 
     // Reset backoff so reconnect happens immediately
     everAttempted = false;

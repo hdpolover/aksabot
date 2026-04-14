@@ -244,6 +244,10 @@ namespace websockets {
         _customHeaders.push_back({internals::fromInterfaceString(key), internals::fromInterfaceString(value)});
     }
 
+    void WebsocketsClient::clearHeaders() {
+        _customHeaders.clear();
+    }
+
     bool WebsocketsClient::connect(WSInterfaceString _url) {
         WSString url = internals::fromInterfaceString(_url);
         WSString protocol = "";

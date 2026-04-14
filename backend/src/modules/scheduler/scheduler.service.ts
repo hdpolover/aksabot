@@ -198,9 +198,8 @@ export class SchedulerService implements OnModuleInit {
     const device = this.devicesRepo.findOne({ where: { id: deviceId } }).then((dev) => {
       const settings = dev?.settingsJson ?? {};
       const tz = settings.timezone as string | undefined;
-      const { time, date } = this.ai.formatTimeForDevice(tz);
 
-      const payload: Record<string, any> = { time, date };
+      const payload: Record<string, any> = {};
 
       if (settings.integrations_weather) {
         // Refresh weather in background (cached, won't re-fetch if fresh)
@@ -216,6 +215,11 @@ export class SchedulerService implements OnModuleInit {
           payload.weatherCode = weather.weatherCode;
         }
       }
+
+      // Capture time as late as possible — right before sending — so it's as fresh as it can be
+      const { time, date } = this.ai.formatTimeForDevice(tz);
+      payload.time = time;
+      payload.date = date;
 
       this.sendToDevice(deviceId, 'context:sync', payload);
       this.logger.debug(`Context sync sent to ${deviceId}: ${time}, ${payload.weather ?? 'no weather'}`);

@@ -5,7 +5,9 @@ script re-applies patches at every build.
 
 Patches:
   - esp32_tcp.hpp: adds setInsecure() to SecuredEsp32TcpClient (ESP32 parity with ESP8266)
-  - websockets_client.cpp: adds client->setInsecure() fallback when no CA cert for ESP32
+  - websockets_client.cpp: adds client->setInsecure() fallback when no CA cert for ESP32;
+                           adds clearHeaders() to erase accumulated custom headers
+  - client.hpp: adds clearHeaders() declaration to WebsocketsClient public API
 """
 import shutil
 import os
@@ -28,6 +30,10 @@ patches = [
     (
         os.path.join(patches_dir, "websockets_client.cpp"),
         os.path.join(lib_dir, "websockets_client.cpp"),
+    ),
+    (
+        os.path.join(patches_dir, "client.hpp"),
+        os.path.join(lib_dir, "tiny_websockets", "client.hpp"),
     ),
 ]
 
