@@ -201,6 +201,16 @@ class DeviceDashboardBody extends StatelessWidget {
         ),
         const SizedBox(height: AppConstants.spacingMd),
         _WideCard(
+          icon: Icons.access_time_rounded,
+          label: 'Clock Mode',
+          description: 'Switch display to live clock',
+          cardBg: cs.surfaceContainerHighest,
+          iconBg: cs.onSurfaceVariant,
+          iconFg: cs.surface,
+          onTap: () => _setClockMode(context, id),
+        ),
+        const SizedBox(height: AppConstants.spacingMd),
+        _WideCard(
           icon: Icons.image_rounded,
           label: 'Push Image',
           description: 'Send a photo to the device display',
@@ -279,6 +289,20 @@ class DeviceDashboardBody extends StatelessWidget {
     ),
     );
   }
+}
+
+Future<void> _setClockMode(BuildContext context, String deviceId) async {
+  final repo = sl<DevicesRepository>();
+  final result = await repo.updateSettings(deviceId, {'idle_display_mode': 'clock'});
+  if (!context.mounted) return;
+  result.fold(
+    (failure) => ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Failed: ${failure.message}')),
+    ),
+    (_) => ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Display switched to clock mode')),
+    ),
+  );
 }
 
 void _showPushImageSheet(BuildContext context, String deviceId) {
@@ -514,11 +538,16 @@ class _StatusCard extends StatefulWidget {
 
 class _StatusCardState extends State<_StatusCard> {
   DeviceStats? _stats;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _fetchStats();
+    _refreshTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) => _fetchStats(),
+    );
   }
 
   @override
@@ -527,6 +556,12 @@ class _StatusCardState extends State<_StatusCard> {
     if (oldWidget.device.id != widget.device.id) {
       _fetchStats();
     }
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _fetchStats() async {

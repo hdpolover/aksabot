@@ -1859,7 +1859,9 @@ void loop() {
             xQueueReset(playbackQueue);
             face::feedAudioAmplitude(0);
             display::setTranscriptText("");
-            // Don't set IDLE here — the connectivity check below will set OFFLINE
+            appState.botState = BotState::IDLE;
+            // Connectivity block below will apply CONFUSED (WS dropped, WiFi up)
+            // or OFFLINE (WiFi gone) — but botState must be IDLE for its guard to pass.
         }
     }
     prevWsForPlayback = appState.wsConnected;
