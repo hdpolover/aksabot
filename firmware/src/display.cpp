@@ -383,11 +383,11 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
                 }
             } else {
                 if (nova) {
-                    // Flat wide rounded rect with subtle breathe variation
                     float breathOff = sinf(breathPhase * 2 * 3.14159f) * 1.5f;
-                    int mw = 52, mh = 7 + (int)breathOff;
-                    if (mh < 5) mh = 5;
-                    s.fillRoundRect(CX - mw / 2, my - mh / 2, mw, mh, mh / 2, pal.mouth);
+                    thickBezier(s, CX - 26, my + (int)breathOff,
+                                   CX,      my + 8 + (int)breathOff,
+                                   CX + 26, my + (int)breathOff,
+                                3, pal.mouth);
                 } else {
                     float breathOff = sinf(breathPhase * 2 * 3.14159f) * 1.5f;
                     thickBezier(s, CX - 30, my, CX, my + 10 + breathOff, CX + 30, my, 3, pal.mouth);
@@ -460,11 +460,10 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
                 }
             } else {
                 if (nova) {
-                    // Wide short rounded rect — happy smile bar
-                    int mw = 54, mh = 8;
-                    s.fillRoundRect(CX - mw / 2, my + 4, mw, mh, mh / 2, pal.mouth);
-                    s.fillRoundRect(CX - mw / 2 + 6, my + 5, mw - 12, 3, 1,
-                                    blendRGB565(TFT_WHITE, pal.mouth, 160));
+                    // Wide arc smile — control below endpoints = bows downward = smile
+                    thickBezier(s, CX - 28, my,     CX, my + 18, CX + 28, my,     4, pal.mouth);
+                    thickBezier(s, CX - 18, my + 2, CX, my + 11, CX + 18, my + 2, 2,
+                                blendRGB565(TFT_WHITE, pal.mouth, 160), 16);
                 } else {
                     thickBezier(s, CX - 26, my, CX, my + 16, CX + 26, my, 3, pal.mouth);
                     thickBezier(s, CX - 16, my + 2, CX, my + 10, CX + 16, my + 2, 2,
@@ -496,10 +495,12 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
                 }
             } else {
                 if (nova) {
-                    // Narrow short rect sitting lower — sad flat line
-                    float trem = sinf(breathPhase * 6.28318f * 3) * 1.0f;
-                    int mw = 30, mh = 6;
-                    s.fillRoundRect(CX - mw / 2, my + 2 + (int)trem, mw, mh, mh / 2, pal.mouth);
+                    // Arc frown — control above endpoints = bows upward = frown
+                    float trem = sinf(breathPhase * 6.28318f * 3) * 1.5f;
+                    thickBezier(s, CX - 22, my + 6 + (int)trem,
+                                   CX,      my - 4 + (int)trem,
+                                   CX + 22, my + 6 + (int)trem,
+                                3, pal.mouth);
                 } else {
                     float trem = sinf(breathPhase * 6.28318f * 3) * 1.0f;
                     thickBezier(s, CX - 18, my + 4, CX, my - 6 + trem, CX + 18, my + 4, 2, pal.mouth);
@@ -530,11 +531,10 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
                 }
             } else {
                 if (nova) {
-                    // Wide short rect — confident smile bar
-                    int mw = 48, mh = 8;
-                    s.fillRoundRect(CX - mw / 2, my + 4, mw, mh, mh / 2, pal.mouth);
-                    s.fillRoundRect(CX - mw / 2 + 5, my + 5, mw - 10, 3, 1,
-                                    blendRGB565(TFT_WHITE, pal.mouth, 120));
+                    // Medium arc smile
+                    thickBezier(s, CX - 24, my,     CX, my + 14, CX + 24, my,     4, pal.mouth);
+                    thickBezier(s, CX - 15, my + 2, CX, my +  9, CX + 15, my + 2, 2,
+                                blendRGB565(TFT_WHITE, pal.mouth, 120), 14);
                 } else {
                     thickBezier(s, CX - 24, my, CX, my + 14, CX + 24, my, 3, pal.mouth);
                     thickBezier(s, CX - 14, my + 2, CX, my + 9, CX + 14, my + 2, 2,
@@ -743,9 +743,11 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
                 }
             } else {
                 if (nova) {
-                    // Narrow short rect — tight angry line
-                    int mw = 32, mh = 6;
-                    s.fillRoundRect(CX - mw / 2, my + 1, mw, mh, mh / 2, pal.mouth);
+                    // Tight clenched frown — control above endpoints = bows upward = frown
+                    thickBezier(s, CX - 20, my + 4, CX, my - 4, CX + 20, my + 4, 3, pal.mouth);
+                    // Teeth-clenched highlight line
+                    thickBezier(s, CX - 12, my + 4, CX, my - 1, CX + 12, my + 4, 1,
+                                blendRGB565(TFT_WHITE, pal.mouth, 100), 12);
                 } else {
                     // Tight clenched frown
                     thickBezier(s, CX - 20, my + 2, CX, my - 6, CX + 20, my + 2, 3, pal.mouth);
