@@ -12,6 +12,7 @@ import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../../../core/widgets/status_dot.dart';
+import '../../data/models/device_stats_model.dart';
 import '../../domain/entities/device_entity.dart';
 import '../../domain/repositories/devices_repository.dart';
 import '../bloc/devices_bloc.dart';
@@ -503,12 +504,44 @@ class _PushImageSheetState extends State<_PushImageSheet> {
 // Status card
 // ---------------------------------------------------------------------------
 
-class _StatusCard extends StatelessWidget {
+class _StatusCard extends StatefulWidget {
   final Device device;
   const _StatusCard({required this.device});
 
   @override
+  State<_StatusCard> createState() => _StatusCardState();
+}
+
+class _StatusCardState extends State<_StatusCard> {
+  DeviceStats? _stats;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchStats();
+  }
+
+  @override
+  void didUpdateWidget(_StatusCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.device.id != widget.device.id) {
+      _fetchStats();
+    }
+  }
+
+  Future<void> _fetchStats() async {
+    final repo = sl<DevicesRepository>();
+    final result = await repo.getStats(widget.device.id);
+    if (!mounted) return;
+    result.fold(
+      (_) {},
+      (json) => setState(() => _stats = DeviceStats.fromJson(json)),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final device = widget.device;
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final ac = theme.extension<AppColors>()!;
@@ -578,7 +611,10 @@ class _StatusCard extends StatelessWidget {
                   ),
                 ],
                 const Spacer(),
-                if (device.lastSeenAt != null)
+                _buildBatteryIndicator(_stats?.batteryPercent, cs),
+                if (device.lastSeenAt != null) ...[
+                  if (_stats?.batteryPercent != null)
+                    const SizedBox(width: AppConstants.spacingSm),
                   Text(
                     online
                         ? _formatUptime(
@@ -587,6 +623,7 @@ class _StatusCard extends StatelessWidget {
                     style: theme.textTheme.labelSmall
                         ?.copyWith(color: cs.outline),
                   ),
+                ],
               ],
             ),
 
@@ -613,6 +650,29 @@ class _StatusCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Widget _buildBatteryIndicator(int? pct, ColorScheme cs) {
+    if (pct == null) return const SizedBox.shrink();
+    if (pct == 255) {
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.usb, size: 14, color: cs.onSurfaceVariant),
+        const SizedBox(width: 4),
+        Text('Charging',
+            style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+      ]);
+    }
+    final icon = pct > 60
+        ? Icons.battery_full
+        : pct > 30
+            ? Icons.battery_3_bar
+            : Icons.battery_alert;
+    final color = pct <= 20 ? Colors.red : cs.onSurfaceVariant;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: 14, color: color),
+      const SizedBox(width: 4),
+      Text('$pct%', style: TextStyle(fontSize: 12, color: color)),
+    ]);
   }
 
   static String _formatUptime(Duration d) {
