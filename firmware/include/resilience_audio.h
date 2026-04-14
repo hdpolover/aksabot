@@ -21,6 +21,7 @@ enum class Clip {
     THINKING,       // Ambient thinking sound
     SLEEP,          // Going to sleep sound
     WAKE,           // Waking up sound
+    LOW_BATTERY,    // "Hey, I'm running low — plug me in"
 };
 
 /// Load all resilience audio from SD into PSRAM.

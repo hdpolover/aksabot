@@ -1928,6 +1928,20 @@ void loop() {
     }
     status_led::tick(now);
 
+    // Low-battery voice alert — fires once when battery drops below threshold
+    {
+        static bool lowBatAlertFired = false;
+        if (battery::isLow() && !lowBatAlertFired &&
+            appState.botState == BotState::IDLE) {
+            lowBatAlertFired = true;
+            resilience_audio::playClip(resilience_audio::Clip::LOW_BATTERY);
+            Serial.println("[Battery] Low battery alert fired");
+        }
+        if (battery::isUsbPowered()) {
+            lowBatAlertFired = false;  // reset when plugged in
+        }
+    }
+
     // Explicit WiFi reconnect with backoff — fallback for when setAutoReconnect
     // silently stops retrying (router restart, driver exhaustion, etc.)
     wifi_manager::tick();
