@@ -1562,6 +1562,34 @@ export class AudioGateway
     return true;
   }
 
+  /** Accept a PCM audio buffer from the mobile app, transcribe it via STT,
+   *  and run the full AI pipeline (STT → LLM → TTS) targeting the device speaker.
+   *  Returns the transcript immediately; the pipeline fires asynchronously.
+   *  Returns { transcript: '', dispatched: false } if speech was not recognised
+   *  or the device has no active session. */
+  async handleAppVoiceInput(
+    deviceId: string,
+    pcm: Buffer,
+  ): Promise<{ transcript: string; dispatched: boolean }> {
+    const sttResult = await this.aiService.transcribeOnce(pcm, { sampleRate: 16000 });
+
+    if (!sttResult.transcript.trim()) {
+      return { transcript: '', dispatched: false };
+    }
+
+    const session = this.sessions.get(deviceId);
+    if (!session) {
+      // Device is offline — pipeline has nowhere to deliver audio
+      return { transcript: sttResult.transcript, dispatched: false };
+    }
+
+    // Fire the same pipeline the device tap would trigger, non-blocking.
+    // onSttFinal handles conversation persistence, LLM, TTS, and WS delivery.
+    void this.onSttFinal(deviceId, sttResult);
+
+    return { transcript: sttResult.transcript, dispatched: true };
+  }
+
   /** Send a single raw Opus frame to a device without framing headers.
    *  Used by IntercomGateway for real-time streaming — caller manages
    *  response:start / response:end lifecycle events. */

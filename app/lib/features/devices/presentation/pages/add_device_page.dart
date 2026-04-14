@@ -61,7 +61,7 @@ class AddDevicePage extends StatelessWidget {
                 title: 'Bluetooth',
                 subtitle: 'Scan nearby and send Wi-Fi credentials over BLE',
                 isPrimary: true,
-                onTap: () => Navigator.of(context).push(
+                onTap: () => Navigator.of(context, rootNavigator: true).push(
                   MaterialPageRoute(builder: (_) => const BleProvisioningPage()),
                 ),
               ),
@@ -73,7 +73,7 @@ class AddDevicePage extends StatelessWidget {
                 title: 'Wi-Fi Hotspot',
                 subtitle: 'Connect to Aksabot hotspot manually',
                 isPrimary: false,
-                onTap: () => Navigator.of(context).push(
+                onTap: () => Navigator.of(context, rootNavigator: true).push(
                   MaterialPageRoute(builder: (_) => const _WifiSetupPage()),
                 ),
               ),

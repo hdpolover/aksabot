@@ -200,15 +200,7 @@ class DeviceDashboardBody extends StatelessWidget {
           onTap: () => context.push('/devices/$id/reminders'),
         ),
         const SizedBox(height: AppConstants.spacingMd),
-        _WideCard(
-          icon: Icons.access_time_rounded,
-          label: 'Clock Mode',
-          description: 'Switch display to live clock',
-          cardBg: cs.surfaceContainerHighest,
-          iconBg: cs.onSurfaceVariant,
-          iconFg: cs.surface,
-          onTap: () => _setClockMode(context, id),
-        ),
+        _DisplayModeCard(device: device),
         const SizedBox(height: AppConstants.spacingMd),
         _WideCard(
           icon: Icons.image_rounded,
@@ -291,17 +283,21 @@ class DeviceDashboardBody extends StatelessWidget {
   }
 }
 
-Future<void> _setClockMode(BuildContext context, String deviceId) async {
+Future<void> _setDisplayMode(BuildContext context, String deviceId, String mode) async {
   final repo = sl<DevicesRepository>();
-  final result = await repo.updateSettings(deviceId, {'idle_display_mode': 'clock'});
+  final result = await repo.updateSettings(deviceId, {'idle_display_mode': mode});
   if (!context.mounted) return;
   result.fold(
     (failure) => ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Failed: ${failure.message}')),
     ),
-    (_) => ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Display switched to clock mode')),
-    ),
+    (_) {
+      final label = mode == 'clock' ? 'clock' : 'face';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Display switched to $label mode')),
+      );
+      context.read<DevicesBloc>().add(LoadDevice(deviceId));
+    },
   );
 }
 
@@ -965,6 +961,37 @@ class _WideCard extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+// Display mode toggle card — shows "Clock Mode" or "Face Mode" depending on
+// the device's current idle_display_mode setting, and toggles on tap.
+// ---------------------------------------------------------------------------
+
+class _DisplayModeCard extends StatelessWidget {
+  final Device device;
+  const _DisplayModeCard({required this.device});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final currentMode = device.settingsJson['idle_display_mode'] as String? ?? 'face';
+    final isClockMode = currentMode == 'clock';
+
+    return _WideCard(
+      icon: isClockMode ? Icons.face_rounded : Icons.access_time_rounded,
+      label: isClockMode ? 'Face Mode' : 'Clock Mode',
+      description: isClockMode ? 'Switch display back to animated face' : 'Switch display to live clock',
+      cardBg: cs.surfaceContainerHighest,
+      iconBg: cs.onSurfaceVariant,
+      iconFg: cs.surface,
+      onTap: () => _setDisplayMode(
+        context,
+        device.id,
+        isClockMode ? 'face' : 'clock',
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Settings group — grouped list rows in a card
 // ---------------------------------------------------------------------------
 
@@ -1572,7 +1599,7 @@ class _ReconnectSheetState extends State<_ReconnectSheet> {
 
     // Push BLE provisioning in changeWifiMode — skips re-registration,
     // only re-writes Wi-Fi credentials to this existing device.
-    await Navigator.of(context).push<void>(
+    await Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute(
         builder: (_) => const BleProvisioningPage(changeWifiMode: true),
       ),

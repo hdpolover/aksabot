@@ -56,6 +56,9 @@ static uint32_t autoReturnAtMs = 0;
 static uint32_t lastRenderMs = 0;
 static const uint16_t RENDER_INTERVAL_MS = 33;  // ~30fps
 
+// Clock dirty flag — set when entering CLOCK mode so the first frame always draws
+static bool g_clockDirty = true;
+
 // Fade transition state
 static bool fadeActive = false;
 static uint8_t fadeFrom = 0;
@@ -1190,32 +1193,52 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
 }
 
 void renderClock(const display::StatusBar& status) {
-    tft.fillScreen(COL_BG);
+    // Only redraw when the displayed minute changes (or on first entry).
+    static uint32_t lastClockMin = 0xFFFFFFFFu;
 
-    tft.setTextDatum(lgfx::middle_center);
+    uint32_t elapsedMin = (syncedAtMs > 0) ? (millis() - syncedAtMs) / 60000 : 0;
+    uint32_t totalMin   = (syncedMinutes + elapsedMin) % (24 * 60);
+    if (totalMin == lastClockMin && !g_clockDirty) return;
+    lastClockMin = totalMin;
+    g_clockDirty = false;
 
-    // Live time — seeded by context:sync, ticks locally via millis()
+    LGFX_Sprite& s = sprite.getBuffer() ? sprite : (LGFX_Sprite&)tft;
+    bool useSprite  = (sprite.getBuffer() != nullptr);
+
+    // Background matches the face bg override
+    uint16_t bgCol = rgb(
+        (g_faceBgColor >> 16) & 0xFF,
+        (g_faceBgColor >>  8) & 0xFF,
+         g_faceBgColor        & 0xFF);
+
+    if (useSprite) s.fillSprite(bgCol);
+    else           tft.fillScreen(bgCol);
+
+    s.setTextDatum(lgfx::middle_center);
+
+    // Time — ticks locally from seeded sync point
     char timeBuf[8];
     if (syncedAtMs > 0) {
-        uint32_t elapsedMin = (millis() - syncedAtMs) / 60000;
-        uint32_t totalMin   = (syncedMinutes + elapsedMin) % (24 * 60);
-        uint8_t  lh         = (uint8_t)(totalMin / 60);
-        uint8_t  lm         = (uint8_t)(totalMin % 60);
+        uint8_t lh = (uint8_t)(totalMin / 60);
+        uint8_t lm = (uint8_t)(totalMin % 60);
         snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", lh, lm);
     } else {
         strncpy(timeBuf, "--:--", sizeof(timeBuf));
     }
 
-    tft.setFont(&fonts::Font0);
-    tft.setTextSize(6);
-    tft.setTextColor(COL_FACE);
-    tft.drawString(timeBuf, CX, CY - 20);
+    // Time text — matches eye body color
+    s.setFont(&fonts::Font0);
+    s.setTextSize(6);
+    s.setTextColor(g_faceEyeBody565);
+    s.drawString(timeBuf, CX, CY - 20);
 
-    // Date from last context:sync
-    tft.setTextSize(2);
-    tft.setTextColor(COL_DIM);
+    // Date — dimmed version of the eye color
+    s.setTextSize(2);
+    s.setTextColor(blendRGB565(g_faceEyeBody565, bgCol, 100));
     const char* dateStr = (contextDataAvailable && latestContext.date[0]) ? latestContext.date : "---";
-    tft.drawString(dateStr, CX, CY + 30);
+    s.drawString(dateStr, CX, CY + 30);
+
+    if (useSprite) sprite.pushSprite(0, 0);
 }
 
 void renderPomodoro(const display::PomodoroData& data) {
@@ -1791,6 +1814,7 @@ void display::setMode(Mode mode) {
     previousMode = currentMode;
     currentMode = mode;
     autoReturnActive = false;
+    if (mode == Mode::CLOCK) g_clockDirty = true;
     if (sleeping) wake();
 }
 
@@ -1803,6 +1827,7 @@ void display::setModeTemporary(Mode mode, uint16_t durationMs) {
     currentMode = mode;
     autoReturnActive = true;
     autoReturnAtMs = millis() + durationMs;
+    if (mode == Mode::CLOCK) g_clockDirty = true;
     if (sleeping) wake();
 }
 

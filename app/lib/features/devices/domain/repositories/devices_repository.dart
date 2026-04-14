@@ -50,10 +50,26 @@ abstract class DevicesRepository {
     int durationMs = 10000,
   });
 
+  /// Send a voice recording to the AI pipeline (STT → LLM → TTS → device speaker).
+  /// Returns the recognised transcript and whether the pipeline was dispatched.
+  Future<Either<Failure, VoiceInputResult>> sendVoiceInput(String id, Uint8List audioBytes);
+
   /// Request fresh logs from the device (sends log:fetch over WebSocket).
   /// Waits up to ~3s for the device to respond.
   /// Returns [DeviceLogs] on success, or a failure if the device is offline.
   Future<Either<Failure, DeviceLogs>> fetchLogs(String id);
+}
+
+class VoiceInputResult {
+  final String transcript;
+  final bool dispatched;
+
+  const VoiceInputResult({required this.transcript, required this.dispatched});
+
+  factory VoiceInputResult.fromJson(Map<String, dynamic> json) => VoiceInputResult(
+        transcript: json['transcript'] as String? ?? '',
+        dispatched: json['dispatched'] as bool? ?? false,
+      );
 }
 
 class DeviceLogs {

@@ -208,6 +208,44 @@ export class DevicesController {
     return { playing };
   }
 
+  /** Accept a voice recording from the mobile app and run the full AI pipeline
+   *  (STT → LLM → TTS) targeting the device speaker — same path as a device
+   *  tap-to-talk, but initiated from the phone instead of the physical button.
+   *  Returns the recognised transcript immediately; the AI response plays on
+   *  the device asynchronously.
+   *  Returns { dispatched: false } when speech was not recognised or the device
+   *  is offline. */
+  @Post(':id/voice-input')
+  @RateLimit({ limit: 10, windowSeconds: 60, keyType: 'user' })
+  @UseInterceptors(
+    FileInterceptor('audio', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async voiceInput(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    await this.devicesService.findById(id, user.userId);
+
+    if (!file) {
+      throw new NotFoundException('No audio file provided');
+    }
+
+    // Strip WAV header if present
+    let pcm = file.buffer;
+    if (pcm.length > 44 && pcm.subarray(0, 4).toString('ascii') === 'RIFF') {
+      const dataIdx = pcm.indexOf(Buffer.from('data'));
+      pcm = dataIdx !== -1 && dataIdx + 8 <= pcm.length
+        ? pcm.subarray(dataIdx + 8)
+        : pcm.subarray(44);
+    }
+
+    return this.gateway.handleAppVoiceInput(id, pcm);
+  }
+
   /** Report a presence event from the mobile app (reverse BLE scan flow).
    *  The app scans for the ESP32's BLE advertisement and calls this endpoint
    *  when the user arrives or leaves — triggering the same greeting/departure

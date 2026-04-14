@@ -250,7 +250,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
               title: const Text('Change Wi-Fi'),
               subtitle: const Text('Connect Aksabot to a different network'),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(
+              onTap: () => Navigator.of(context, rootNavigator: true).push(
                 MaterialPageRoute(
                   builder: (_) => const BleProvisioningPage(changeWifiMode: true),
                 ),

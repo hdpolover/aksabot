@@ -223,6 +223,33 @@ class DevicesRemoteDatasource {
     }
   }
 
+  /// Send a voice recording to the AI pipeline — STT → LLM → TTS → device speaker.
+  /// Returns the recognised transcript and whether the pipeline was dispatched.
+  Future<Map<String, dynamic>> sendVoiceInput(String id, Uint8List audioBytes) async {
+    try {
+      final formData = FormData.fromMap({
+        'audio': MultipartFile.fromBytes(audioBytes, filename: 'voice.wav'),
+      });
+      final response = await _client.dio.post(
+        '/devices/$id/voice-input',
+        data: formData,
+      );
+      final data = response.data['data'] ?? response.data;
+      return {
+        'transcript': (data is Map ? data['transcript'] as String? : null) ?? '',
+        'dispatched': (data is Map ? data['dispatched'] as bool? : null) ?? false,
+      };
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      String message = 'Voice input failed';
+      if (data is Map) {
+        final msg = data['message'];
+        if (msg is String) message = msg;
+      }
+      throw ServerException(message, statusCode: e.response?.statusCode);
+    }
+  }
+
   Future<Map<String, dynamic>> fetchLogs(String id) async {
     final data = await _client.post('/devices/$id/logs/fetch', data: {});
     return data as Map<String, dynamic>;

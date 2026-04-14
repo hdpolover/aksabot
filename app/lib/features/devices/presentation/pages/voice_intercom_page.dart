@@ -47,6 +47,13 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
   int _intercomVolume = 80;
   Timer? _volumeDebounce;
 
+  // ── Talk to Aksa state ───────────────────────────────────────
+  _AiInputState _aiState = _AiInputState.idle;
+  String _aiTranscript = '';
+  String? _aiError;
+  Duration _aiDuration = Duration.zero;
+  Timer? _aiTimer;
+
   // ── Voice Message state ────────────────────────────────────────
   bool _msgRecording = false;
   bool _msgSending = false;
@@ -75,7 +82,7 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 2, vsync: this);
+    _tab = TabController(length: 3, vsync: this);
     _loadDevice();
 
     // Track when the reply audio finishes playing
@@ -87,6 +94,7 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
   @override
   void dispose() {
     _tab.dispose();
+    _aiTimer?.cancel();
     _msgTimer?.cancel();
     _liveTimer?.cancel();
     _volumeDebounce?.cancel();
@@ -126,6 +134,100 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
     try {
       await _datasource.sendVolumeOverride(widget.deviceId, _originalVolume);
     } catch (_) {}
+  }
+
+  // ── Voice Message ─────────────────────────────────────────────
+
+  // ── Talk to Aksa ──────────────────────────────────────────────
+
+  Future<void> _toggleAiRecording() async {
+    if (_aiState == _AiInputState.recording) {
+      await _stopAiRecording();
+    } else {
+      await _startAiRecording();
+    }
+  }
+
+  Future<void> _startAiRecording() async {
+    final hasPermission = await _recorder.hasPermission();
+    if (!hasPermission) {
+      _showSnack('Microphone permission required');
+      return;
+    }
+
+    final dir = await Directory.systemTemp.createTemp('aksa_ai_');
+    final path = '${dir.path}/voice.wav';
+
+    await _recorder.start(
+      const RecordConfig(
+        encoder: AudioEncoder.wav,
+        sampleRate: 16000,
+        numChannels: 1,
+        bitRate: 256000,
+      ),
+      path: path,
+    );
+
+    _aiTimer?.cancel();
+    _aiTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _aiDuration += const Duration(seconds: 1));
+    });
+
+    setState(() {
+      _aiState = _AiInputState.recording;
+      _aiDuration = Duration.zero;
+      _aiTranscript = '';
+      _aiError = null;
+    });
+  }
+
+  Future<void> _stopAiRecording() async {
+    final path = await _recorder.stop();
+    _aiTimer?.cancel();
+    if (path == null) {
+      setState(() => _aiState = _AiInputState.idle);
+      return;
+    }
+    setState(() => _aiState = _AiInputState.processing);
+    await _sendToAi(path);
+  }
+
+  Future<void> _sendToAi(String path) async {
+    final file = File(path);
+    if (!file.existsSync()) {
+      setState(() { _aiState = _AiInputState.error; _aiError = 'Recording file not found'; });
+      return;
+    }
+    final bytes = await file.readAsBytes();
+
+    final result = await _repo.sendVoiceInput(widget.deviceId, bytes);
+    if (!mounted) return;
+
+    result.fold(
+      (failure) => setState(() {
+        _aiState = _AiInputState.error;
+        _aiError = failure.message;
+      }),
+      (data) {
+        if (!data.dispatched && data.transcript.isEmpty) {
+          setState(() {
+            _aiState = _AiInputState.error;
+            _aiError = 'No speech recognised. Try speaking closer to the mic.';
+          });
+        } else if (!data.dispatched) {
+          setState(() {
+            _aiState = _AiInputState.error;
+            _aiTranscript = data.transcript;
+            _aiError = 'Device is offline — Aksa could not respond.';
+          });
+        } else {
+          setState(() {
+            _aiState = _AiInputState.done;
+            _aiTranscript = data.transcript;
+          });
+        }
+      },
+    );
   }
 
   // ── Voice Message ─────────────────────────────────────────────
@@ -400,6 +502,7 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
           tabs: const [
             Tab(icon: Icon(Icons.mic_rounded), text: 'Voice Message'),
             Tab(icon: Icon(Icons.surround_sound_rounded), text: 'Live'),
+            Tab(icon: Icon(Icons.smart_toy_rounded), text: 'Talk to Aksa'),
           ],
         ),
       ),
@@ -431,6 +534,19 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
             onVolumeChanged: _onVolumeChanged,
             formatDuration: _formatDuration,
             cs: cs,
+          ),
+          _TalkToAksaTab(
+            state: _aiState,
+            transcript: _aiTranscript,
+            duration: _aiDuration,
+            error: _aiError,
+            onToggle: _toggleAiRecording,
+            onReset: () => setState(() {
+              _aiState = _AiInputState.idle;
+              _aiTranscript = '';
+              _aiError = null;
+            }),
+            formatDuration: _formatDuration,
           ),
         ],
       ),
@@ -930,4 +1046,175 @@ class _PulsingMicButtonState extends State<_PulsingMicButton>
       ),
     );
   }
+}
+
+// ── Talk to Aksa Tab ──────────────────────────────────────────────────────────
+
+enum _AiInputState { idle, recording, processing, done, error }
+
+class _TalkToAksaTab extends StatelessWidget {
+  final _AiInputState state;
+  final String transcript;
+  final Duration duration;
+  final String? error;
+  final VoidCallback onToggle;
+  final VoidCallback onReset;
+  final String Function(Duration) formatDuration;
+
+  const _TalkToAksaTab({
+    required this.state,
+    required this.transcript,
+    required this.duration,
+    required this.error,
+    required this.onToggle,
+    required this.onReset,
+    required this.formatDuration,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.all(AppConstants.spacingXxl),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Status area
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: switch (state) {
+              _AiInputState.idle => _buildHint(theme, cs),
+              _AiInputState.recording => _buildRecording(theme, cs),
+              _AiInputState.processing => _buildProcessing(theme, cs),
+              _AiInputState.done => _buildDone(theme, cs),
+              _AiInputState.error => _buildError(theme, cs),
+            },
+          ),
+
+          const SizedBox(height: AppConstants.spacingXxxl),
+
+          // Mic button — shown for idle and recording states
+          if (state == _AiInputState.idle || state == _AiInputState.recording)
+            _PulsingMicButton(
+              recording: state == _AiInputState.recording,
+              loading: false,
+              onTap: onToggle,
+            )
+          else if (state == _AiInputState.processing)
+            const SizedBox(
+              width: 80,
+              height: 80,
+              child: CircularProgressIndicator(strokeWidth: 3),
+            )
+          else
+            FilledButton.tonal(
+              onPressed: onReset,
+              child: const Text('Ask again'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHint(ThemeData theme, ColorScheme cs) => Column(
+    key: const ValueKey('hint'),
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(Icons.smart_toy_rounded, size: 48, color: cs.primary),
+      const SizedBox(height: AppConstants.spacingLg),
+      Text(
+        'Talk to Aksa',
+        style: theme.textTheme.titleLarge,
+        textAlign: TextAlign.center,
+      ),
+      const SizedBox(height: AppConstants.spacingSm),
+      Text(
+        'Tap the mic, ask anything, and Aksa will respond through the device speaker.',
+        style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+        textAlign: TextAlign.center,
+      ),
+    ],
+  );
+
+  Widget _buildRecording(ThemeData theme, ColorScheme cs) => Column(
+    key: const ValueKey('recording'),
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(
+        formatDuration(duration),
+        style: theme.textTheme.displaySmall?.copyWith(
+          color: cs.error,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      const SizedBox(height: AppConstants.spacingMd),
+      Text(
+        'Listening… tap to send',
+        style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+      ),
+    ],
+  );
+
+  Widget _buildProcessing(ThemeData theme, ColorScheme cs) => Column(
+    key: const ValueKey('processing'),
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(
+        'Transcribing…',
+        style: theme.textTheme.titleMedium?.copyWith(color: cs.onSurfaceVariant),
+      ),
+    ],
+  );
+
+  Widget _buildDone(ThemeData theme, ColorScheme cs) => Column(
+    key: const ValueKey('done'),
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(Icons.check_circle_rounded, size: 40, color: cs.primary),
+      const SizedBox(height: AppConstants.spacingMd),
+      if (transcript.isNotEmpty) ...[
+        Text(
+          '"$transcript"',
+          style: theme.textTheme.bodyLarge?.copyWith(
+            fontStyle: FontStyle.italic,
+            color: cs.onSurface,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: AppConstants.spacingMd),
+      ],
+      Text(
+        'Aksa is responding on your device…',
+        style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+        textAlign: TextAlign.center,
+      ),
+    ],
+  );
+
+  Widget _buildError(ThemeData theme, ColorScheme cs) => Column(
+    key: const ValueKey('error'),
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(Icons.error_outline_rounded, size: 40, color: cs.error),
+      const SizedBox(height: AppConstants.spacingMd),
+      if (transcript.isNotEmpty) ...[
+        Text(
+          '"$transcript"',
+          style: theme.textTheme.bodyLarge?.copyWith(
+            fontStyle: FontStyle.italic,
+            color: cs.onSurface,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: AppConstants.spacingSm),
+      ],
+      Text(
+        error ?? 'Something went wrong',
+        style: theme.textTheme.bodyMedium?.copyWith(color: cs.error),
+        textAlign: TextAlign.center,
+      ),
+    ],
+  );
 }

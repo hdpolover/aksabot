@@ -122,6 +122,10 @@ export class AiService {
     return this.stt.createStream(options);
   }
 
+  transcribeOnce(pcmAudio: Buffer, options?: SttOptions) {
+    return this.stt.transcribe(pcmAudio, options);
+  }
+
   async refreshWeather(lat: number, lon: number): Promise<void> {
     return this.prompt.refreshWeather(lat, lon);
   }
