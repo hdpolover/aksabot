@@ -157,6 +157,25 @@ class DevicesRemoteDatasource {
     }
   }
 
+  /// Push a temporary volume to the device (no DB write).
+  /// Call again with the original value to restore.
+  Future<void> sendVolumeOverride(String id, int volume) async {
+    try {
+      await _client.dio.post(
+        '/devices/$id/volume-override',
+        data: {'volume': volume.clamp(0, 100)},
+      );
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      String message = 'Volume override failed';
+      if (data is Map) {
+        final msg = data['message'];
+        if (msg is String) message = msg;
+      }
+      throw ServerException(message, statusCode: e.response?.statusCode);
+    }
+  }
+
   /// Send a pre-recorded voice message (raw PCM or WAV bytes) to the device.
   /// Returns true if the device was online and played the audio.
   Future<bool> sendVoiceMessage(String id, Uint8List audioBytes) async {

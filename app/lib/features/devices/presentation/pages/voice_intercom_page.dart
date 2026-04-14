@@ -12,6 +12,8 @@ import '../../../../core/constants/api.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/storage_keys.dart';
 import '../../../../core/di/injection.dart';
+import '../../data/datasources/devices_remote_datasource.dart';
+import '../../domain/entities/device_entity.dart';
 import '../../domain/repositories/devices_repository.dart';
 
 /// Two-mode voice intercom page.
@@ -21,6 +23,9 @@ import '../../domain/repositories/devices_repository.dart';
 ///
 /// **Live Intercom** — tap to start streaming; PCM audio is forwarded
 /// in real time via the /intercom WebSocket to the device.
+/// Includes a temporary volume slider that overrides the device's
+/// global volume setting for the duration of the session, then
+/// restores it automatically when done.
 class VoiceIntercomPage extends StatefulWidget {
   final String deviceId;
   const VoiceIntercomPage({super.key, required this.deviceId});
@@ -35,6 +40,13 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
   final _recorder = AudioRecorder();
   final _storage = sl<FlutterSecureStorage>();
   final _repo = sl<DevicesRepository>();
+  final _datasource = sl<DevicesRemoteDatasource>();
+
+  // ── Device / volume ───────────────────────────────────────────
+  Device? _device;
+  int _originalVolume = 80;  // restored after intercom
+  int _intercomVolume = 80;  // slider value during intercom
+  Timer? _volumeDebounce;
 
   // ── Voice Message state ────────────────────────────────────────
   bool _msgRecording = false;
@@ -56,6 +68,7 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
   void initState() {
     super.initState();
     _tab = TabController(length: 2, vsync: this);
+    _loadDevice();
   }
 
   @override
@@ -63,9 +76,43 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
     _tab.dispose();
     _msgTimer?.cancel();
     _liveTimer?.cancel();
+    _volumeDebounce?.cancel();
     _recorder.dispose();
     _stopLive(notify: false);
     super.dispose();
+  }
+
+  Future<void> _loadDevice() async {
+    final result = await _repo.getDevice(widget.deviceId);
+    result.fold(
+      (_) {},
+      (device) {
+        final vol = (device.settingsJson['volume'] as num?)?.toInt() ?? 80;
+        setState(() {
+          _device = device;
+          _originalVolume = vol;
+          _intercomVolume = vol;
+        });
+      },
+    );
+  }
+
+  // ── Volume override ───────────────────────────────────────────
+
+  void _onVolumeChanged(double value) {
+    setState(() => _intercomVolume = value.round());
+    // Debounce: only send 300ms after the user stops dragging.
+    _volumeDebounce?.cancel();
+    _volumeDebounce = Timer(const Duration(milliseconds: 300), () {
+      _datasource.sendVolumeOverride(widget.deviceId, _intercomVolume)
+          .catchError((_) {});
+    });
+  }
+
+  Future<void> _restoreVolume() async {
+    try {
+      await _datasource.sendVolumeOverride(widget.deviceId, _originalVolume);
+    } catch (_) {}
   }
 
   // ── Voice Message ─────────────────────────────────────────────
@@ -136,10 +183,9 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
       result.fold(
         (failure) => _showSnack('Failed: ${failure.message}'),
         (playing) => _showSnack(
-          playing ? 'Playing on device!' : 'Device is offline — message queued',
+          playing ? 'Playing on device!' : 'Device is offline',
         ),
       );
-      // Reset for next recording
       setState(() => _msgFilePath = null);
     } finally {
       if (mounted) setState(() => _msgSending = false);
@@ -173,7 +219,11 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
         return;
       }
 
-      // Derive WS URL from API base URL (http→ws, https→wss)
+      // Push the intercom volume before opening the stream.
+      // If it's already at original, this is a no-op on the device.
+      await _datasource.sendVolumeOverride(widget.deviceId, _intercomVolume)
+          .catchError((_) {});
+
       final wsBase = ApiConstants.baseUrl
           .replaceFirst('https://', 'wss://')
           .replaceFirst('http://', 'ws://');
@@ -186,7 +236,6 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
         onDone: () => _stopLive(),
       );
 
-      // Send start event — gateway will verify device ownership
       _wsChannel!.sink.add(jsonEncode({
         'event': 'intercom:start',
         'data': {'deviceId': widget.deviceId},
@@ -244,6 +293,8 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
 
   Future<void> _stopLive({bool notify = true}) async {
     _liveTimer?.cancel();
+    _volumeDebounce?.cancel();
+
     await _pcmSub?.cancel();
     _pcmSub = null;
 
@@ -259,6 +310,9 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
     _wsSub = null;
 
     await _recorder.stop();
+
+    // Restore original volume — fire and forget.
+    _restoreVolume();
 
     if (notify && mounted) {
       setState(() {
@@ -320,7 +374,10 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
             active: _liveActive,
             connecting: _liveConnecting,
             duration: _liveDuration,
+            intercomVolume: _intercomVolume.toDouble(),
+            originalVolume: _originalVolume,
             onToggle: _toggleLive,
+            onVolumeChanged: _onVolumeChanged,
             formatDuration: _formatDuration,
             cs: cs,
           ),
@@ -363,20 +420,15 @@ class _VoiceMessageTab extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Status label
           Text(
             recording
                 ? 'Recording…'
                 : hasRecording
                     ? 'Ready to send'
                     : 'Tap to record a voice message',
-            style: tt.titleMedium?.copyWith(
-              color: cs.onSurfaceVariant,
-            ),
+            style: tt.titleMedium?.copyWith(color: cs.onSurfaceVariant),
           ),
           const SizedBox(height: AppConstants.spacingMd),
-
-          // Timer
           if (recording || hasRecording)
             Text(
               formatDuration(duration),
@@ -386,16 +438,11 @@ class _VoiceMessageTab extends StatelessWidget {
               ),
             ),
           const SizedBox(height: AppConstants.spacingHuge),
-
-          // Mic button
           _PulsingMicButton(
             recording: recording,
             onTap: hasRecording && !recording ? null : onToggle,
           ),
-
           const SizedBox(height: AppConstants.spacingXxl),
-
-          // Send / Discard
           if (hasRecording && !recording) ...[
             FilledButton.icon(
               onPressed: sending ? null : onSend,
@@ -430,7 +477,10 @@ class _LiveIntercomTab extends StatelessWidget {
   final bool active;
   final bool connecting;
   final Duration duration;
+  final double intercomVolume;
+  final int originalVolume;
   final VoidCallback onToggle;
+  final ValueChanged<double> onVolumeChanged;
   final String Function(Duration) formatDuration;
   final ColorScheme cs;
 
@@ -438,7 +488,10 @@ class _LiveIntercomTab extends StatelessWidget {
     required this.active,
     required this.connecting,
     required this.duration,
+    required this.intercomVolume,
+    required this.originalVolume,
     required this.onToggle,
+    required this.onVolumeChanged,
     required this.formatDuration,
     required this.cs,
   });
@@ -480,14 +533,122 @@ class _LiveIntercomTab extends StatelessWidget {
           ),
 
           const SizedBox(height: AppConstants.spacingXxl),
-          Text(
-            'Your voice is streamed directly to the device in real time.\n'
-            'The device plays it as you speak.',
-            style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-            textAlign: TextAlign.center,
+
+          // Volume override — shown whenever the tab is active (not just during
+          // live session) so the user can set it before starting.
+          _VolumeOverrideSlider(
+            volume: intercomVolume,
+            originalVolume: originalVolume,
+            isLive: active,
+            onChanged: onVolumeChanged,
+            cs: cs,
           ),
         ],
       ),
+    );
+  }
+}
+
+// ── Volume override slider ────────────────────────────────────────────────────
+
+class _VolumeOverrideSlider extends StatelessWidget {
+  final double volume;
+  final int originalVolume;
+  final bool isLive;
+  final ValueChanged<double> onChanged;
+  final ColorScheme cs;
+
+  const _VolumeOverrideSlider({
+    required this.volume,
+    required this.originalVolume,
+    required this.isLive,
+    required this.onChanged,
+    required this.cs,
+  });
+
+  IconData _volumeIcon(double v) {
+    if (v == 0) return Icons.volume_off_rounded;
+    if (v < 40) return Icons.volume_down_rounded;
+    return Icons.volume_up_rounded;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final changed = volume.round() != originalVolume;
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Icon(_volumeIcon(volume), size: AppConstants.iconMd, color: cs.primary),
+            const SizedBox(width: AppConstants.spacingMd),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Intercom volume',
+                        style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        '${volume.round()}',
+                        style: tt.bodyMedium?.copyWith(
+                          color: cs.primary,
+                          fontWeight: FontWeight.w600,
+                          fontFeatures: [const FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ),
+                  SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 3,
+                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                    ),
+                    child: Slider(
+                      value: volume,
+                      min: 0,
+                      max: 100,
+                      divisions: 20,
+                      onChanged: onChanged,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        if (changed)
+          Padding(
+            padding: const EdgeInsets.only(top: AppConstants.spacingXs),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.info_outline,
+                    size: AppConstants.iconSm, color: cs.onSurfaceVariant),
+                const SizedBox(width: AppConstants.spacingXs),
+                Text(
+                  'Restores to $originalVolume when intercom ends',
+                  style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+        if (!isLive && !changed)
+          Padding(
+            padding: const EdgeInsets.only(top: AppConstants.spacingXs),
+            child: Text(
+              'Adjust before or during the live session.\nRestored automatically when you stop.',
+              style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
+          ),
+      ],
     );
   }
 }

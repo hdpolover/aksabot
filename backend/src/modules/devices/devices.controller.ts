@@ -155,6 +155,22 @@ export class DevicesController {
     return { playing };
   }
 
+  /** Temporarily override device volume without touching the DB or NVS permanently.
+   *  Sends `config:update { volume }` directly to the device via WebSocket.
+   *  The caller is responsible for restoring the original volume when done.
+   *  Volume range: 0–100. Returns 204 regardless of online status. */
+  @Post(':id/volume-override')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async volumeOverride(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+    @Body() body: { volume: number },
+  ) {
+    await this.devicesService.findById(id, user.userId);
+    const clamped = Math.max(0, Math.min(100, Math.round(body.volume ?? 80)));
+    this.gateway.sendToDevice(id, 'config:update', { volume: clamped });
+  }
+
   /** Accept a pre-recorded voice message (raw 16kHz/mono/16-bit PCM or WAV),
    *  encode it to Opus, and send it to the device for playback.
    *  WAV files are automatically stripped of their 44-byte header.

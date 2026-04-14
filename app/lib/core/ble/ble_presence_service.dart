@@ -3,16 +3,38 @@ import 'dart:async';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Manages presence detection by scanning for the ESP32's BLE advertisement.
+/// Presence detection via a persistent GATT connection to the ESP32.
 ///
-/// The phone scans for a device named "Aksabot" (or matching a stored MAC
-/// address) and measures RSSI. When the device is close enough, the app
-/// reports arrival to the backend. When it drops below the threshold for the
-/// full grace period, it reports departure.
+/// ## Why GATT connection instead of repeated scanning
 ///
-/// This is the reverse of the original approach (where the phone advertised
-/// and the ESP32 scanned) — scanning is more reliably supported across
-/// Android OEMs than peripheral advertising.
+/// The ESP32 advertises as "Aksabot" with service UUID 0xFFE0. The phone
+/// connects to it once and the OS (CoreBluetooth on iOS, Android Bluetooth
+/// stack) maintains the connection in the background — even when the app is
+/// suspended.  Connection state changes wake the app so it can report
+/// arrived / departed to the backend.
+///
+/// Repeated scanning (the previous approach) was paused by iOS when the app
+/// was backgrounded because the scan had no service UUID filter.  A
+/// persistent GATT connection sidesteps this entirely: the OS owns the
+/// connection state machine, not a Dart timer.
+///
+/// ## Limitation
+///
+/// When the app is **terminated** (swiped away from the app switcher), the
+/// OS closes the GATT connection.  There is no way to prevent this on iOS;
+/// on Android a foreground service would be required.  For the common case
+/// — app is backgrounded but not killed — this approach works correctly.
+///
+/// ## Flow
+///
+/// 1. `startScanning()` — scan with a 0xFFE0 UUID filter (iOS-background-safe)
+///    until "Aksabot" is found.
+/// 2. Connect with `autoConnect: true` — the OS reconnects automatically if
+///    the connection drops temporarily (e.g., the user walked just outside
+///    BLE range and came back quickly).
+/// 3. `connectionState` stream: `connected` → report arrived; `disconnected`
+///    (after grace period) → report departed.
+/// 4. `stopScanning()` — disconnect and clean up.
 class BlePresenceService {
   static const _prefEnabled = 'presence_enabled';
   static const _prefRssiThreshold = 'presence_rssi_threshold';
@@ -20,38 +42,42 @@ class BlePresenceService {
   static const _prefSilentWake = 'presence_silent_wake';
   static const _prefDeviceId = 'presence_device_id';
 
-  static const _scanDurationSec = 5;
   static const _targetName = 'Aksabot';
+  static const _targetServiceUuid = '0000ffe0-0000-1000-8000-00805f9b34fb';
+  static const _scanTimeoutSec = 30; // give up initial scan after 30s; retry loop takes over
 
-  // ── State ─────────────────────────────────────────────────────
+  // ── State ─────────────────────────────────────────────────────────────
 
-  bool _scanning = false;
-  bool get isScanning => _scanning;
+  bool get isScanning => _scanActive || _connected;
 
-  _PresenceState _state = _PresenceState.away;
-  DateTime? _lastSeen;
-  DateTime? _leftAt;
+  bool _scanActive = false;
+  bool _connected = false;
 
-  /// Whether the ESP32 is currently detected nearby.
-  bool get isPresent => _state == _PresenceState.present;
+  /// Whether the ESP32 is currently connected (= user at desk).
+  bool get isPresent => _connected;
 
-  String? _deviceId;
+  String? _deviceId;         // backend device ID (not BLE device ID)
+  BluetoothDevice? _device;  // the discovered ESP32
+
+  StreamSubscription<List<ScanResult>>? _scanSub;
+  StreamSubscription<BluetoothConnectionState>? _connSub;
+  Timer? _graceTimer;
+  Timer? _retryTimer;        // restart scan if connect never happened
+
   String? lastError;
 
-  Timer? _scanTimer;
+  // ── Callbacks ─────────────────────────────────────────────────────────
 
-  // Callback invoked on state transitions — set by the caller to trigger
-  // backend REST calls without creating a circular dependency.
+  /// Invoked on PRESENT → AWAY or AWAY → PRESENT transitions.
   Future<void> Function(String deviceId, String event, int awaySeconds)?
       onPresenceChanged;
 
-  // ── Lifecycle ─────────────────────────────────────────────────
+  // ── Lifecycle ─────────────────────────────────────────────────────────
 
   Future<bool> startScanning() async {
     lastError = null;
 
-    final enabled = await loadEnabled();
-    if (!enabled) return false;
+    if (!await loadEnabled()) return false;
 
     _deviceId = await _loadDeviceId();
     if (_deviceId == null) {
@@ -65,127 +91,162 @@ class BlePresenceService {
       return false;
     }
 
-    _scanning = true;
-    // Scan immediately on enable (1s delay to let BLE settle) rather than
-    // waiting the full 8s interval — gives fast feedback after toggle.
-    _scanTimer = Timer(const Duration(seconds: 1), _doScanCycle);
+    _scanActive = true;
+    _startScan();
     return true;
   }
 
   Future<void> stopScanning() async {
-    _scanning = false;
-    _scanTimer?.cancel();
-    _scanTimer = null;
-    // Reset state to away so that re-enabling always triggers a fresh
-    // _reportArrived() on the next detection. Without this, _state stays
-    // 'present' and _processScanResult skips the report entirely.
-    _state = _PresenceState.away;
-    _lastSeen = null;
-    _leftAt = null;
-    try {
-      await FlutterBluePlus.stopScan();
-    } catch (_) {}
-  }
+    _scanActive = false;
+    _graceTimer?.cancel();
+    _graceTimer = null;
+    _retryTimer?.cancel();
+    _retryTimer = null;
 
-  // ── Scan loop ─────────────────────────────────────────────────
+    await _scanSub?.cancel();
+    _scanSub = null;
 
-  void _scheduleNextScan() {
-    if (!_scanning) return;
-    // Scan every scanDuration + 5s gap. When present, check less aggressively.
-    final intervalSec = _state == _PresenceState.present ? 15 : 8;
-    _scanTimer = Timer(Duration(seconds: intervalSec), _doScanCycle);
-  }
+    try { await FlutterBluePlus.stopScan(); } catch (_) {}
 
-  Future<void> _doScanCycle() async {
-    if (!_scanning) return;
+    await _connSub?.cancel();
+    _connSub = null;
 
-    int? bestRssi;
-
-    try {
-      final rssiThreshold = await loadRssiThreshold();
-
-      // Collect best RSSI via a listener — we can't use `await for` on
-      // scanResults because it's a broadcast stream that never closes, so
-      // `await for` would hang forever after the scan timeout fires.
-      final sub = FlutterBluePlus.scanResults.listen((results) {
-        for (final r in results) {
-          if (_isTargetDevice(r)) {
-            final current = bestRssi;
-            if (current == null || r.rssi > current) {
-              bestRssi = r.rssi;
-            }
-          }
-        }
-      });
-
-      await FlutterBluePlus.startScan(
-        timeout: const Duration(seconds: _scanDurationSec),
-      );
-
-      // Wait for the scan to finish (isScanning goes false when timeout fires).
-      await FlutterBluePlus.isScanning.where((v) => !v).first;
-      await sub.cancel();
-
-      await _processScanResult(bestRssi, rssiThreshold.round());
-    } catch (e) {
-      lastError = 'Scan error: $e';
+    if (_device != null) {
+      try { await _device!.disconnect(); } catch (_) {}
+      _device = null;
     }
 
-    _scheduleNextScan();
+    _connected = false;
   }
 
-  bool _isTargetDevice(ScanResult r) {
+  // ── Scan ──────────────────────────────────────────────────────────────
+
+  void _startScan() {
+    if (!_scanActive) return;
+
+    // Cancel any previous scan subscription before starting a new one.
+    _scanSub?.cancel();
+    _scanSub = null;
+    try { FlutterBluePlus.stopScan(); } catch (_) {}
+
+    _scanSub = FlutterBluePlus.scanResults.listen((results) {
+      for (final r in results) {
+        if (_isTarget(r)) {
+          _onDeviceFound(r.device);
+          return;
+        }
+      }
+    });
+
+    FlutterBluePlus.startScan(
+      // Service UUID filter allows iOS to continue scanning in the background.
+      // Without a filter, iOS pauses the scan when the app is suspended.
+      withServices: [Guid(_targetServiceUuid)],
+      timeout: const Duration(seconds: _scanTimeoutSec),
+    ).catchError((e) {
+      lastError = 'Scan error: $e';
+    });
+
+    // If scan expires without finding the device, retry after a short pause.
+    _retryTimer?.cancel();
+    _retryTimer = Timer(const Duration(seconds: _scanTimeoutSec + 5), () {
+      if (_scanActive && !_connected) _startScan();
+    });
+  }
+
+  bool _isTarget(ScanResult r) {
     return r.advertisementData.advName == _targetName ||
         r.device.platformName == _targetName ||
         r.device.advName == _targetName;
   }
 
-  Future<void> _processScanResult(int? rssi, int threshold) async {
-    final gracePeriod = await loadGracePeriod();
+  void _onDeviceFound(BluetoothDevice device) {
+    // Stop scanning — we have a target, now connect.
+    _scanSub?.cancel();
+    _scanSub = null;
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    try { FlutterBluePlus.stopScan(); } catch (_) {}
 
-    if (rssi != null && rssi >= threshold) {
-      // Device in range
-      _lastSeen = DateTime.now();
-      _leftAt = null;
+    _device = device;
+    _connect(device);
+  }
 
-      if (_state == _PresenceState.away) {
-        _state = _PresenceState.present;
-        await _reportArrived();
-      } else {
-        _state = _PresenceState.present;
+  // ── Connection ────────────────────────────────────────────────────────
+
+  void _connect(BluetoothDevice device) {
+    _connSub?.cancel();
+    _connSub = device.connectionState.listen(_onConnectionState);
+
+    device.connect(
+      // autoConnect: true — the OS (CoreBluetooth / Android Bluetooth)
+      // will reconnect automatically when the device re-appears in range.
+      // This is the key to background operation: the OS handles reconnect
+      // without needing the Dart timer loop to restart scanning.
+      autoConnect: true,
+      timeout: const Duration(seconds: 30),
+    ).catchError((e) {
+      lastError = 'Connect error: $e';
+      // Fall back to scanning so we can try again.
+      if (_scanActive) {
+        Future.delayed(const Duration(seconds: 5), () {
+          if (_scanActive && !_connected) _startScan();
+        });
       }
-    } else {
-      // Device not seen or below threshold
-      if (_state == _PresenceState.present) {
-        _state = _PresenceState.leaving;
-        _leftAt = DateTime.now();
-      } else if (_state == _PresenceState.leaving && _leftAt != null) {
-        final elapsed = DateTime.now().difference(_leftAt!).inSeconds;
-        if (elapsed >= gracePeriod) {
-          _state = _PresenceState.away;
-          await _reportDeparted();
-        }
+    });
+  }
+
+  void _onConnectionState(BluetoothConnectionState state) {
+    if (state == BluetoothConnectionState.connected) {
+      _graceTimer?.cancel();
+      _graceTimer = null;
+
+      if (!_connected) {
+        _connected = true;
+        _reportArrived();
+      }
+    } else if (state == BluetoothConnectionState.disconnected) {
+      if (_connected) {
+        _connected = false;
+        _startGraceTimer();
+      } else if (_scanActive) {
+        // Never reached "arrived" — device went away before we connected.
+        // autoConnect will keep trying; nothing to do here.
       }
     }
   }
 
-  Future<void> _reportArrived() async {
-    if (_deviceId == null || onPresenceChanged == null) return;
-    final silentWakeMin = await loadSilentWakeMinutes();
-    final awaySec = _lastSeen != null
-        ? 0
-        : (silentWakeMin * 60); // conservative if no prior seen time
-    await onPresenceChanged!(_deviceId!, 'arrived', awaySec);
+  // ── Grace period ──────────────────────────────────────────────────────
+
+  /// Start a grace timer before reporting departure.
+  ///
+  /// [autoConnect: true] reconnects quickly if the user just stepped slightly
+  /// out of range.  The grace period ensures we don't report "departed" for
+  /// momentary BLE drops (stairwell, metal door) before autoConnect fires.
+  void _startGraceTimer() async {
+    final gracePeriod = await loadGracePeriod();
+    _graceTimer?.cancel();
+    _graceTimer = Timer(Duration(seconds: gracePeriod), () {
+      if (!_connected && _scanActive) {
+        _reportDeparted();
+      }
+    });
   }
 
-  Future<void> _reportDeparted() async {
+  // ── Reporting ─────────────────────────────────────────────────────────
+
+  void _reportArrived() {
     if (_deviceId == null || onPresenceChanged == null) return;
-    await onPresenceChanged!(_deviceId!, 'departed', 0);
+    onPresenceChanged!(_deviceId!, 'arrived', 0);
   }
 
-  // ── Configuration ─────────────────────────────────────────────
+  void _reportDeparted() {
+    if (_deviceId == null || onPresenceChanged == null) return;
+    onPresenceChanged!(_deviceId!, 'departed', 0);
+  }
 
-  /// Call this when the user selects a device for presence detection.
+  // ── Configuration ─────────────────────────────────────────────────────
+
   Future<void> configureDevice(String deviceId) async {
     _deviceId = deviceId;
     final prefs = await SharedPreferences.getInstance();
@@ -197,15 +258,12 @@ class BlePresenceService {
     return prefs.getString(_prefDeviceId);
   }
 
-  /// Restores scanning on app startup if it was previously enabled.
   Future<void> restoreState() async {
     final enabled = await loadEnabled();
-    if (enabled) {
-      await startScanning();
-    }
+    if (enabled) await startScanning();
   }
 
-  // ── Persisted Settings ────────────────────────────────────────
+  // ── Persisted settings ────────────────────────────────────────────────
 
   Future<bool> loadEnabled() async {
     final prefs = await SharedPreferences.getInstance();
@@ -247,5 +305,3 @@ class BlePresenceService {
     await prefs.setInt(_prefSilentWake, minutes);
   }
 }
-
-enum _PresenceState { away, present, leaving }
