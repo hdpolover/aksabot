@@ -298,20 +298,24 @@ static void drawEyeV2(LGFX_Sprite& s, int cx, int cy,
 
     s.fillRoundRect(ex - eyeW / 2, bodyTopY, eyeW, bodyH, actualCR, EYE_COL);
 
-    // Wedge: fills the triangular raised area above bodyTopY on one side
+    // Wedge: fills the raised area above bodyTopY using horizontal scanlines.
+    // Scanlines give a clean pixel-perfect slant with no diagonal aliasing.
     if (leftTopY < rightTopY) {
-        // Left corner is higher — fill upper-left wedge
-        // Triangle: apex at top-left, base along bodyTopY spanning full width
-        s.fillTriangle(ex - eyeW / 2, leftTopY,
-                       ex - eyeW / 2, bodyTopY,
-                       ex + eyeW / 2, bodyTopY,
-                       EYE_COL);
+        // Left corner is higher — right edge of the wedge slopes down left→right
+        int span = rightTopY - leftTopY;
+        for (int y = leftTopY; y < rightTopY; y++) {
+            int w = (y - leftTopY + 1) * eyeW / span;
+            if (w < 1) w = 1;
+            s.fillRect(ex - eyeW / 2, y, w, 1, EYE_COL);
+        }
     } else if (rightTopY < leftTopY) {
-        // Right corner is higher — fill upper-right wedge
-        s.fillTriangle(ex + eyeW / 2, rightTopY,
-                       ex + eyeW / 2, bodyTopY,
-                       ex - eyeW / 2, bodyTopY,
-                       EYE_COL);
+        // Right corner is higher — left edge of the wedge slopes down right→left
+        int span = leftTopY - rightTopY;
+        for (int y = rightTopY; y < leftTopY; y++) {
+            int w = (y - rightTopY + 1) * eyeW / span;
+            if (w < 1) w = 1;
+            s.fillRect(ex + eyeW / 2 - w + 1, y, w, 1, EYE_COL);
+        }
     }
 }
 
@@ -880,7 +884,9 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
             drawEyeV2(s, rightEyeX, eyeY, rightScale, dx, dy, squint, rw, rh,
                        es.tiltInner, es.tiltOuter);
 
-            if (es.hasBrows || drawPeakBrows) {
+            // Nova reads emotion from eye tilt — no brows for any expression or peak event
+            const bool isNova = (g_faceStyle && g_faceStyle->id == face_style::StyleId::NOVA);
+            if (!isNova && (es.hasBrows || drawPeakBrows)) {
                 int br = es.eyeH / 2;
                 if (fs.expression == face::Expression::ANGRY) {
                     // V-shape angry brows

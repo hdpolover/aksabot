@@ -30,7 +30,7 @@ const face_style::FaceStyleDef face_style::NOVA = {
         /* HAPPY       */       { true,   72,  40,  0.50f, 0.25f, 0.75f, 0.00f, false, +3,  +6 },
         /* SAD         */       { true,   62,  34,  0.00f, 0.00f, 0.00f, 0.80f, false,+10,   0 },
         /* SHRUG       */       { true,   68,  38,  0.00f, 0.00f, 0.00f, 0.80f, false,  0,   0 },
-        /* SURPRISED   */       { true,   82,  48,  0.00f, 0.00f, 0.00f, 0.50f, true,   0,   0 },
+        /* SURPRISED   */       { true,   82,  48,  0.00f, 0.00f, 0.00f, 0.50f, false,  0,   0 },
         /* SHOCKED     */       { true,   86,  52,  0.00f, 0.00f, 0.00f, 0.00f, false,  0,   0 },
         /* ANGRY       */       { true,   52,  28,  0.38f, 0.00f, 0.38f, 0.30f, false,-12,   0 },
         /* DISTURBED   */       { true,   68,  38,  0.00f, 0.00f, 0.00f, 1.00f, false,  0,   0 },
