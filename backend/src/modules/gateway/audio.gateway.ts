@@ -1459,7 +1459,7 @@ export class AudioGateway
   async sendVoiceMessage(deviceId: string, framedOpus: Buffer): Promise<boolean> {
     const socket = this.deviceToSocket.get(deviceId);
     if (!socket || socket.readyState !== 1) return false;
-    this.sendToDevice(deviceId, 'response:start', { type: 'voice_message' });
+    this.sendToDevice(deviceId, 'response:start', { type: 'intercom' });
     await this.sendFramedOpusToDevice(deviceId, framedOpus);
     this.sendToDevice(deviceId, 'response:end', { fullText: '', cacheKeys: [] });
     return true;
