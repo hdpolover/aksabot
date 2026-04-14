@@ -2079,7 +2079,8 @@ void loop() {
                 "\"ip\":\"%s\","
                 "\"uptimeSec\":%lu,"
                 "\"freeHeap\":%lu,"
-                "\"sdMounted\":%s"
+                "\"sdMounted\":%s,"
+                "\"batteryPercent\":%d"
                 "}",
                 FIRMWARE_VERSION,
                 WiFi.SSID().c_str(),
@@ -2087,7 +2088,8 @@ void loop() {
                 WiFi.localIP().toString().c_str(),
                 millis() / 1000,
                 (unsigned long)ESP.getFreeHeap(),
-                sd_storage::isMounted() ? "true" : "false"
+                sd_storage::isMounted() ? "true" : "false",
+                (int)battery::readPercent()
             );
             ws_client::sendEvent("device:info", infoPayload);
 
