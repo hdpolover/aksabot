@@ -94,11 +94,11 @@ void boot_screen::showSplashWithBootCheck(const char* version) {
     // ── Title & tagline ──────────────────────────────────
     drawCentered("Aksabot", 88, WHITE, 1.6f);
     tft.drawFastHLine(CX - 56, 118, 112, GLOW_4);
-    drawSmall("AI Desk Companion", 128, CYAN_DIM);
+    drawSmall("AI Desk Companion", 128, CYAN);
 
     char versionStr[24];
     snprintf(versionStr, sizeof(versionStr), "v%s", version);
-    drawSmall(versionStr, 150, DIM_DARK);
+    drawSmall(versionStr, 150, DIM);
 
     // ── Decoration dots ───────────────────────────────────
     tft.fillCircle(CX - 18, 200, 2, GLOW_4);
@@ -112,7 +112,7 @@ void boot_screen::showSplashWithBootCheck(const char* version) {
     const int barH = 5;
     tft.drawRoundRect(barX - 1, barY - 1, barW + 2, barH + 2, 3, GLOW_2);
 
-    drawSmall("Hold BOOT for BIOS", 254, DIM_DARK);
+    drawSmall("Hold BOOT for BIOS", 254, DIM);
 
     // ── 2-second BIOS window ─────────────────────────────
     const uint32_t durationMs = 2000;
@@ -180,12 +180,12 @@ void boot_screen::showFirstBoot() {
 
     drawCentered("Aksabot", 92, WHITE, 1.6f);
     tft.drawFastHLine(CX - 56, 122, 112, GLOW_4);
-    drawSmall("Your AI desk companion", 132, CYAN_DIM);
+    drawSmall("Your AI desk companion", 132, CYAN);
 
     tft.drawFastHLine(30, 174, LCD_WIDTH - 60, GLOW_3);
 
-    drawSmall("Open the Aksabot app on your", 186, DIM);
-    drawSmall("phone to get started.", 204, DIM);
+    drawSmall("Open the Aksabot app on your", 186, WHITE);
+    drawSmall("phone to get started.", 204, WHITE);
 
     delay(2500);
 }
@@ -209,17 +209,17 @@ void boot_screen::showProvisioningPrompt(const char* apName) {
     drawCentered("Setup Required", 132, WHITE);
 
     if (apName && strlen(apName) > 0) {
-        drawSmall("Open the Aksabot app", 155, DIM);
-        drawSmall("— or connect to Wi-Fi —", 173, DIM);
+        drawSmall("Open the Aksabot app", 155, WHITE);
+        drawSmall("— or connect to Wi-Fi —", 173, WHITE);
         char apLine[48];
         snprintf(apLine, sizeof(apLine), "\"%s\"", apName);
         drawSmall(apLine, 191, CYAN);
     } else {
-        drawSmall("Open the Aksabot app", 158, DIM);
-        drawSmall("to connect this device", 178, DIM);
+        drawSmall("Open the Aksabot app", 158, WHITE);
+        drawSmall("to connect this device", 178, WHITE);
     }
 
-    drawSmall("Waiting...", 225, DIM);
+    drawSmall("Waiting...", 225, CYAN_DIM);
 }
 
 void boot_screen::showProvisioningConnected() {
@@ -237,14 +237,14 @@ void boot_screen::showProvisioningConnected() {
     tft.drawLine(CX + 28, phoneY + 26, CX + 40, phoneY + 12, GREEN);
 
     drawCentered("Phone Connected", 100, WHITE);
-    drawSmall("Setting up your Aksabot...", 128, DIM);
+    drawSmall("Setting up your Aksabot...", 128, WHITE);
 
     tft.drawFastHLine(30, 152, LCD_WIDTH - 60, GLOW_3);
 
-    drawSmall("Select your Wi-Fi network", 164, CYAN_DIM);
-    drawSmall("in the app to continue.", 184, DIM);
+    drawSmall("Select your Wi-Fi network", 164, CYAN);
+    drawSmall("in the app to continue.", 184, WHITE);
 
-    drawSmall("Waiting for Wi-Fi...", 225, DIM);
+    drawSmall("Waiting for Wi-Fi...", 225, CYAN_DIM);
 }
 
 void boot_screen::showProvisioningStatus(const char* status) {
@@ -284,7 +284,7 @@ void boot_screen::showConnecting(const char* ssid) {
     char ssidStr[48];
     snprintf(ssidStr, sizeof(ssidStr), "\"%s\"", ssid);
     drawSmall(ssidStr, 160, CYAN);
-    drawSmall("Please wait...", 185, DIM);
+    drawSmall("Please wait...", 185, WHITE);
 }
 
 void boot_screen::showConnected(const char* ip) {
@@ -293,7 +293,7 @@ void boot_screen::showConnected(const char* ip) {
 
     char ipStr[32];
     snprintf(ipStr, sizeof(ipStr), "IP: %s", ip);
-    drawSmall(ipStr, 208, DIM);
+    drawSmall(ipStr, 208, WHITE);
 
     delay(500);
 }
@@ -301,7 +301,7 @@ void boot_screen::showConnected(const char* ip) {
 void boot_screen::showConnectionFailed(const char* reason) {
     tft.fillRect(0, 178, LCD_WIDTH, 60, BG);
     drawSmall("Connection Failed", 185, RED);
-    drawSmall(reason, 208, DIM);
+    drawSmall(reason, 208, WHITE);
 }
 
 void boot_screen::showReady() {
@@ -321,7 +321,7 @@ void boot_screen::showReady() {
     }
 
     drawCentered("Ready!", 134, WHITE, 1.2f);
-    drawSmall("Hold screen to talk", 166, CYAN_DIM);
+    drawSmall("Hold screen to talk", 166, WHITE);
 
     delay(1500);
 }
@@ -345,8 +345,8 @@ void boot_screen::showRebootingForSetup() {
     tft.drawLine(CX + r - 2, iconCY + 8, CX + r - 2, iconCY + 16, CYAN);
 
     drawCentered("Entering Setup Mode", 118, WHITE, 1.0f);
-    drawSmall("Requested from the app.", 148, DIM);
-    drawSmall("Rebooting in a moment...", 168, DIM);
+    drawSmall("Requested from the app.", 148, WHITE);
+    drawSmall("Rebooting in a moment...", 168, WHITE);
 }
 
 bool boot_screen::showBiosCountdown() {
@@ -367,7 +367,7 @@ bool boot_screen::showBiosCountdown() {
     }
 
     drawCentered("Hold for BIOS", 105, WHITE);
-    drawSmall("Release to continue boot", 130, DIM);
+    drawSmall("Release to continue boot", 130, WHITE);
 
     // Progress bar
     const int barX = 30;
@@ -418,6 +418,54 @@ bool boot_screen::showBiosCountdown() {
     return held;
 }
 
+void boot_screen::setStep(uint8_t step, uint8_t total, const char* label) {
+    static bool screenReady = false;
+
+    // ── Layout constants ─────────────────────────────────
+    const int barX  = 30;
+    const int barY  = 210;
+    const int barW  = LCD_WIDTH - 60;
+    const int barH  = 6;
+    const int lblY  = barY + barH + 10;
+
+    // ── First call: draw the static frame ────────────────
+    if (!screenReady || step == 0) {
+        clearScreen();
+
+        drawCentered("Aksabot", 72, WHITE, 1.3f);
+        tft.drawFastHLine(CX - 44, 98, 88, GLOW_4);
+        drawSmall("Initializing...", 108, CYAN);
+
+        // Three decorative dots in the middle of the screen
+        tft.fillCircle(CX - 18, 170, 2, GLOW_4);
+        tft.fillCircle(CX,      170, 2, GLOW_4);
+        tft.fillCircle(CX + 18, 170, 2, GLOW_4);
+
+        // Bar outline
+        tft.drawRoundRect(barX - 1, barY - 1, barW + 2, barH + 2, 3, GLOW_2);
+
+        screenReady = true;
+
+        if (step == 0) return;
+    }
+
+    // ── Update progress bar ───────────────────────────────
+    if (total > 0) {
+        int fillW = (int)((step * barW) / total);
+        if (fillW > barW) fillW = barW;
+        if (fillW > 0) {
+            tft.fillRoundRect(barX, barY, fillW, barH, 2, CYAN);
+        }
+        if (fillW < barW) {
+            tft.fillRect(barX + fillW, barY, barW - fillW, barH, BG);
+        }
+    }
+
+    // ── Update step label ─────────────────────────────────
+    tft.fillRect(0, lblY, LCD_WIDTH, 20, BG);
+    drawSmall(label, lblY, WHITE);
+}
+
 void boot_screen::showSetupComplete(const char* ssid) {
     clearScreen();
 
@@ -435,10 +483,10 @@ void boot_screen::showSetupComplete(const char* ssid) {
     char ssidLine[36];
     snprintf(ssidLine, sizeof(ssidLine), "\"%s\"", ssid);
     drawSmall(ssidLine, 162, CYAN);
-    drawSmall("Connected to the internet", 182, DIM);
+    drawSmall("Connected to the internet", 182, WHITE);
 
     tft.drawFastHLine(30, 206, LCD_WIDTH - 60, GLOW_3);
-    drawSmall("Starting Aksabot...", 216, DIM);
+    drawSmall("Starting Aksabot...", 216, WHITE);
 
     delay(2500);
 }

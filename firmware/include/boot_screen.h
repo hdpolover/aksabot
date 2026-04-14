@@ -63,4 +63,9 @@ void showRebootingForSetup();
 /// Returns false if the countdown expired without a hold (continue boot).
 bool showBiosCountdown();
 
+/// Show or update the hardware init progress screen.
+/// Call once per subsystem as it initializes. step goes from 1..total.
+/// Calling with step=0 resets the screen (call before hardware init begins).
+void setStep(uint8_t step, uint8_t total, const char* label);
+
 }  // namespace boot_screen

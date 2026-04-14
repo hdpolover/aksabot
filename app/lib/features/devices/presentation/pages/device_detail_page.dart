@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ import '../../../../core/widgets/status_dot.dart';
 import '../../domain/entities/device_entity.dart';
 import '../../domain/repositories/devices_repository.dart';
 import '../bloc/devices_bloc.dart';
+import 'ble_provisioning_page.dart';
 
 class DeviceDetailPage extends StatelessWidget {
   final String deviceId;
@@ -509,7 +511,35 @@ class _StatusCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final ac = theme.extension<AppColors>()!;
     final online = device.isOnline;
+    final s = device.settingsJson;
+
+    final presenceEnabled = s['presence_enabled'] as bool? ?? false;
+    final weatherEnabled = s['integrations_weather'] as bool? ?? false;
+    final rssi = device.wifiRssi;
+
+    // Build the feature pills that are active / relevant
+    final pills = <_StatusPill>[
+      if (online && presenceEnabled)
+        _StatusPill(
+          icon: Icons.sensors_rounded,
+          label: 'Presence',
+          color: ac.info,
+        ),
+      if (online && weatherEnabled)
+        _StatusPill(
+          icon: Icons.wb_sunny_rounded,
+          label: 'Weather',
+          color: cs.tertiary,
+        ),
+      if (online && rssi != null)
+        _StatusPill(
+          icon: _wifiIcon(rssi),
+          label: _wifiLabel(rssi),
+          color: _wifiColor(rssi, ac),
+        ),
+    ];
 
     return Card(
       child: Padding(
@@ -517,39 +547,68 @@ class _StatusCard extends StatelessWidget {
           horizontal: AppConstants.spacingLg,
           vertical: AppConstants.spacingMd,
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            StatusDot(
-              variant: online
-                  ? StatusDotVariant.online
-                  : StatusDotVariant.offline,
+            // ── Connection row ───────────────────────────────────────
+            Row(
+              children: [
+                StatusDot(
+                  variant: online
+                      ? StatusDotVariant.online
+                      : StatusDotVariant.offline,
+                ),
+                const SizedBox(width: AppConstants.spacingSm),
+                Text(
+                  online ? 'Connected' : 'Offline',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: online ? cs.primary : cs.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (online && device.wifiSsid != null) ...[
+                  const SizedBox(width: AppConstants.spacingXs),
+                  Flexible(
+                    child: Text(
+                      '· ${device.wifiSsid}',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: cs.onSurfaceVariant),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+                const Spacer(),
+                if (device.lastSeenAt != null)
+                  Text(
+                    online
+                        ? _formatUptime(
+                            DateTime.now().difference(device.lastSeenAt!))
+                        : _formatTimeAgo(device.lastSeenAt!),
+                    style: theme.textTheme.labelSmall
+                        ?.copyWith(color: cs.outline),
+                  ),
+              ],
             ),
-            const SizedBox(width: AppConstants.spacingSm),
-            Text(
-              online ? 'Connected' : 'Offline',
-              style: theme.textTheme.titleSmall?.copyWith(
-                color: online ? cs.primary : cs.onSurfaceVariant,
-                fontWeight: FontWeight.w600,
+
+            // ── Feature pills (only when there's something to show) ──
+            if (pills.isNotEmpty) ...[
+              const SizedBox(height: AppConstants.spacingMd),
+              Wrap(
+                spacing: AppConstants.spacingSm,
+                runSpacing: AppConstants.spacingXs,
+                children: pills.map((p) => _PillChip(pill: p)).toList(),
               ),
-            ),
-            if (online && device.wifiSsid != null) ...[
-              const SizedBox(width: AppConstants.spacingXs),
+            ],
+
+            // ── Offline hint ─────────────────────────────────────────
+            if (!online && device.lastSeenAt == null) ...[
+              const SizedBox(height: AppConstants.spacingXs),
               Text(
-                '· ${device.wifiSsid}',
+                'Never connected — make sure the device is powered on and provisioned.',
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: cs.onSurfaceVariant),
               ),
             ],
-            const Spacer(),
-            if (device.lastSeenAt != null)
-              Text(
-                online
-                    ? _formatUptime(
-                        DateTime.now().difference(device.lastSeenAt!))
-                    : _formatTimeAgo(device.lastSeenAt!),
-                style: theme.textTheme.labelSmall
-                    ?.copyWith(color: cs.outline),
-              ),
           ],
         ),
       ),
@@ -567,6 +626,64 @@ class _StatusCard extends StatelessWidget {
     if (diff.inDays > 0) return '${diff.inDays}d ago';
     if (diff.inHours > 0) return '${diff.inHours}h ago';
     return '${diff.inMinutes}m ago';
+  }
+
+  static IconData _wifiIcon(int rssi) {
+    if (rssi >= -60) return Icons.network_wifi_rounded;
+    if (rssi >= -70) return Icons.network_wifi_2_bar_rounded;
+    return Icons.network_wifi_1_bar_rounded;
+  }
+
+  static String _wifiLabel(int rssi) {
+    if (rssi >= -60) return 'Excellent';
+    if (rssi >= -70) return 'Good';
+    if (rssi >= -80) return 'Fair';
+    return 'Weak';
+  }
+
+  static Color _wifiColor(int rssi, AppColors ac) {
+    if (rssi >= -60) return ac.success;
+    if (rssi >= -70) return ac.info;
+    if (rssi >= -80) return ac.warning;
+    return ac.warning;
+  }
+}
+
+class _StatusPill {
+  final IconData icon;
+  final String label;
+  final Color color;
+  const _StatusPill({required this.icon, required this.label, required this.color});
+}
+
+class _PillChip extends StatelessWidget {
+  final _StatusPill pill;
+  const _PillChip({required this.pill});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: pill.color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(pill.icon, size: 13, color: pill.color),
+          const SizedBox(width: 5),
+          Text(
+            pill.label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: pill.color,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -849,7 +966,7 @@ class _SettingsRowTile extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Reconnect row — standalone card below Device settings group
+// Re-provision row — standalone card below Device settings group
 // ---------------------------------------------------------------------------
 
 class _ReconnectRow extends StatelessWidget {
@@ -897,13 +1014,13 @@ class _ReconnectRow extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Reconnect Device',
+                        'Re-provision / Change Wi-Fi',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w500,
                         ),
                       ),
                       Text(
-                        'Re-run setup if Wi-Fi or token changed',
+                        'Update Wi-Fi credentials without losing data',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: cs.onSurfaceVariant,
                         ),
@@ -961,6 +1078,28 @@ class _ReconnectSheetState extends State<_ReconnectSheet> {
   _SheetStep _step = _SheetStep.choose;
   String? _error;
 
+  // Countdown (wait-for-reboot step)
+  static const _countdownStart = 6;
+  int _countdown = _countdownStart;
+  Timer? _countdownTimer;
+  Timer? _offlinePoller;
+
+  // Online poller (wait-for-online step)
+  Timer? _onlinePoller;
+  bool _deviceBackOnline = false;
+  int _waitingSeconds = 0;
+  static const _onlineTimeoutSeconds = 90;
+
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    _offlinePoller?.cancel();
+    _onlinePoller?.cancel();
+    super.dispose();
+  }
+
+  // ── Build ──────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -976,15 +1115,16 @@ class _ReconnectSheetState extends State<_ReconnectSheet> {
           child: switch (_step) {
             _SheetStep.choose => _buildChooseStep(),
             _SheetStep.signaling => _buildSignalingStep(),
-            _SheetStep.waitForReboot => _buildWaitStep(),
+            _SheetStep.countdown => _buildCountdownStep(),
             _SheetStep.offlineInstructions => _buildOfflineStep(),
+            _SheetStep.waitingOnline => _buildWaitingOnlineStep(),
           },
         ),
       ),
     );
   }
 
-  // ── Step: choose path ──────────────────────────────────
+  // ── Step: choose ───────────────────────────────────────
 
   Widget _buildChooseStep() {
     final theme = Theme.of(context);
@@ -995,26 +1135,13 @@ class _ReconnectSheetState extends State<_ReconnectSheet> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Handle
-        Center(
-          child: Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: cs.outlineVariant,
-              borderRadius: BorderRadius.circular(AppConstants.radiusFull),
-            ),
-          ),
-        ),
+        _SheetHandle(cs: cs),
         const SizedBox(height: AppConstants.spacingXxl),
-
-        Text(
-          'Reconnect Device',
-          style: theme.textTheme.titleLarge,
-        ),
+        Text('Re-provision Device', style: theme.textTheme.titleLarge),
         const SizedBox(height: AppConstants.spacingSm),
         Text(
-          'Use this when the device lost its Wi-Fi credentials, its token changed, or you moved it to a new network.',
+          'Use this when you\'ve changed your Wi-Fi network or password. '
+          'Your conversations, memories, and settings are kept.',
           style: theme.textTheme.bodyMedium?.copyWith(
             color: cs.onSurfaceVariant,
           ),
@@ -1022,35 +1149,34 @@ class _ReconnectSheetState extends State<_ReconnectSheet> {
         const SizedBox(height: AppConstants.spacingXxl),
 
         if (widget.deviceIsOnline) ...[
-          // Online path
           FilledButton.icon(
             onPressed: _signalDevice,
             icon: const Icon(Icons.wifi_tethering_rounded),
             label: const Text('Signal device to enter setup mode'),
           ),
+          const SizedBox(height: AppConstants.spacingMd),
+          Center(
+            child: TextButton(
+              onPressed: () =>
+                  setState(() => _step = _SheetStep.offlineInstructions),
+              child: const Text('Device not responding? Do it manually'),
+            ),
+          ),
+        ] else ...[
+          OutlinedButton.icon(
+            onPressed: () =>
+                setState(() => _step = _SheetStep.offlineInstructions),
+            icon: const Icon(Icons.power_settings_new_rounded),
+            label: const Text('Put device in setup mode manually'),
+          ),
           const SizedBox(height: AppConstants.spacingSm),
           Text(
-            'Device is online — it will reboot into BLE setup mode automatically. Keep your phone close.',
+            'Device is offline — hold BOOT while powering on.',
             textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: cs.onSurfaceVariant),
           ),
-          const SizedBox(height: AppConstants.spacingXxl),
-          const Divider(),
-          const SizedBox(height: AppConstants.spacingXxl),
         ],
-
-        // Offline / manual path
-        OutlinedButton.icon(
-          onPressed: () => setState(() => _step = _SheetStep.offlineInstructions),
-          icon: const Icon(Icons.power_settings_new_rounded),
-          label: const Text('Device is offline — manual setup'),
-        ),
-        const SizedBox(height: AppConstants.spacingSm),
-        Text(
-          'Hold the BOOT button while powering on to enter setup mode.',
-          textAlign: TextAlign.center,
-          style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-        ),
 
         if (_error != null) ...[
           const SizedBox(height: AppConstants.spacingMd),
@@ -1072,78 +1198,96 @@ class _ReconnectSheetState extends State<_ReconnectSheet> {
     return Column(
       key: const ValueKey('signaling'),
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Center(
-          child: SizedBox(
-            width: 48,
-            height: 48,
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-              color: theme.colorScheme.primary,
-            ),
+        const SizedBox(height: AppConstants.spacingXxl),
+        SizedBox(
+          width: 48,
+          height: 48,
+          child: CircularProgressIndicator(
+            strokeWidth: 3,
+            color: theme.colorScheme.primary,
           ),
         ),
         const SizedBox(height: AppConstants.spacingXxl),
         Text(
-          'Signaling device...',
+          'Signaling device…',
           textAlign: TextAlign.center,
           style: theme.textTheme.titleLarge,
         ),
         const SizedBox(height: AppConstants.spacingSm),
         Text(
-          'Sending setup command to your device.',
+          'Sending the reboot command.',
           textAlign: TextAlign.center,
           style: theme.textTheme.bodyMedium?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
+        const SizedBox(height: AppConstants.spacingXxl),
       ],
     );
   }
 
-  // ── Step: wait for reboot ──────────────────────────────
+  // ── Step: countdown ────────────────────────────────────
 
-  Widget _buildWaitStep() {
+  Widget _buildCountdownStep() {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final ac = theme.extension<AppColors>()!;
+    final ready = _countdown <= 0;
 
     return Column(
-      key: const ValueKey('wait'),
+      key: const ValueKey('countdown'),
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Center(
-          child: Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: ac.successContainer,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(Icons.check_rounded, color: ac.success, size: 40),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              SizedBox(
+                width: 80,
+                height: 80,
+                child: CircularProgressIndicator(
+                  strokeWidth: 4,
+                  value: ready ? 1.0 : (_countdownStart - _countdown) / _countdownStart,
+                  color: ready ? ac.success : cs.primary,
+                  backgroundColor: cs.surfaceContainerHigh,
+                ),
+              ),
+              if (ready)
+                Icon(Icons.check_rounded, color: ac.success, size: 36)
+              else
+                Text(
+                  '$_countdown',
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: cs.primary,
+                  ),
+                ),
+            ],
           ),
         ),
         const SizedBox(height: AppConstants.spacingXxl),
         Text(
-          'Command sent',
+          ready ? 'Device is rebooting' : 'Command sent',
           textAlign: TextAlign.center,
-          style: theme.textTheme.headlineSmall,
+          style: theme.textTheme.titleLarge,
         ),
         const SizedBox(height: AppConstants.spacingSm),
         Text(
-          'Your device is rebooting into setup mode. Wait ~5 seconds for it to restart, then tap Continue.',
+          ready
+              ? 'Keep your phone close — starting BLE setup.'
+              : 'Waiting for device to reboot… keep your phone close.',
           textAlign: TextAlign.center,
-          style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: cs.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: AppConstants.spacingXxl),
         FilledButton(
-          onPressed: () {
-            Navigator.of(context).pop();
-            context.push('/devices/add');
-          },
-          child: const Text('Continue to setup'),
+          onPressed: ready ? _startBleProvisioning : null,
+          child: const Text('Continue to BLE setup'),
         ),
         const SizedBox(height: AppConstants.spacingSm),
         TextButton(
@@ -1165,16 +1309,7 @@ class _ReconnectSheetState extends State<_ReconnectSheet> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Center(
-          child: Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: cs.outlineVariant,
-              borderRadius: BorderRadius.circular(AppConstants.radiusFull),
-            ),
-          ),
-        ),
+        _SheetHandle(cs: cs),
         const SizedBox(height: AppConstants.spacingXxl),
         Text('Put device in setup mode', style: theme.textTheme.titleLarge),
         const SizedBox(height: AppConstants.spacingMd),
@@ -1190,16 +1325,82 @@ class _ReconnectSheetState extends State<_ReconnectSheet> {
         ],
         const SizedBox(height: AppConstants.spacingXxl),
         FilledButton(
-          onPressed: () {
-            Navigator.of(context).pop();
-            context.push('/devices/add');
-          },
-          child: const Text('Continue to setup'),
+          onPressed: _startBleProvisioning,
+          child: const Text('Continue to BLE setup'),
         ),
         const SizedBox(height: AppConstants.spacingSm),
         TextButton(
           onPressed: () => setState(() => _step = _SheetStep.choose),
           child: const Text('Back'),
+        ),
+      ],
+    );
+  }
+
+  // ── Step: waiting for device to come back online ───────
+
+  Widget _buildWaitingOnlineStep() {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final ac = theme.extension<AppColors>()!;
+    final timedOut = _waitingSeconds >= _onlineTimeoutSeconds;
+
+    return Column(
+      key: const ValueKey('waitingOnline'),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Center(
+          child: Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: _deviceBackOnline
+                  ? ac.successContainer
+                  : cs.primaryContainer.withValues(alpha: 0.5),
+              shape: BoxShape.circle,
+            ),
+            child: _deviceBackOnline
+                ? Icon(Icons.check_rounded, color: ac.success, size: 40)
+                : timedOut
+                    ? Icon(Icons.schedule_rounded,
+                        color: cs.onSurfaceVariant, size: 36)
+                    : Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          color: cs.primary,
+                        ),
+                      ),
+          ),
+        ),
+        const SizedBox(height: AppConstants.spacingXxl),
+        Text(
+          _deviceBackOnline
+              ? 'Device is back online!'
+              : timedOut
+                  ? 'Taking longer than expected'
+                  : 'Waiting for device to reconnect…',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.titleLarge,
+        ),
+        const SizedBox(height: AppConstants.spacingSm),
+        Text(
+          _deviceBackOnline
+              ? 'Everything is set up. Your device reconnected successfully.'
+              : timedOut
+                  ? 'The device should come online in a moment. '
+                      'Pull to refresh on the home screen to check.'
+                  : 'The device is connecting to Wi-Fi with the new credentials.',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: cs.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: AppConstants.spacingXxl),
+        FilledButton(
+          onPressed: _closeAndRefresh,
+          child: Text(_deviceBackOnline ? 'Done' : 'Close'),
         ),
       ],
     );
@@ -1225,14 +1426,125 @@ class _ReconnectSheetState extends State<_ReconnectSheet> {
           _error = 'Failed to signal device: ${failure.message}';
         });
       },
-      (_) {
-        setState(() => _step = _SheetStep.waitForReboot);
-      },
+      (_) => _startCountdown(),
     );
+  }
+
+  void _startCountdown() {
+    setState(() {
+      _countdown = _countdownStart;
+      _step = _SheetStep.countdown;
+    });
+
+    // Tick down every second
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() => _countdown = (_countdown - 1).clamp(0, _countdownStart));
+      if (_countdown <= 0) t.cancel();
+    });
+
+    // Poll for device going offline — once it does, auto-advance
+    _offlinePoller = Timer.periodic(const Duration(seconds: 2), (t) async {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      final repo = sl<DevicesRepository>();
+      final result = await repo.getDevice(widget.deviceId);
+      result.fold((_) {}, (device) {
+        if (!device.isOnline && mounted && _step == _SheetStep.countdown) {
+          t.cancel();
+          _countdownTimer?.cancel();
+          setState(() => _countdown = 0); // unlock button
+        }
+      });
+    });
+  }
+
+  Future<void> _startBleProvisioning() async {
+    _countdownTimer?.cancel();
+    _offlinePoller?.cancel();
+
+    // Push BLE provisioning in changeWifiMode — skips re-registration,
+    // only re-writes Wi-Fi credentials to this existing device.
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => const BleProvisioningPage(changeWifiMode: true),
+      ),
+    );
+
+    if (!mounted) return;
+
+    // BLE page was popped — start polling for device to come back online
+    _startOnlinePolling();
+  }
+
+  void _startOnlinePolling() {
+    setState(() {
+      _step = _SheetStep.waitingOnline;
+      _waitingSeconds = 0;
+      _deviceBackOnline = false;
+    });
+
+    _onlinePoller = Timer.periodic(const Duration(seconds: 3), (t) async {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      _waitingSeconds += 3;
+
+      if (_waitingSeconds >= _onlineTimeoutSeconds) {
+        t.cancel();
+        setState(() {}); // show timeout UI
+        return;
+      }
+
+      final repo = sl<DevicesRepository>();
+      final result = await repo.getDevice(widget.deviceId);
+      result.fold((_) {}, (device) {
+        if (device.isOnline && mounted) {
+          t.cancel();
+          setState(() => _deviceBackOnline = true);
+        }
+      });
+    });
+  }
+
+  void _closeAndRefresh() {
+    _onlinePoller?.cancel();
+    Navigator.of(context).pop();
+    // Trigger a device list refresh so the home page status card updates
+    context.read<DevicesBloc>().add(const LoadDevices());
   }
 }
 
-enum _SheetStep { choose, signaling, waitForReboot, offlineInstructions }
+enum _SheetStep { choose, signaling, countdown, offlineInstructions, waitingOnline }
+
+// ---------------------------------------------------------------------------
+// Sheet handle — reusable drag handle bar for bottom sheets
+// ---------------------------------------------------------------------------
+
+class _SheetHandle extends StatelessWidget {
+  final ColorScheme cs;
+  const _SheetHandle({required this.cs});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        width: 40,
+        height: 4,
+        decoration: BoxDecoration(
+          color: cs.outlineVariant,
+          borderRadius: BorderRadius.circular(AppConstants.radiusFull),
+        ),
+      ),
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Instruction row (shared with offline step)

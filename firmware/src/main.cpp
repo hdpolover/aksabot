@@ -1469,9 +1469,16 @@ void setup() {
     }
 
     // ── 5. Hardware init ───────────────────────────────────
+    // Steps shown on boot progress screen (8 steps total).
+    const uint8_t BOOT_STEPS = 8;
 
+    boot_screen::setStep(1, BOOT_STEPS, "SD Card");
     sd_storage::init();
+
+    boot_screen::setStep(2, BOOT_STEPS, "TTS Cache");
     tts_cache::init();
+
+    boot_screen::setStep(3, BOOT_STEPS, "Audio Buffers");
     recording_buffer::init();
     resilience_audio::init();
 
@@ -1481,12 +1488,15 @@ void setup() {
     // presence:arrived / presence:departed events HERE via WebSocket.
     // No local RSSI scanning is needed on the firmware side.
 
+    boot_screen::setStep(4, BOOT_STEPS, "Touch Input");
     touch::init();
     touch::onEvent(onTouchEvent);
 
+    boot_screen::setStep(5, BOOT_STEPS, "Audio I/O");
     audio_io::init();
     audioInitialized = true;
 
+    boot_screen::setStep(6, BOOT_STEPS, "Opus Codec");
     bool opusOk = opus_codec::init();
     if (!opusOk) {
         Serial.println("[Main] FATAL: Opus init failed");
@@ -1498,11 +1508,13 @@ void setup() {
     // internally; without the decoder the SFX would play silently).
     resilience_audio::playClip(resilience_audio::Clip::BOOT);
 
+    boot_screen::setStep(7, BOOT_STEPS, "Subsystems");
     vad::init();
     ota_update::init();
     status_led::init();
 
     // Load brightness from NVS and pass to power manager
+    boot_screen::setStep(8, BOOT_STEPS, "Power Manager");
     {
         power_manager::Config pwrCfg;
         uint8_t savedBrightness = nvs_store::getBrightness();
