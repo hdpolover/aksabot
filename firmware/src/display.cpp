@@ -370,9 +370,9 @@ static void drawEyeClosed(LGFX_Sprite& s, int cx, int cy, int r, bool curveUp) {
     thickBezier(s, cx - r, cy, cx, cy + bend, cx + r, cy, 2, g_faceEyeBody565, 20);
 }
 
-static void drawEyeX(LGFX_Sprite& s, int cx, int cy, int size, uint16_t color) {
+static void drawEyeX(LGFX_Sprite& s, int cx, int cy, int size, uint16_t color, int thickness = 2) {
     int hs = size / 2;
-    for (int i = -2; i <= 2; i++) {
+    for (int i = -thickness; i <= thickness; i++) {
         s.drawLine(cx - hs + i, cy - hs, cx + hs + i, cy + hs, color);
         s.drawLine(cx + hs + i, cy - hs, cx - hs + i, cy + hs, color);
     }
@@ -478,10 +478,14 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
                 }
             } else {
                 if (nova) {
-                    // Wide arc smile — control below endpoints = bows downward = smile
-                    thickBezier(s, CX - 28, my,     CX, my + 18, CX + 28, my,     4, pal.mouth);
-                    thickBezier(s, CX - 18, my + 2, CX, my + 11, CX + 18, my + 2, 2,
-                                blendRGB565(TFT_WHITE, pal.mouth, 160), 16);
+                    // D-shaped grin: filled cavity + thick arc upper lip + teeth strip
+                    // Grin cavity (the "inside" of the open mouth)
+                    s.fillRoundRect(CX - 30, my + 4, 60, 18, 4, pal.mouth);
+                    // Thick smile arc closing the top (upper lip)
+                    thickBezier(s, CX - 34, my + 2, CX, my + 24, CX + 34, my + 2, 5, pal.mouth);
+                    // Teeth strip — bright horizontal bar at top of cavity
+                    s.fillRect(CX - 22, my + 6, 44, 5,
+                               blendRGB565(TFT_WHITE, pal.mouth, 200));
                 } else {
                     thickBezier(s, CX - 26, my, CX, my + 16, CX + 26, my, 3, pal.mouth);
                     thickBezier(s, CX - 16, my + 2, CX, my + 10, CX + 16, my + 2, 2,
@@ -666,13 +670,19 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             break;
         }
         case face::Expression::SLEEPING: {
-            // Z text — same for both styles
-            float bOff = sinf(breathPhase * 2 * 3.14159f) * 5;
-            s.setTextSize(2);
-            s.setTextColor(pal.accent);
-            s.drawChar('z', CX + 22, my - 5 + (int)bOff);
-            s.setTextSize(3);
-            s.drawChar('Z', CX + 35, my - 25 + (int)(bOff * 0.7f));
+            // Three Zs at 120° phase offsets — each cycles from small+bright to large+faded
+            // breathPhase drives the cycle; faster cycle (×1.5) so they feel lively
+            for (int zi = 0; zi < 3; zi++) {
+                float phase = fmodf(breathPhase * 1.5f + zi * 0.333f, 1.0f);
+                int fontSize = 1 + (int)(phase * 2.0f);     // size 1→3
+                int xPos = CX + 16 + (int)(phase * 18.0f);  // drifts right
+                int yPos = my  -      (int)(phase * 42.0f);  // rises up
+                // Fade quadratically so they're bright early and dim late
+                uint8_t a = (uint8_t)(220.0f * (1.0f - phase * phase));
+                s.setTextSize(fontSize);
+                s.setTextColor(blendRGB565(pal.accent, pal.bg, a));
+                s.drawChar('Z', xPos, yPos);
+            }
             break;
         }
         case face::Expression::OFFLINE:
@@ -712,13 +722,15 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             // Wide open "O" mouth — "oh wow!"
             float pulse = sinf(breathPhase * 2 * 3.14159f) * 0.1f + 0.9f;
             if (nova) {
-                // Tall rounded rect — rectangular O-mouth
+                // Rectangular open mouth — matches Nova's square language
                 int mw = (int)(44 * pulse);
                 int mh = (int)(52 * pulse);
-                int cr = mw / 3;
-                s.fillRoundRect(CX - mw / 2, my - mh / 2, mw, mh, cr, pal.mouth);
-                s.fillRoundRect(CX - mw / 2 + 5, my - mh / 2 + 5, mw - 10, mh - 10, cr,
-                                blendRGB565(pal.accent, pal.bg, 25));
+                s.fillRoundRect(CX - mw / 2, my - mh / 2, mw, mh, 4, pal.mouth);
+                // Square off the top edge
+                s.fillRect(CX - mw / 2, my - mh / 2, mw, 4, pal.mouth);
+                // Dark inner cavity
+                s.fillRoundRect(CX - mw / 2 + 5, my - mh / 2 + 5, mw - 10, mh - 10, 3,
+                                blendRGB565(pal.accent, pal.bg, 40));
             } else {
                 int ow = (int)(26 * pulse);
                 int oh = (int)(28 * pulse);
@@ -731,13 +743,15 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
             // Maximum gape — jaw dropped open, trembling slightly
             float trem = sinf(breathPhase * 6.28f * 5) * 1.5f;
             if (nova) {
-                // Tall rounded rect with tremor
+                // Rectangular gape — sharp corners, trembling
                 int mw = 52;
                 int mh = 56 + (int)trem;
-                int cr = mw / 3;
-                s.fillRoundRect(CX - mw / 2, my - mh / 2 + 4, mw, mh, cr, pal.mouth);
-                s.fillRoundRect(CX - mw / 2 + 5, my - mh / 2 + 9, mw - 10, mh - 10, cr,
-                                blendRGB565(pal.accent, pal.bg, 20));
+                s.fillRoundRect(CX - mw / 2, my - mh / 2 + 4, mw, mh, 4, pal.mouth);
+                // Square off the top
+                s.fillRect(CX - mw / 2, my - mh / 2 + 4, mw, 4, pal.mouth);
+                // Dark inner cavity
+                s.fillRoundRect(CX - mw / 2 + 5, my - mh / 2 + 9, mw - 10, mh - 10, 3,
+                                blendRGB565(pal.accent, pal.bg, 40));
             } else {
                 int ow = 32;
                 int oh = 34 + (int)trem;
@@ -761,15 +775,17 @@ static void drawMouth(LGFX_Sprite& s, face::Expression expr, const Palette& pal,
                 }
             } else {
                 if (nova) {
-                    // Tight clenched frown — control above endpoints = bows upward = frown
-                    thickBezier(s, CX - 20, my + 4, CX, my - 4, CX + 20, my + 4, 3, pal.mouth);
-                    // Teeth-clenched highlight line
-                    thickBezier(s, CX - 12, my + 4, CX, my - 1, CX + 12, my + 4, 1,
-                                blendRGB565(TFT_WHITE, pal.mouth, 100), 12);
+                    // Rectangular clenched grimace — two thin rects with a gap (teeth)
+                    // Upper lip bar
+                    s.fillRect(CX - 22, my - 2, 44, 4, pal.mouth);
+                    // Lower lip bar (slightly narrower, gap between = exposed teeth)
+                    s.fillRect(CX - 18, my + 4, 36, 4, pal.mouth);
+                    // Thin white teeth strip in the gap
+                    s.fillRect(CX - 16, my + 2, 32, 2,
+                               blendRGB565(TFT_WHITE, pal.mouth, 180));
                 } else {
                     // Tight clenched frown
                     thickBezier(s, CX - 20, my + 2, CX, my - 6, CX + 20, my + 2, 3, pal.mouth);
-                    // Teeth-clenched line
                     thickBezier(s, CX - 12, my + 2, CX, my - 2, CX + 12, my + 2, 1,
                                 blendRGB565(TFT_WHITE, pal.mouth, 100), 12);
                 }
@@ -861,9 +877,18 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
     }
 
     if (fs.expression == face::Expression::SLEEPING) {
-        float bOff = sinf(fs.breathPhase * 2 * 3.14159f) * 3;
-        drawEyeClosed(s, leftEyeX,  eyeY + (int)bOff, 24, false);
-        drawEyeClosed(s, rightEyeX, eyeY + (int)bOff, 24, false);
+        const bool novaSleep = (g_faceStyle && g_faceStyle->id == face_style::StyleId::NOVA);
+        float bOff = sinf(fs.breathPhase * 2 * 3.14159f) * 3.0f;
+        if (novaSleep) {
+            // Nova: thin flat rect slits — matches rectangular eye language
+            int slitW = 68, slitH = 3;
+            int slitY = eyeY - slitH / 2 + (int)bOff;
+            s.fillRect(leftEyeX  - slitW / 2, slitY, slitW, slitH, g_faceEyeBody565);
+            s.fillRect(rightEyeX - slitW / 2, slitY, slitW, slitH, g_faceEyeBody565);
+        } else {
+            drawEyeClosed(s, leftEyeX,  eyeY + (int)bOff, 24, false);
+            drawEyeClosed(s, rightEyeX, eyeY + (int)bOff, 24, false);
+        }
     } else if (fs.expression == face::Expression::OFFLINE) {
         const bool novaOff = (g_faceStyle && g_faceStyle->id == face_style::StyleId::NOVA);
         if (novaOff) {
@@ -871,8 +896,9 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
             // The X is drawn on top — dead-screen look.
             drawEyeV2(s, leftEyeX,  eyeY, 1.0f, 0.0f, 0.0f, 0.0f, 68, 38);
             drawEyeV2(s, rightEyeX, eyeY, 1.0f, 0.0f, 0.0f, 0.0f, 68, 38);
-            drawEyeX(s, leftEyeX,  eyeY, 30, pal.accent);
-            drawEyeX(s, rightEyeX, eyeY, 30, pal.accent);
+            // Thick X — size 34 + thickness 4 for a bold dead-screen look
+            drawEyeX(s, leftEyeX,  eyeY, 34, pal.accent, 4);
+            drawEyeX(s, rightEyeX, eyeY, 34, pal.accent, 4);
         } else {
             // Orbit OFFLINE: plain white circle, NO pupil, X on top.
             s.fillSmoothCircle(leftEyeX,  eyeY, leftEye.r,  TFT_WHITE);
