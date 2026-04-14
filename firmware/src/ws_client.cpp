@@ -91,7 +91,7 @@ static void onMessage(WebsocketsMessage msg) {
     }
 
     const char* event = doc["event"] | "";
-    char dataBuf[512];
+    char dataBuf[1024];
     if (doc["data"].isNull()) {
         dataBuf[0] = '\0';
     } else {
