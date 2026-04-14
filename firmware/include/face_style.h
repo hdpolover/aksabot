@@ -31,6 +31,13 @@ struct ExprEyeStyle {
 
     // ── Shared ────────────────────────────────────────────────────────────
     bool    hasBrows;         ///< Draw eyebrows for this expression (both styles)
+
+    // ── Nova v3 top-lid tilt ──────────────────────────────────────────────
+    // Positive = corner raised (visually higher on screen).
+    // Inner = the side facing the nose. Left eye: right top. Right eye: left top.
+    // Outer = the far side.              Left eye: left top. Right eye: right top.
+    int8_t  tiltInner;        ///< Top inner corner offset in pixels (+raised/-lowered)
+    int8_t  tiltOuter;        ///< Top outer corner offset in pixels (+raised/-lowered)
 };
 
 /// Unique style identifiers — stored in NVS as uint8_t.
