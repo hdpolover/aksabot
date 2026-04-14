@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -37,6 +39,25 @@ class _HomeViewState extends State<_HomeView> {
   // Cached so the UI doesn't flash to empty while refreshing or during
   // a LoadDevice call triggered by DeviceDashboardBody's pull-to-refresh.
   Device? _device;
+
+  Timer? _pollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Poll every 30 s so online/offline status stays fresh without manual refresh.
+    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) {
+        context.read<DevicesBloc>().add(const LoadDevices());
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
