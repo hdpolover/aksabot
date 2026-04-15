@@ -28,4 +28,9 @@ enum class Clip {
 /// or the clip file is missing.
 void play(Clip clip);
 
+/// Enable or disable ambient UI audio (e.g. notifications, presence, WiFi sounds).
+/// HOLD_START and RECORDING_STOP are always audible regardless — they are
+/// interaction feedback, not ambient sounds.
+void setEnabled(bool enabled);
+
 }  // namespace ui_audio

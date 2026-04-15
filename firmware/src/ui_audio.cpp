@@ -4,6 +4,7 @@
 #include <Arduino.h>
 
 static const char* UI_AUDIO_DIR = "/audio/ui";
+static bool g_uiAudioEnabled = true;
 
 static const char* clipFileName(ui_audio::Clip clip) {
     switch (clip) {
@@ -21,10 +22,19 @@ static const char* clipFileName(ui_audio::Clip clip) {
 }
 
 void ui_audio::play(Clip clip) {
+    // HOLD_START and RECORDING_STOP are interaction feedback — always audible.
+    // Everything else respects the sfx_enabled toggle.
+    bool isInteractionFeedback = (clip == Clip::HOLD_START || clip == Clip::RECORDING_STOP);
+    if (!g_uiAudioEnabled && !isInteractionFeedback) return;
+
     const char* fname = clipFileName(clip);
     if (!fname) return;
 
     char path[72];
     snprintf(path, sizeof(path), "%s/%s", UI_AUDIO_DIR, fname);
     ogg_player::playFile(path);
+}
+
+void ui_audio::setEnabled(bool enabled) {
+    g_uiAudioEnabled = enabled;
 }

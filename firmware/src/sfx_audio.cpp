@@ -3,8 +3,10 @@
 #include <Arduino.h>
 
 static const char* SFX_DIR = "/audio/sfx";
+static bool g_sfxEnabled = true;
 
 void sfx_audio::play(const char* clipName) {
+    if (!g_sfxEnabled) return;
     if (!clipName || !*clipName) return;
 
     char path[72];
@@ -13,4 +15,8 @@ void sfx_audio::play(const char* clipName) {
     if (!ogg_player::playFile(path)) {
         Serial.printf("[SfxAudio] Could not play: %s\n", path);
     }
+}
+
+void sfx_audio::setEnabled(bool enabled) {
+    g_sfxEnabled = enabled;
 }

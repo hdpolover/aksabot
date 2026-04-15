@@ -27,6 +27,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
   double _brightness = 70;
   bool _showTranscript = false;
   bool _ttsEnabled = true;
+  bool _sfxEnabled = true;
   String _idleTimeout = '30';
 
 
@@ -55,12 +56,14 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
         final br = (s['brightness'] as num?)?.toDouble();
         final tr = s['display_transcript'] as bool?;
         final tts = s['tts_enabled'] as bool?;
+        final sfx = s['sfx_enabled'] as bool?;
         final minutes = timeoutSec != null ? (timeoutSec ~/ 60) : 30;
         setState(() {
           _volume = vol ?? 70;
           _brightness = br ?? 70;
           _showTranscript = tr ?? false;
           _ttsEnabled = tts ?? true;
+          _sfxEnabled = sfx ?? true;
           _idleTimeout =
               const ['1', '5', '10', '30'].contains(minutes.toString())
                   ? minutes.toString()
@@ -82,6 +85,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
       'brightness': _brightness.round(),
       'display_transcript': _showTranscript,
       'tts_enabled': _ttsEnabled,
+      'sfx_enabled': _sfxEnabled,
       'idle_timeout_seconds': int.parse(_idleTimeout) * 60,
     });
     if (!mounted) return;
@@ -225,6 +229,26 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
                       Switch(
                         value: _ttsEnabled,
                         onChanged: (v) => setState(() => _ttsEnabled = v),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Sound effects',
+                              style: theme.textTheme.bodyMedium),
+                          Text('Notification, presence & SFX clips',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colors.onSurfaceVariant,
+                              )),
+                        ],
+                      ),
+                      Switch(
+                        value: _sfxEnabled,
+                        onChanged: (v) => setState(() => _sfxEnabled = v),
                       ),
                     ],
                   ),

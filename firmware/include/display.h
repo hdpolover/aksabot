@@ -21,6 +21,7 @@ enum class Mode : uint8_t {
     STATUS,         // Wi-Fi, battery, uptime, stats
     GLANCE,         // Temporary idle screen — time + weather
     IMAGE,          // Static image from SD — tick() skips sprite rendering
+    TEXT_RESPONSE,  // Full-screen text response — used when TTS is disabled
 };
 
 /// Status bar data (visible in face and clock modes).
@@ -182,5 +183,17 @@ void setBiosOverlay(const char* title, const char* counter,
 
 /// Remove the BIOS overlay (normal face rendering resumes).
 void clearBiosOverlay();
+
+/// Append a sentence to the full-screen text response view.
+/// Switches to TEXT_RESPONSE mode on first call of a new response.
+/// Strips markdown before rendering.
+void appendTextResponse(const char* text);
+
+/// Mark the current text response as complete.
+/// Starts an 8-second auto-return timer back to the previous mode.
+void finalizeTextResponse();
+
+/// Dismiss the text response immediately and return to the previous mode.
+void clearTextResponse();
 
 }  // namespace display

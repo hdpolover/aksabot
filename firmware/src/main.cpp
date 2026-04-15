@@ -90,6 +90,11 @@ static volatile bool stopSpeakerPending = false;
 // sets playbackDone=true when the count reaches zero (all responses done).
 static volatile int8_t pendingResponseEnds = 0;
 
+// ── TTS toggle ────────────────────────────────────────
+// When false, the backend skips ElevenLabs synthesis and sends text only.
+// response:text triggers the full-screen TEXT_RESPONSE display mode instead.
+static bool s_ttsEnabled = true;
+
 // ── Echo mode (hold-to-record, release-to-playback) ───
 // Records raw stereo I2S frames to PSRAM (same as audio-pipeline test firmware).
 // Plays back raw stereo directly — no mono conversion, no quality loss.
@@ -343,9 +348,22 @@ static void onWsJson(const char* event, const char* data) {
             txt = respDoc["text"] | data;
         }
         Serial.printf("[Main] LLM: %s\n", txt);
-        display::setTranscriptText(txt);
+        if (s_ttsEnabled) {
+            display::setTranscriptText(txt);
+        } else {
+            display::appendTextResponse(txt);
+        }
     }
     else if (strcmp(event, "response:end") == 0) {
+        if (!s_ttsEnabled) {
+            // Text-only mode — no audio to drain. Finalize the text screen and
+            // return to idle; skip all TTS cache and playback-counter logic.
+            display::finalizeTextResponse();
+            appState.botState = BotState::IDLE;
+            syncFaceToState();
+            return;
+        }
+
         if (data && data[0] != '\0') {
             JsonDocument endDoc;
             if (deserializeJson(endDoc, data) == DeserializationError::Ok) {
@@ -682,6 +700,19 @@ static void onWsJson(const char* event, const char* data) {
                 display::setTranscriptOverlay(show);
                 nvs_store::setDisplayTranscript(show);
                 Serial.printf("[Main] Config: display_transcript=%s\n", show ? "true" : "false");
+            }
+            // TTS enabled toggle — when false, responses are text-only (no ElevenLabs)
+            if (!doc["tts_enabled"].isNull()) {
+                s_ttsEnabled = doc["tts_enabled"] | true;
+                if (!s_ttsEnabled) display::clearTextResponse();  // clear stale buffer on toggle
+                Serial.printf("[Main] Config: tts_enabled=%s\n", s_ttsEnabled ? "true" : "false");
+            }
+            // SFX enabled toggle — gates sfx_audio and ambient ui_audio clips
+            if (!doc["sfx_enabled"].isNull()) {
+                bool sfxOn = doc["sfx_enabled"] | true;
+                sfx_audio::setEnabled(sfxOn);
+                ui_audio::setEnabled(sfxOn);
+                Serial.printf("[Main] Config: sfx_enabled=%s\n", sfxOn ? "true" : "false");
             }
             // Presence detection enable/disable — saved to NVS, start/stop BLE advertising
             if (!doc["presence_enabled"].isNull()) {
@@ -1053,6 +1084,10 @@ static void onTouchEvent(touch::Event event) {
                 // Dismiss reminder
                 display::setMode(display::getHomeMode());
                 ws_client::sendEvent("proactive:dismiss");
+            }
+            else if (display::getMode() == display::Mode::TEXT_RESPONSE) {
+                // Dismiss text response screen
+                display::clearTextResponse();
             }
             else if (appState.botState == BotState::IDLE) {
                 ui_audio::play(ui_audio::Clip::TAP);

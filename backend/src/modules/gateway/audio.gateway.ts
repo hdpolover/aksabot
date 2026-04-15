@@ -1366,6 +1366,7 @@ export class AudioGateway
     // Extract voice settings and context from device config
     const settings = device?.settingsJson ?? {};
     const ttsEnabled = settings.tts_enabled !== false; // default true
+    const sfxEnabled = settings.sfx_enabled !== false; // default true
     const voiceOptions = {
       voice: settings.voice_preset as string | undefined,
       speed: settings.voice_speed as number | undefined,
@@ -1404,6 +1405,7 @@ export class AudioGateway
         context,
         moodEntries,
         ttsEnabled,
+        sfxEnabled,
         myGen,
       );
     } catch (err: any) {
@@ -1643,6 +1645,7 @@ export class AudioGateway
     },
     moodHistory?: { date: string; mood: string; note?: string }[],
     ttsEnabled = true,
+    sfxEnabled = true,
     gen?: number,
   ) {
     const session = this.sessions.get(deviceId);
@@ -1719,7 +1722,7 @@ export class AudioGateway
         }
 
         // Send SFX event before TTS frames so the clip plays first.
-        if (event.sfx) {
+        if (event.sfx && sfxEnabled) {
           this.sendToDevice(deviceId, 'audio:sfx', { clip: event.sfx });
         }
       } else if (event.type === 'audio') {

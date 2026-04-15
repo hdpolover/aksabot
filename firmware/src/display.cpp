@@ -48,6 +48,12 @@ static int  transcriptTotalLines     = 0;   // total wrapped lines (updated by r
 static uint32_t transcriptScrollMs   = 0;   // last scroll-advance timestamp
 static const uint32_t TRANSCRIPT_SCROLL_INTERVAL_MS = 2500;
 
+// Text response mode (full-screen text when TTS is disabled)
+static char     textResponseBuf[1024]  = {};
+static bool     textResponseComplete   = false;
+static uint32_t textResponseCompleteMs = 0;
+static const uint32_t TEXT_RESPONSE_LINGER_MS = 8000;  // auto-return after 8s
+
 // Auto-return timer
 static bool autoReturnActive = false;
 static uint32_t autoReturnAtMs = 0;
@@ -103,9 +109,10 @@ static const char* modeToString(display::Mode m) {
         case display::Mode::REMINDER:  return "reminder";
         case display::Mode::COUNTDOWN: return "countdown";
         case display::Mode::STATUS:    return "status";
-        case display::Mode::GLANCE:    return "glance";
-        case display::Mode::IMAGE:     return "image";
-        default:                       return "face";
+        case display::Mode::GLANCE:         return "glance";
+        case display::Mode::IMAGE:          return "image";
+        case display::Mode::TEXT_RESPONSE:  return "text_response";
+        default:                            return "face";
     }
 }
 
@@ -1918,6 +1925,74 @@ void renderTranscriptOverlay(LGFX_Sprite& target, const char* text) {
     }
 }
 
+void renderTextResponse() {
+    LGFX_Sprite& s = sprite.getBuffer() ? sprite : (LGFX_Sprite&)tft;
+    bool useSprite = (sprite.getBuffer() != nullptr);
+
+    if (useSprite) s.fillSprite(COL_BG);
+    else           tft.fillScreen(COL_BG);
+
+    // "Aksa" label centered at top
+    s.setFont(&fonts::Font2);
+    s.setTextSize(1);
+    s.setTextDatum(lgfx::middle_center);
+    s.setTextColor(COL_ACCENT);
+    s.drawString("Aksa", CX, 14);
+
+    // Thin separator line
+    s.drawFastHLine(20, 26, LCD_WIDTH - 40, COL_DIM);
+
+    // Body text — word-wrapped, left-aligned with padding
+    s.setTextColor(COL_FACE);
+    s.setTextDatum(lgfx::top_left);
+
+    const int padX   = 10;
+    const int lineH  = 16;
+    const int maxW   = LCD_WIDTH - padX * 2;
+    const int bodyBot = LCD_HEIGHT - 24;  // leave room for dismiss hint
+    int y = 34;
+
+    char buf[1024];
+    strncpy(buf, textResponseBuf, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+
+    char line[64] = {};
+    char* word = strtok(buf, " ");
+    while (word) {
+        char test[64];
+        if (line[0] == '\0') {
+            strncpy(test, word, sizeof(test) - 1);
+        } else {
+            snprintf(test, sizeof(test), "%s %s", line, word);
+        }
+        test[sizeof(test) - 1] = '\0';
+
+        if (s.textWidth(test) > maxW && line[0] != '\0') {
+            if (y + lineH > bodyBot) break;
+            s.drawString(line, padX, y);
+            y += lineH;
+            strncpy(line, word, sizeof(line) - 1);
+        } else {
+            strncpy(line, test, sizeof(line) - 1);
+        }
+        line[sizeof(line) - 1] = '\0';
+        word = strtok(nullptr, " ");
+    }
+    if (line[0] != '\0' && y + lineH <= bodyBot) {
+        s.drawString(line, padX, y);
+    }
+
+    // Dismiss hint — visible only once the response is complete
+    if (textResponseComplete) {
+        s.setTextDatum(lgfx::middle_center);
+        s.setTextColor(COL_DIM);
+        s.drawString("tap to dismiss", CX, LCD_HEIGHT - 12);
+    }
+    s.setTextDatum(lgfx::top_left);
+
+    if (useSprite) sprite.pushSprite(0, 0);
+}
+
 void renderGlance(const display::GlanceData& data) {
     LGFX_Sprite& s = sprite.getBuffer() ? sprite : (LGFX_Sprite&)tft;
     bool useSprite = (sprite.getBuffer() != nullptr);
@@ -2237,6 +2312,16 @@ void display::tick(uint32_t nowMs) {
         if (g_onModeChange) g_onModeChange(modeToString(currentMode));
     }
 
+    // TEXT_RESPONSE auto-return after linger period
+    if (currentMode == Mode::TEXT_RESPONSE && textResponseComplete) {
+        if (nowMs - textResponseCompleteMs >= TEXT_RESPONSE_LINGER_MS) {
+            textResponseBuf[0]   = '\0';
+            textResponseComplete = false;
+            currentMode = previousMode;
+            if (g_onModeChange) g_onModeChange(modeToString(currentMode));
+        }
+    }
+
     // IMAGE mode: image drawn directly to TFT hardware — skip sprite rendering
     // to avoid overwriting it.
     if (currentMode == Mode::IMAGE) return;
@@ -2270,6 +2355,9 @@ void display::tick(uint32_t nowMs) {
             break;
         case Mode::GLANCE:
             display_hw::renderGlance(glanceData);
+            break;
+        case Mode::TEXT_RESPONSE:
+            display_hw::renderTextResponse();
             break;
     }
 
@@ -2365,6 +2453,37 @@ void display::setTranscriptText(const char* text) {
     // Reset scroll to top whenever text changes (new sentence / STT update)
     transcriptScrollLine = 0;
     transcriptScrollMs   = millis();
+}
+
+void display::appendTextResponse(const char* text) {
+    if (!text || !text[0]) return;
+    // Start fresh if the previous response was already complete
+    if (textResponseComplete) {
+        textResponseBuf[0]   = '\0';
+        textResponseComplete = false;
+    }
+    // Strip markdown and append with a space separator between sentences
+    char stripped[256];
+    stripMarkdown(text, stripped, sizeof(stripped));
+    if (textResponseBuf[0] != '\0') {
+        strncat(textResponseBuf, " ", sizeof(textResponseBuf) - strlen(textResponseBuf) - 1);
+    }
+    strncat(textResponseBuf, stripped, sizeof(textResponseBuf) - strlen(textResponseBuf) - 1);
+    // Switch to TEXT_RESPONSE mode — saves previousMode on first call of a new response
+    if (currentMode != Mode::TEXT_RESPONSE) {
+        setMode(Mode::TEXT_RESPONSE);
+    }
+}
+
+void display::finalizeTextResponse() {
+    textResponseComplete   = true;
+    textResponseCompleteMs = millis();
+}
+
+void display::clearTextResponse() {
+    textResponseBuf[0]   = '\0';
+    textResponseComplete = false;
+    setMode(previousMode);
 }
 
 void display::setBrightness(uint8_t level) {

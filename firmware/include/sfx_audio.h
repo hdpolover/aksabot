@@ -16,4 +16,7 @@ namespace sfx_audio {
 /// SPEAKING / LISTENING.
 void play(const char* clipName);
 
+/// Enable or disable SFX playback. When disabled, all play() calls are no-ops.
+void setEnabled(bool enabled);
+
 }  // namespace sfx_audio

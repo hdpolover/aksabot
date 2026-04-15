@@ -36,6 +36,10 @@ export class UpdateSettingsDto {
 
   @IsBoolean()
   @IsOptional()
+  sfx_enabled?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
   audio_wake_sound?: boolean;
 
   @IsBoolean()
