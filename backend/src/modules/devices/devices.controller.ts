@@ -176,7 +176,7 @@ export class DevicesController {
     @Body() body: { volume: number },
   ) {
     await this.devicesService.findById(id, user.userId);
-    const clamped = Math.max(0, Math.min(100, Math.round(body.volume ?? 80)));
+    const clamped = Math.max(0, Math.min(100, Math.round(body.volume ?? 50)));
     this.gateway.sendToDevice(id, 'config:update', { volume: clamped });
   }
 

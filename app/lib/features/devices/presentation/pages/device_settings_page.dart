@@ -23,7 +23,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
   bool _saving = false;
   String? _error;
 
-  double _volume = 70;
+  double _volume = 50;
   double _brightness = 70;
   bool _showTranscript = false;
   bool _ttsEnabled = true;
@@ -59,7 +59,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
         final sfx = s['sfx_enabled'] as bool?;
         final minutes = timeoutSec != null ? (timeoutSec ~/ 60) : 30;
         setState(() {
-          _volume = vol ?? 70;
+          _volume = vol ?? 50;
           _brightness = br ?? 70;
           _showTranscript = tr ?? false;
           _ttsEnabled = tts ?? true;

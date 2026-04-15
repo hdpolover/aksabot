@@ -109,7 +109,7 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
     result.fold(
       (_) {},
       (device) {
-        final vol = (device.settingsJson['volume'] as num?)?.toInt() ?? 80;
+        final vol = (device.settingsJson['volume'] as num?)?.toInt() ?? 50;
         setState(() {
           _originalVolume = vol;
           _intercomVolume = vol;

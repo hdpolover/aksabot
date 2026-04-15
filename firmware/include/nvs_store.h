@@ -35,7 +35,7 @@ bool hasDeviceToken();
 
 // ── Device settings ───────────────────────────────────
 
-uint8_t getVolume();       // 0-100, default 80
+uint8_t getVolume();       // 0-100, default 50
 bool setVolume(uint8_t volume);
 
 uint8_t getBrightness();   // 0-100, default 70

@@ -603,7 +603,7 @@ static void onWsJson(const char* event, const char* data) {
         if (deserializeJson(doc, data) == DeserializationError::Ok) {
             // Volume — save to NVS and apply to ES8311 codec immediately
             if (!doc["volume"].isNull()) {
-                uint8_t vol = doc["volume"] | 80;
+                uint8_t vol = doc["volume"] | 50;
                 nvs_store::setVolume(vol);
                 audio_io::setVolume(vol);
                 Serial.printf("[Main] Config: volume=%d\n", vol);
