@@ -52,7 +52,10 @@ static const uint32_t TRANSCRIPT_SCROLL_INTERVAL_MS = 2500;
 static char     textResponseBuf[1024]  = {};
 static bool     textResponseComplete   = false;
 static uint32_t textResponseCompleteMs = 0;
-static const uint32_t TEXT_RESPONSE_LINGER_MS = 8000;  // auto-return after 8s
+static const uint32_t TEXT_RESPONSE_LINGER_MS = 8000;   // auto-return after 8s
+static float    textScrollPx           = 0.0f;           // current scroll offset (px)
+static uint32_t textScrollLastMs       = 0;              // for delta-time scroll anim
+static const float TEXT_SCROLL_SPEED   = 40.0f;         // px per second
 
 // Auto-return timer
 static bool autoReturnActive = false;
@@ -1747,57 +1750,69 @@ void renderReminder(const display::ReminderData& data) {
     if (useSprite) s.fillSprite(COL_BG);
     else           tft.fillScreen(COL_BG);
 
-    // Icon
-    s.setTextDatum(lgfx::middle_center);
-    s.setTextSize(3);
-    s.setTextColor(COL_WARM);
-    s.drawString("!", CX, 40);
-
-    // Reminder text — word-wrap, centered. textSize 2 for large quips.
-    const uint8_t sz    = (data.textSize >= 2) ? 2 : 1;
-    const int     lineH = (sz == 2) ? 22 : 18;
-    s.setTextSize(sz);
+    // Body text — same layout as TEXT_RESPONSE for consistency.
+    // Font2 ~18px, word-wrapped, each line centered horizontally,
+    // block centered vertically in the body area.
+    s.setFont(&fonts::Font2);
+    s.setTextSize(1.3f);
     s.setTextColor(COL_FACE);
-    s.setTextDatum(lgfx::top_center);
 
-    const int maxW = LCD_WIDTH - 20;  // 10px margin each side
-    int y = (sz == 2) ? 70 : 80;
+    const int padX    = 14;
+    const int lineH   = 22;
+    const int maxW    = LCD_WIDTH - padX * 2;
+    const int areaTop = 32;
+    const int areaBot = LCD_HEIGHT - 24;
+    const int availH  = areaBot - areaTop;
 
-    // Simple word-wrap
-    char buf[256];
+    // ── Word-wrap ──
+    char buf[128];
     strncpy(buf, data.text, sizeof(buf) - 1);
     buf[sizeof(buf) - 1] = '\0';
 
-    char line[64] = {};
-    char* word = strtok(buf, " ");
-    while (word) {
-        char test[64];
-        if (line[0] == '\0') {
-            strncpy(test, word, sizeof(test) - 1);
-        } else {
-            snprintf(test, sizeof(test), "%s %s", line, word);
-        }
+    char  lines[16][72];
+    memset(lines, 0, sizeof(lines));
+    int   lineCount = 0;
+    char  cur[72]   = {};
+    char* word      = strtok(buf, " ");
+    while (word && lineCount < 15) {
+        char test[72];
+        if (cur[0] == '\0') strncpy(test, word, sizeof(test) - 1);
+        else                snprintf(test, sizeof(test), "%s %s", cur, word);
         test[sizeof(test) - 1] = '\0';
-
-        if (s.textWidth(test) > maxW && line[0] != '\0') {
-            s.drawString(line, CX, y);
-            y += lineH;
-            strncpy(line, word, sizeof(line) - 1);
+        if (s.textWidth(test) > maxW && cur[0] != '\0') {
+            strncpy(lines[lineCount++], cur, sizeof(lines[0]) - 1);
+            strncpy(cur, word, sizeof(cur) - 1);
         } else {
-            strncpy(line, test, sizeof(line) - 1);
+            strncpy(cur, test, sizeof(cur) - 1);
         }
-        line[sizeof(line) - 1] = '\0';
+        cur[sizeof(cur) - 1] = '\0';
         word = strtok(nullptr, " ");
     }
-    if (line[0] != '\0') {
-        s.drawString(line, CX, y);
+    if (cur[0] != '\0') strncpy(lines[lineCount++], cur, sizeof(lines[0]) - 1);
+
+    // ── Vertically center the text block ──
+    int totalH = lineCount * lineH;
+    int startY = areaTop + (availH - totalH) / 2;
+
+    // ── Render lines ──
+    s.setTextDatum(lgfx::top_center);
+    for (int i = 0; i < lineCount; i++) {
+        s.drawString(lines[i], CX, startY + i * lineH);
     }
 
-    // Dismiss hint
+    // ── Header on top (same as text response) ──
+    s.fillRect(0, 0, LCD_WIDTH, areaTop, COL_BG);
+    s.setFont(&fonts::Font2);
     s.setTextSize(1);
-    s.setTextColor(COL_DIM);
     s.setTextDatum(lgfx::middle_center);
-    s.drawString("tap to dismiss", CX, LCD_HEIGHT - 20);
+    s.setTextColor(COL_ACCENT);
+    s.drawString("Aksa", CX, 14);
+    s.drawFastHLine(20, 26, LCD_WIDTH - 40, COL_DIM);
+
+    // ── Dismiss hint ──
+    s.setTextDatum(lgfx::middle_center);
+    s.setTextColor(COL_DIM);
+    s.drawString("tap to dismiss", CX, LCD_HEIGHT - 12);
     s.setTextDatum(lgfx::top_left);
 
     if (useSprite) sprite.pushSprite(0, 0);
@@ -1932,58 +1947,90 @@ void renderTextResponse() {
     if (useSprite) s.fillSprite(COL_BG);
     else           tft.fillScreen(COL_BG);
 
-    // "Aksa" label centered at top
+    // Body text — Font2 ~18px, word-wrapped, lines centered horizontally.
+    // Rendered before the header so scrolled text can't bleed over the "Aksa" label.
+    s.setFont(&fonts::Font2);
+    s.setTextSize(1.3f);
+    s.setTextColor(COL_FACE);
+
+    const int   padX    = 14;
+    const int   lineH   = 22;
+    const int   maxW    = LCD_WIDTH - padX * 2;
+    const int   areaTop = 32;   // below separator
+    const int   areaBot = LCD_HEIGHT - 24;
+    const int   availH  = areaBot - areaTop;
+
+    // ── Word-wrap: build line array ──
+    char buf[1024];
+    strncpy(buf, textResponseBuf, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+
+    char  lines[32][72];
+    memset(lines, 0, sizeof(lines));
+    int   lineCount = 0;
+    char  cur[72]   = {};
+    char* word      = strtok(buf, " ");
+    while (word && lineCount < 31) {
+        char test[72];
+        if (cur[0] == '\0') strncpy(test, word, sizeof(test) - 1);
+        else                snprintf(test, sizeof(test), "%s %s", cur, word);
+        test[sizeof(test) - 1] = '\0';
+        if (s.textWidth(test) > maxW && cur[0] != '\0') {
+            strncpy(lines[lineCount++], cur, sizeof(lines[0]) - 1);
+            strncpy(cur, word, sizeof(cur) - 1);
+        } else {
+            strncpy(cur, test, sizeof(cur) - 1);
+        }
+        cur[sizeof(cur) - 1] = '\0';
+        word = strtok(nullptr, " ");
+    }
+    if (cur[0] != '\0') strncpy(lines[lineCount++], cur, sizeof(lines[0]) - 1);
+
+    int totalH = lineCount * lineH;
+
+    // ── Scroll / center ──
+    uint32_t now    = millis();
+    int      startY = areaTop;
+
+    if (totalH <= availH) {
+        // Content fits — center the block vertically
+        startY           = areaTop + (availH - totalH) / 2;
+        textScrollPx     = 0.0f;
+        textScrollLastMs = 0;
+    } else {
+        // Content overflows — auto-scroll after response is complete
+        if (textResponseComplete) {
+            if (textScrollLastMs == 0) textScrollLastMs = now;  // first frame
+            float dt = (now - textScrollLastMs) / 1000.0f;
+            textScrollLastMs = now;
+            float maxScroll = (float)(totalH - availH);
+            textScrollPx = fminf(textScrollPx + TEXT_SCROLL_SPEED * dt, maxScroll);
+        }
+        startY = areaTop - (int)textScrollPx;
+    }
+
+    // ── Render lines (skip those fully outside body area) ──
+    s.setTextDatum(lgfx::top_center);
+    for (int i = 0; i < lineCount; i++) {
+        int y = startY + i * lineH;
+        if (y + lineH <= areaTop) continue;   // fully above visible area
+        if (y >= areaBot)          break;      // below visible area
+        s.drawString(lines[i], CX, y);
+    }
+
+    // ── Re-draw header on top so scrolled lines can't bleed over "Aksa" label ──
+    s.fillRect(0, 0, LCD_WIDTH, areaTop, COL_BG);
     s.setFont(&fonts::Font2);
     s.setTextSize(1);
     s.setTextDatum(lgfx::middle_center);
     s.setTextColor(COL_ACCENT);
     s.drawString("Aksa", CX, 14);
-
-    // Thin separator line
     s.drawFastHLine(20, 26, LCD_WIDTH - 40, COL_DIM);
 
-    // Body text — word-wrapped, left-aligned with padding
-    s.setTextColor(COL_FACE);
-    s.setTextDatum(lgfx::top_left);
-
-    const int padX   = 10;
-    const int lineH  = 16;
-    const int maxW   = LCD_WIDTH - padX * 2;
-    const int bodyBot = LCD_HEIGHT - 24;  // leave room for dismiss hint
-    int y = 34;
-
-    char buf[1024];
-    strncpy(buf, textResponseBuf, sizeof(buf) - 1);
-    buf[sizeof(buf) - 1] = '\0';
-
-    char line[64] = {};
-    char* word = strtok(buf, " ");
-    while (word) {
-        char test[64];
-        if (line[0] == '\0') {
-            strncpy(test, word, sizeof(test) - 1);
-        } else {
-            snprintf(test, sizeof(test), "%s %s", line, word);
-        }
-        test[sizeof(test) - 1] = '\0';
-
-        if (s.textWidth(test) > maxW && line[0] != '\0') {
-            if (y + lineH > bodyBot) break;
-            s.drawString(line, padX, y);
-            y += lineH;
-            strncpy(line, word, sizeof(line) - 1);
-        } else {
-            strncpy(line, test, sizeof(line) - 1);
-        }
-        line[sizeof(line) - 1] = '\0';
-        word = strtok(nullptr, " ");
-    }
-    if (line[0] != '\0' && y + lineH <= bodyBot) {
-        s.drawString(line, padX, y);
-    }
-
-    // Dismiss hint — visible only once the response is complete
-    if (textResponseComplete) {
+    // ── Dismiss hint — only once complete and scroll has reached the end ──
+    bool scrollDone = (totalH <= availH) ||
+                      (textScrollPx >= (float)(totalH - availH) - 1.0f);
+    if (textResponseComplete && scrollDone) {
         s.setTextDatum(lgfx::middle_center);
         s.setTextColor(COL_DIM);
         s.drawString("tap to dismiss", CX, LCD_HEIGHT - 12);
@@ -2461,6 +2508,8 @@ void display::appendTextResponse(const char* text) {
     if (textResponseComplete) {
         textResponseBuf[0]   = '\0';
         textResponseComplete = false;
+        textScrollPx         = 0.0f;
+        textScrollLastMs     = 0;
     }
     // Strip markdown and append with a space separator between sentences
     char stripped[256];
@@ -2483,6 +2532,8 @@ void display::finalizeTextResponse() {
 void display::clearTextResponse() {
     textResponseBuf[0]   = '\0';
     textResponseComplete = false;
+    textScrollPx         = 0.0f;
+    textScrollLastMs     = 0;
     setMode(previousMode);
 }
 
