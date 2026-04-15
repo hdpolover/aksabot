@@ -1956,6 +1956,146 @@ export class AudioGateway
     return { transcript: sttResult.transcript, dispatched: true };
   }
 
+  /** Handle a voice recording from the mobile app and return the AI response
+   *  directly to the app (text + MP3 audio) instead of sending it to the device.
+   *  The full pipeline (STT → LLM → TTS) runs synchronously and the result is
+   *  returned in the HTTP response. Does NOT require the device to be online. */
+  async handleAppVoiceInputForApp(
+    deviceId: string,
+    pcm: Buffer,
+  ): Promise<{
+    transcript: string;
+    response: string;
+    audio: string;
+    mimeType: string;
+  }> {
+    const empty = { transcript: '', response: '', audio: '', mimeType: '' };
+
+    // 1. STT
+    const sttResult = await this.aiService.transcribeOnce(pcm, {
+      sampleRate: 16000,
+    });
+    if (!sttResult.transcript.trim()) return empty;
+
+    this.logger.log(
+      `[${deviceId}] App-reply transcript: "${sttResult.transcript}"`,
+    );
+
+    // 2. Fetch device settings and context (from DB — device doesn't need to be online)
+    const device = await this.persistence.getDevice(deviceId);
+    const settings = device?.settingsJson ?? {};
+
+    const voiceOptions = {
+      voice: settings.voice_preset as string | undefined,
+      speed: settings.voice_speed as number | undefined,
+      stability: settings.voice_stability as number | undefined,
+      language: (settings.language as 'en' | 'id' | undefined) ?? 'en',
+    };
+    const context = {
+      timezone: settings.timezone as string | undefined,
+      weatherEnabled: settings.integrations_weather as boolean | undefined,
+      latitude: settings.latitude as number | undefined,
+      longitude: settings.longitude as number | undefined,
+      language: (settings.language as 'en' | 'id' | undefined) ?? 'en',
+    };
+
+    // 3. Fetch memories, history, mood in parallel
+    // Use the device's active conversation if one exists (from a device session),
+    // otherwise history will be empty — that's fine for a standalone app interaction.
+    const session = this.sessions.get(deviceId);
+    const existingConvId = session?.conversationId;
+
+    const [memories, moodHistory, history] = await Promise.all([
+      this.memoriesService.getRelevant(deviceId),
+      this.moodJournal.getRecentMoods(deviceId).catch(() => []),
+      existingConvId
+        ? this.persistence.getRecentHistory(existingConvId)
+        : Promise.resolve([]),
+    ]);
+
+    // Bump access on used memories
+    if (memories.length > 0) {
+      this.memoriesService
+        .bumpAccessed(memories.map((m) => m.id))
+        .catch(() => {});
+    }
+
+    const moodEntries = moodHistory.map((m) => ({
+      date: m.date,
+      mood: m.mood,
+      note: m.note ?? undefined,
+    }));
+
+    // 4. Refresh weather if enabled
+    if (context.weatherEnabled && context.latitude && context.longitude) {
+      await this.aiService.refreshWeather(context.latitude, context.longitude);
+    }
+
+    // 5. Create conversation and save user message
+    const conversation = await this.persistence.createConversation(deviceId);
+    await this.persistence.saveMessage(
+      conversation.id,
+      'user',
+      sttResult.transcript,
+    );
+
+    // 6. Run LLM (text only, no TTS — we'll synthesize MP3 separately)
+    let fullText = '';
+    const pipeline = this.aiService.processTranscript(
+      sttResult.transcript,
+      memories,
+      history,
+      voiceOptions,
+      context,
+      moodEntries,
+      false, // ttsEnabled = false
+    );
+    for await (const event of pipeline) {
+      if (event.type === 'done') {
+        fullText = event.fullText;
+      }
+    }
+
+    if (!fullText) {
+      return {
+        transcript: sttResult.transcript,
+        response: '',
+        audio: '',
+        mimeType: '',
+      };
+    }
+
+    // 7. Synthesize TTS as MP3 for app playback
+    let audioBase64 = '';
+    let mimeType = '';
+    try {
+      const mp3Buffer = await this.aiService.synthesizeForApp(
+        fullText,
+        voiceOptions,
+      );
+      audioBase64 = mp3Buffer.toString('base64');
+      mimeType = 'audio/mpeg';
+    } catch (err: any) {
+      this.logger.warn(
+        `[${deviceId}] App TTS synthesis failed: ${err.message}`,
+      );
+      // Graceful degradation: return text without audio
+    }
+
+    // 8. Save assistant message and extract memories
+    await this.persistence.saveMessage(conversation.id, 'assistant', fullText);
+    this.memoriesService
+      .extractFromConversation(conversation.id, deviceId)
+      .catch(() => {});
+
+    return {
+      transcript: sttResult.transcript,
+      response: fullText,
+      audio: audioBase64,
+      mimeType,
+    };
+  }
+
   /** Send a single raw Opus frame to a device without framing headers.
    *  Used by IntercomGateway for real-time streaming — caller manages
    *  response:start / response:end lifecycle events. */

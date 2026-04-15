@@ -231,21 +231,38 @@ class DevicesRemoteDatasource {
     }
   }
 
-  /// Send a voice recording to the AI pipeline — STT → LLM → TTS → device speaker.
-  /// Returns the recognised transcript and whether the pipeline was dispatched.
-  Future<Map<String, dynamic>> sendVoiceInput(String id, Uint8List audioBytes) async {
+  /// Send a voice recording to the AI pipeline.
+  ///
+  /// When [replyTarget] is `'app'`, the backend runs the full pipeline and
+  /// returns the AI response text + MP3 audio. When `'device'` (default), the
+  /// response plays on the ESP32 and only the transcript is returned.
+  Future<Map<String, dynamic>> sendVoiceInput(
+    String id,
+    Uint8List audioBytes, {
+    String replyTarget = 'device',
+  }) async {
     try {
       final formData = FormData.fromMap({
         'audio': MultipartFile.fromBytes(audioBytes, filename: 'voice.wav'),
+        'replyTarget': replyTarget,
       });
       final response = await _client.dio.post(
         '/devices/$id/voice-input',
         data: formData,
+        options: replyTarget == 'app'
+            ? Options(receiveTimeout: const Duration(seconds: 60))
+            : null,
       );
       final data = response.data['data'] ?? response.data;
+      if (data is! Map) {
+        return {'transcript': '', 'dispatched': false};
+      }
       return {
-        'transcript': (data is Map ? data['transcript'] as String? : null) ?? '',
-        'dispatched': (data is Map ? data['dispatched'] as bool? : null) ?? false,
+        'transcript': data['transcript'] as String? ?? '',
+        'dispatched': data['dispatched'] as bool? ?? false,
+        if (data['response'] != null) 'response': data['response'] as String,
+        if (data['audio'] != null) 'audio': data['audio'] as String,
+        if (data['mimeType'] != null) 'mimeType': data['mimeType'] as String,
       };
     } on DioException catch (e) {
       final data = e.response?.data;

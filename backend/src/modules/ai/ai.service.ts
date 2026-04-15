@@ -228,6 +228,23 @@ export class AiService {
   }
 
   /**
+   * Synthesize TTS as MP3 for app-side playback (not Opus for ESP32).
+   * Used when the user chooses to receive the AI response on the mobile app
+   * instead of the device speaker.
+   */
+  async synthesizeForApp(
+    text: string,
+    voiceOptions?: TtsOptions,
+    signal?: AbortSignal,
+  ): Promise<Buffer> {
+    return this.tts.synthesize(
+      text,
+      { ...voiceOptions, outputFormat: 'mp3_44100_128' },
+      signal,
+    );
+  }
+
+  /**
    * Process a finalized transcript into a streamed audio response.
    * Yields events as they become available:
    *   - { type: 'text', text } — a completed sentence

@@ -218,13 +218,14 @@ export class DevicesController {
     return { playing };
   }
 
-  /** Accept a voice recording from the mobile app and run the full AI pipeline
-   *  (STT → LLM → TTS) targeting the device speaker — same path as a device
-   *  tap-to-talk, but initiated from the phone instead of the physical button.
-   *  Returns the recognised transcript immediately; the AI response plays on
-   *  the device asynchronously.
-   *  Returns { dispatched: false } when speech was not recognised or the device
-   *  is offline. */
+  /** Accept a voice recording from the mobile app and run the full AI pipeline.
+   *
+   *  **replyTarget** (optional form field):
+   *  - `'device'` (default): fire-and-forget — STT → LLM → TTS plays on the
+   *    ESP32 device speaker. Returns `{ transcript, dispatched }` immediately.
+   *  - `'app'`: synchronous — STT → LLM → TTS (MP3) returned in the response.
+   *    Returns `{ transcript, response, audio, mimeType }`. Device stays quiet.
+   *    Works even when the device is offline. */
   @Post(':id/voice-input')
   @RateLimit({ limit: 10, windowSeconds: 60, keyType: 'user' })
   @UseInterceptors(
@@ -237,6 +238,7 @@ export class DevicesController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: RequestUser,
     @UploadedFile() file: Express.Multer.File,
+    @Body('replyTarget') replyTarget?: string,
   ) {
     await this.devicesService.findById(id, user.userId);
 
@@ -252,6 +254,10 @@ export class DevicesController {
         dataIdx !== -1 && dataIdx + 8 <= pcm.length
           ? pcm.subarray(dataIdx + 8)
           : pcm.subarray(44);
+    }
+
+    if (replyTarget === 'app') {
+      return this.gateway.handleAppVoiceInputForApp(id, pcm);
     }
 
     return this.gateway.handleAppVoiceInput(id, pcm);

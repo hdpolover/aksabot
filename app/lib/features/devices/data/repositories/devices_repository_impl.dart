@@ -196,10 +196,15 @@ class DevicesRepositoryImpl implements DevicesRepository {
   @override
   Future<Either<Failure, VoiceInputResult>> sendVoiceInput(
     String id,
-    Uint8List audioBytes,
-  ) async {
+    Uint8List audioBytes, {
+    String replyTarget = 'device',
+  }) async {
     try {
-      final data = await _datasource.sendVoiceInput(id, audioBytes);
+      final data = await _datasource.sendVoiceInput(
+        id,
+        audioBytes,
+        replyTarget: replyTarget,
+      );
       return Right(VoiceInputResult.fromJson(data));
     } on ServerException catch (e) {
       return Left(ServerFailure(e.message, statusCode: e.statusCode));
