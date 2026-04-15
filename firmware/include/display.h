@@ -171,7 +171,14 @@ Mode getHomeMode();
 /// Image is centered on screen. Display wakes if sleeping.
 /// Switches back to previous mode after durationMs (default 10s, 0 = permanent).
 /// Path must be absolute from SD root, e.g. "/images/hello.jpg".
+/// IMPORTANT: must only be called from the display task (Core 1 displayLoop).
+/// For cross-task use, call queueImageFromSD() instead.
 void showImageFromSD(const char* path, uint16_t durationMs = 10000);
+
+/// Thread-safe: queue an image to be shown on the next display tick.
+/// Use this from any task — the display task will call showImageFromSD()
+/// internally, avoiding cross-task SPI/mutex conflicts with LovyanGFX.
+void queueImageFromSD(const char* path, uint16_t durationMs = 10000);
 
 /// Paint a two-bar overlay into the sprite every frame, just before the push.
 /// Used by the BIOS face preview so overlay text is baked in — no flicker.

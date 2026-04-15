@@ -234,6 +234,15 @@ export class AudioGateway
     if (!session || session.state !== 'idle') return;
     if (this.sessions.isClockMode(deviceId)) return;
 
+    // Silent reconnects (e.g. image download) suppress the greeting
+    if (session.skipGreeting) {
+      session.skipGreeting = false;
+      this.logger.debug(
+        `Device ${deviceId} greeting skipped (silent reconnect)`,
+      );
+      return;
+    }
+
     session.state = 'speaking';
 
     try {
@@ -1054,10 +1063,12 @@ export class AudioGateway
           break;
         case 'reconnect:back':
           // Silent reconnects (e.g. image download freeing TLS) skip the LLM
-          // roast — user shouldn't see a reaction to an internal disconnect.
+          // roast AND the connection greeting that handleConnection scheduled.
           if (msg.data?.silent) {
+            const silentSession = this.sessions.get(deviceId);
+            if (silentSession) silentSession.skipGreeting = true;
             this.logger.debug(
-              `Device ${deviceId} reconnect:back (silent — skipping LLM)`,
+              `Device ${deviceId} reconnect:back (silent — skipping LLM + greeting)`,
             );
           } else {
             this.onReconnectBack(deviceId).catch((err) =>

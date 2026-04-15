@@ -23,6 +23,8 @@ export interface DeviceSession {
   batteryPercent?: number;
   /** Current display mode reported by the device. 'clock' suppresses proactive events and audio. */
   displayMode?: string;
+  /** Set by silent reconnect:back — suppresses the connection greeting. */
+  skipGreeting?: boolean;
 }
 
 @Injectable()

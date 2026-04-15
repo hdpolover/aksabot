@@ -338,18 +338,20 @@ static void imageDownloadTask(void* pvParams) {
     Serial.printf("[ImgDL] Internal heap after WS disconnect: %u B\n", (unsigned)freeAfter);
 
     const char* savedPath = downloadImage(p->url);
+
+    // Re-enable WS auto-reconnect BEFORE showing the image — reconnect can
+    // proceed in the background while the display task renders the image.
+    Serial.println("[ImgDL] Re-enabling WS auto-reconnect");
+    ws_client::enableAutoReconnect();
+
     if (savedPath) {
-        display::showImageFromSD(savedPath, p->durationMs);
+        // Queue for the display task — never call showImageFromSD() from this
+        // task.  LovyanGFX's internal SPI mutex gets released from the wrong
+        // task context, causing xTaskPriorityDisinherit assert.
+        display::queueImageFromSD(savedPath, p->durationMs);
     } else {
         Serial.println("[ImgDL] Task: download failed");
     }
-
-    // Re-enable auto-reconnect — the wsLoop poll task will handle the actual
-    // connection on its next cycle. Don't call ws_client::connect() directly:
-    // it takes wsMutex, and releasing it from this task while wsLoop (same core,
-    // same priority) can be time-sliced in causes xTaskPriorityDisinherit assert.
-    Serial.println("[ImgDL] Re-enabling WS auto-reconnect");
-    ws_client::enableAutoReconnect();
 
     free(p);
     s_imageDownloading = false;
@@ -993,9 +995,9 @@ static void onWsJson(const char* event, const char* data) {
                     }
                 }
             } else if (path && *path) {
-                // Already on SD card
+                // Already on SD card — queue for display task (same reason as URL path)
                 Serial.printf("[Main] display:image from SD: %s (%ums)\n", path, (unsigned)durationMs);
-                display::showImageFromSD(path, durationMs);
+                display::queueImageFromSD(path, durationMs);
             }
         }
     }
@@ -1577,7 +1579,7 @@ static void audioCaptureLoop(void* param) {
 
         if (!stackLogged) {
             UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
-            Serial.printf("[Audio] Stack watermark: %u bytes free\n", hwm * 4);
+            Serial.printf("[Audio] Stack watermark: %u bytes free\n", hwm);
             stackLogged = true;
         }
 
@@ -1613,7 +1615,7 @@ static void wsLoop(void* param) {
         ws_client::poll();
         if (!stackLogged && millis() > 15000) {
             UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
-            Serial.printf("[WS] Stack watermark: %u bytes free\n", hwm * 4);
+            Serial.printf("[WS] Stack watermark: %u bytes free\n", hwm);
             stackLogged = true;
         }
         vTaskDelay(pdMS_TO_TICKS(5));
@@ -1628,7 +1630,7 @@ static void displayLoop(void* param) {
         display::tick(millis());
         if (!stackLogged && millis() > 15000) {
             UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
-            Serial.printf("[Display] Stack watermark: %u bytes free\n", hwm * 4);
+            Serial.printf("[Display] Stack watermark: %u bytes free\n", hwm);
             stackLogged = true;
         }
         vTaskDelay(pdMS_TO_TICKS(33));  // ~30fps

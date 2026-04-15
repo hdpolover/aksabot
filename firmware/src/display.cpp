@@ -32,6 +32,11 @@ static uint8_t userBrightness = 70;   // User-set brightness (survives sleep)
 static bool transcriptEnabled = false;
 static char transcriptText[384] = {};
 
+// Pending image queue — set by queueImageFromSD() (any task), consumed by
+// tick() (display task only).  Avoids cross-task LovyanGFX SPI conflicts.
+static char    pendingImagePath[64] = "";
+static uint16_t pendingImageDuration = 0;
+
 // BIOS overlay — baked into the sprite each frame before push (flicker-free)
 static struct {
     bool    enabled = false;
@@ -2201,6 +2206,13 @@ static void containScale(int imgW, int imgH, float& scale, int& offX, int& offY)
 
 // ────────────────────────────────────────────────────────────────────────────
 
+void display::queueImageFromSD(const char* path, uint16_t durationMs) {
+    if (!path || !*path) return;
+    strncpy(pendingImagePath, path, sizeof(pendingImagePath) - 1);
+    pendingImagePath[sizeof(pendingImagePath) - 1] = '\0';
+    pendingImageDuration = durationMs;
+}
+
 void display::showImageFromSD(const char* path, uint16_t durationMs) {
     if (!path || !*path) return;
 
@@ -2367,6 +2379,18 @@ void display::tick(uint32_t nowMs) {
             currentMode = previousMode;
             if (g_onModeChange) g_onModeChange(modeToString(currentMode));
         }
+    }
+
+    // Drain pending image queue (set by queueImageFromSD from another task).
+    // Executed HERE so showImageFromSD runs in the display task context,
+    // avoiding cross-task LovyanGFX SPI mutex conflicts.
+    if (pendingImagePath[0]) {
+        char path[64];
+        strncpy(path, pendingImagePath, sizeof(path));
+        uint16_t dur = pendingImageDuration;
+        pendingImagePath[0] = '\0';  // consume before calling (re-entrancy safe)
+        showImageFromSD(path, dur);
+        return;  // skip normal rendering this tick
     }
 
     // IMAGE mode: image drawn directly to TFT hardware — skip sprite rendering
