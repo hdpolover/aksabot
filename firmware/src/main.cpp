@@ -380,8 +380,20 @@ static void onWsJson(const char* event, const char* data) {
             // All queued responses have ended — signal the audio task to drain
             // remaining frames then go idle.
             pendingResponseEnds = 0;
-            playbackDone = true;
-            Serial.println("[Main] Response end — draining remaining audio");
+            if (!playbackActive) {
+                // No audio was ever queued (e.g., config:update arrived after this
+                // response started). Clean up immediately rather than waiting for
+                // the audio task — transcript would stick forever otherwise.
+                playbackDone = false;
+                appState.botState = BotState::IDLE;
+                syncFaceToState();
+                display::setTranscriptText("");
+                wake_word::startListening();
+                Serial.println("[Main] Response end — no audio queued, cleanup immediate");
+            } else {
+                playbackDone = true;
+                Serial.println("[Main] Response end — draining remaining audio");
+            }
         } else {
             // More responses are still coming (multi-response sequence).
             // Don't set playbackDone yet — current response is still the last one.

@@ -150,6 +150,34 @@ export class AudioGateway
         this.logger.warn(`Scheduler start failed: ${err.message}`),
       );
 
+    // Push current settings to firmware immediately so runtime flags
+    // (tts_enabled, sfx_enabled, presence_enabled, etc.) are always
+    // in sync after a reconnect — firmware resets these to defaults on boot.
+    const s = (device.settingsJson ?? {}) as Record<string, unknown>;
+    const configSync: Record<string, unknown> = {};
+    const runtimeKeys = [
+      'tts_enabled',
+      'sfx_enabled',
+      'volume',
+      'brightness',
+      'display_transcript',
+      'idle_timeout_seconds',
+      'presence_enabled',
+      'presence_rssi_threshold',
+      'presence_grace_period',
+      'idle_animation_speed',
+      'audio_jitter_ms',
+    ];
+    for (const key of runtimeKeys) {
+      if (s[key] !== undefined) configSync[key] = s[key];
+    }
+    if (Object.keys(configSync).length > 0) {
+      this.sendToDevice(device.id, 'config:update', configSync);
+      this.logger.debug(
+        `Settings synced to ${device.id}: ${JSON.stringify(configSync)}`,
+      );
+    }
+
     // Greeting: wait 5s for device to settle, then send TTS greeting
     setTimeout(() => {
       this.sendConnectionGreeting(device.id).catch((err) =>
