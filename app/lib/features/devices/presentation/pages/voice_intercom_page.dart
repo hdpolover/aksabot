@@ -57,6 +57,9 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
   _ReplyTarget _replyTarget = _ReplyTarget.device;
   final _appReplyPlayer = AudioPlayer();
 
+  /// Tracks the ongoing conversation so multiple exchanges stay in one thread.
+  String? _conversationId;
+
   // ── Voice Message state ────────────────────────────────────────
   bool _msgRecording = false;
   bool _msgSending = false;
@@ -209,6 +212,7 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
       widget.deviceId,
       bytes,
       replyTarget: target,
+      conversationId: _conversationId,
     );
     if (!mounted) return;
 
@@ -226,13 +230,18 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
           return;
         }
 
+        // Track conversation for continuity
+        if (data.conversationId != null) {
+          _conversationId = data.conversationId;
+        }
+
         // App reply mode — show response text and play audio
         if (_replyTarget == _ReplyTarget.app) {
           if (data.hasAppReply) {
             setState(() {
               _aiState = _AiInputState.done;
               _aiTranscript = data.transcript;
-              _aiResponse = data.response!;
+              _aiResponse = _stripTags(data.response!);
             });
             // Play MP3 audio if available
             if (data.audio != null && data.audio!.isNotEmpty) {
@@ -521,6 +530,11 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
     );
   }
 
+  /// Strip LLM emotion/sfx tags like [happy], [sfx:midnight], [sarcastic].
+  static final _tagPattern = RegExp(r'\[(?:sfx:\w+|\w+)\]\s*');
+  static String _stripTags(String text) =>
+      text.replaceAll(_tagPattern, '').trim();
+
   String _formatDuration(Duration d) {
     final m = d.inMinutes.toString().padLeft(2, '0');
     final s = (d.inSeconds % 60).toString().padLeft(2, '0');
@@ -586,6 +600,16 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
                 setState(() => _replyTarget = target),
             onReset: () {
               _appReplyPlayer.stop();
+              setState(() {
+                _aiState = _AiInputState.idle;
+                _aiTranscript = '';
+                _aiResponse = '';
+                _aiError = null;
+              });
+            },
+            onNewConversation: () {
+              _appReplyPlayer.stop();
+              _conversationId = null;
               setState(() {
                 _aiState = _AiInputState.idle;
                 _aiTranscript = '';
@@ -1111,6 +1135,7 @@ class _TalkToAksaTab extends StatelessWidget {
   final VoidCallback onToggle;
   final ValueChanged<_ReplyTarget> onReplyTargetChanged;
   final VoidCallback onReset;
+  final VoidCallback onNewConversation;
   final String Function(Duration) formatDuration;
 
   const _TalkToAksaTab({
@@ -1123,206 +1148,174 @@ class _TalkToAksaTab extends StatelessWidget {
     required this.onToggle,
     required this.onReplyTargetChanged,
     required this.onReset,
+    required this.onNewConversation,
     required this.formatDuration,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Done / error states need scrolling for long responses
+    if (state == _AiInputState.done || state == _AiInputState.error) {
+      return _buildResultView(context);
+    }
+
+    // Idle / recording / processing — centered layout
+    return _buildCenteredView(context);
+  }
+
+  // ── Centered layout (idle, recording, processing) ───────────
+
+  Widget _buildCenteredView(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final isIdle = state == _AiInputState.idle;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(AppConstants.spacingXxl),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppConstants.spacingXxl),
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Reply target selector — only interactive when idle
-          _ReplyTargetSelector(
-            target: replyTarget,
-            enabled: isIdle,
-            onChanged: onReplyTargetChanged,
-          ),
-          const SizedBox(height: AppConstants.spacingXxl),
+          const Spacer(flex: 2),
 
-          // Status area
+          // Status text above mic
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 300),
             child: switch (state) {
-              _AiInputState.idle => _buildHint(theme, cs),
-              _AiInputState.recording => _buildRecording(theme, cs),
-              _AiInputState.processing => _buildProcessing(theme, cs),
-              _AiInputState.done => _buildDone(theme, cs),
-              _AiInputState.error => _buildError(theme, cs),
+              _AiInputState.recording => Text(
+                  formatDuration(duration),
+                  key: const ValueKey('rec'),
+                  style: theme.textTheme.displaySmall?.copyWith(
+                    color: cs.error,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              _AiInputState.processing => Padding(
+                  key: const ValueKey('proc'),
+                  padding: const EdgeInsets.only(
+                      bottom: AppConstants.spacingMd),
+                  child: Text(
+                    replyTarget == _ReplyTarget.app
+                        ? 'Aksa is thinking…'
+                        : 'Sending to Aksa…',
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                ),
+              _ => Text(
+                  'Tap to talk',
+                  key: const ValueKey('idle'),
+                  style: theme.textTheme.bodyLarge
+                      ?.copyWith(color: cs.onSurfaceVariant),
+                ),
             },
           ),
 
-          const SizedBox(height: AppConstants.spacingXxxl),
+          const SizedBox(height: AppConstants.spacingXxl),
 
-          // Mic button — shown for idle and recording states
-          if (state == _AiInputState.idle || state == _AiInputState.recording)
-            _PulsingMicButton(
-              recording: state == _AiInputState.recording,
-              loading: false,
-              onTap: onToggle,
-            )
-          else if (state == _AiInputState.processing)
+          // Mic button or spinner
+          if (state == _AiInputState.processing)
             const SizedBox(
               width: 80,
               height: 80,
               child: CircularProgressIndicator(strokeWidth: 3),
             )
           else
-            FilledButton.tonal(
-              onPressed: onReset,
-              child: const Text('Ask again'),
+            _PulsingMicButton(
+              recording: state == _AiInputState.recording,
+              loading: false,
+              onTap: isIdle || state == _AiInputState.recording
+                  ? onToggle
+                  : null,
             ),
+
+          const SizedBox(height: AppConstants.spacingMd),
+
+          // Subtitle under mic
+          if (state == _AiInputState.recording)
+            Text(
+              'Tap to send',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: cs.onSurfaceVariant),
+            ),
+
+          const Spacer(flex: 1),
+
+          // Reply target toggle — compact row at the bottom
+          _ReplyTargetToggle(
+            target: replyTarget,
+            enabled: isIdle,
+            onChanged: onReplyTargetChanged,
+          ),
+
+          const SizedBox(height: AppConstants.spacingLg),
         ],
       ),
     );
   }
 
-  Widget _buildHint(ThemeData theme, ColorScheme cs) {
-    final isApp = replyTarget == _ReplyTarget.app;
-    return Column(
-      key: const ValueKey('hint'),
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.smart_toy_rounded, size: 48, color: cs.primary),
-        const SizedBox(height: AppConstants.spacingLg),
-        Text(
-          'Talk to Aksa',
-          style: theme.textTheme.titleLarge,
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: AppConstants.spacingSm),
-        Text(
-          isApp
-              ? 'Tap the mic, ask anything, and Aksa will reply right here.'
-              : 'Tap the mic, ask anything, and Aksa will respond through the device speaker.',
-          style:
-              theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
-          textAlign: TextAlign.center,
-        ),
-      ],
-    );
-  }
+  // ── Result layout (done, error) ─────────────────────────────
 
-  Widget _buildRecording(ThemeData theme, ColorScheme cs) => Column(
-        key: const ValueKey('recording'),
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            formatDuration(duration),
-            style: theme.textTheme.displaySmall?.copyWith(
-              color: cs.error,
-              fontWeight: FontWeight.bold,
+  Widget _buildResultView(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isApp = replyTarget == _ReplyTarget.app;
+    final isDone = state == _AiInputState.done;
+
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(
+              AppConstants.spacingXxl,
+              AppConstants.spacingLg,
+              AppConstants.spacingXxl,
+              AppConstants.spacingSm,
             ),
+            child: isDone
+                ? _buildDoneContent(theme, cs, isApp)
+                : _buildErrorContent(theme, cs),
           ),
-          const SizedBox(height: AppConstants.spacingMd),
-          Text(
-            'Listening… tap to send',
-            style: theme.textTheme.bodyMedium
-                ?.copyWith(color: cs.onSurfaceVariant),
+        ),
+
+        // Bottom bar with "Continue" and "New conversation"
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppConstants.spacingXxl,
+            AppConstants.spacingSm,
+            AppConstants.spacingXxl,
+            AppConstants.spacingXxl,
           ),
-        ],
-      );
-
-  Widget _buildProcessing(ThemeData theme, ColorScheme cs) => Column(
-        key: const ValueKey('processing'),
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            replyTarget == _ReplyTarget.app
-                ? 'Aksa is thinking…'
-                : 'Transcribing…',
-            style: theme.textTheme.titleMedium
-                ?.copyWith(color: cs.onSurfaceVariant),
-          ),
-        ],
-      );
-
-  Widget _buildDone(ThemeData theme, ColorScheme cs) {
-    final isApp = replyTarget == _ReplyTarget.app;
-
-    return Column(
-      key: const ValueKey('done'),
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // User's transcript
-        if (transcript.isNotEmpty) ...[
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
             children: [
-              Icon(Icons.person_rounded,
-                  size: AppConstants.iconMd, color: cs.onSurfaceVariant),
-              const SizedBox(width: AppConstants.spacingSm),
               Expanded(
-                child: Text(
-                  transcript,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: cs.onSurfaceVariant,
-                    fontStyle: FontStyle.italic,
-                  ),
+                child: FilledButton.tonal(
+                  onPressed: onReset,
+                  child: const Text('Continue'),
+                ),
+              ),
+              const SizedBox(width: AppConstants.spacingMd),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: onNewConversation,
+                  child: const Text('New topic'),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: AppConstants.spacingLg),
-        ],
-
-        // Aksa's response (app mode) or device confirmation
-        if (isApp && response.isNotEmpty) ...[
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(AppConstants.spacingLg),
-            decoration: BoxDecoration(
-              color: cs.primaryContainer.withValues(alpha: 0.4),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.smart_toy_rounded,
-                        size: AppConstants.iconMd, color: cs.primary),
-                    const SizedBox(width: AppConstants.spacingSm),
-                    Text(
-                      'Aksa',
-                      style: theme.textTheme.labelLarge
-                          ?.copyWith(color: cs.primary),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppConstants.spacingSm),
-                Text(
-                  response,
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(color: cs.onSurface),
-                ),
-              ],
-            ),
-          ),
-        ] else if (!isApp) ...[
-          Icon(Icons.check_circle_rounded, size: 40, color: cs.primary),
-          const SizedBox(height: AppConstants.spacingMd),
-          Text(
-            'Aksa is responding on your device…',
-            style: theme.textTheme.bodyMedium
-                ?.copyWith(color: cs.onSurfaceVariant),
-            textAlign: TextAlign.center,
-          ),
-        ],
+        ),
       ],
     );
   }
 
-  Widget _buildError(ThemeData theme, ColorScheme cs) => Column(
-        key: const ValueKey('error'),
-        mainAxisSize: MainAxisSize.min,
+  Widget _buildDoneContent(ThemeData theme, ColorScheme cs, bool isApp) {
+    if (!isApp) {
+      // Device mode — simple confirmation
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.error_outline_rounded, size: 40, color: cs.error),
-          const SizedBox(height: AppConstants.spacingMd),
+          const SizedBox(height: AppConstants.spacingHuge),
+          Icon(Icons.check_circle_rounded, size: 56, color: cs.primary),
+          const SizedBox(height: AppConstants.spacingLg),
           if (transcript.isNotEmpty) ...[
             Text(
               '"$transcript"',
@@ -1332,25 +1325,139 @@ class _TalkToAksaTab extends StatelessWidget {
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: AppConstants.spacingSm),
+            const SizedBox(height: AppConstants.spacingMd),
           ],
           Text(
-            error ?? 'Something went wrong',
-            style: theme.textTheme.bodyMedium?.copyWith(color: cs.error),
+            'Aksa is responding on your device',
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: cs.onSurfaceVariant),
             textAlign: TextAlign.center,
           ),
         ],
       );
+    }
+
+    // App mode — chat-style conversation
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // User bubble (right-aligned)
+        if (transcript.isNotEmpty) ...[
+          Align(
+            alignment: Alignment.centerRight,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 280),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppConstants.spacingLg,
+                  vertical: AppConstants.spacingMd,
+                ),
+                decoration: BoxDecoration(
+                  color: cs.primaryContainer,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    topRight: Radius.circular(16),
+                    bottomLeft: Radius.circular(16),
+                    bottomRight: Radius.circular(4),
+                  ),
+                ),
+                child: Text(
+                  transcript,
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: cs.onPrimaryContainer),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppConstants.spacingMd),
+        ],
+
+        // Aksa bubble (left-aligned)
+        if (response.isNotEmpty)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppConstants.spacingLg,
+                vertical: AppConstants.spacingMd,
+              ),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
+                  bottomLeft: Radius.circular(4),
+                  bottomRight: Radius.circular(16),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.smart_toy_rounded,
+                          size: 14, color: cs.primary),
+                      const SizedBox(width: AppConstants.spacingXs),
+                      Text(
+                        'Aksa',
+                        style: theme.textTheme.labelSmall
+                            ?.copyWith(color: cs.primary),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppConstants.spacingXs),
+                  Text(
+                    response,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: cs.onSurface),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildErrorContent(ThemeData theme, ColorScheme cs) => Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(height: AppConstants.spacingHuge),
+            Icon(Icons.error_outline_rounded, size: 48, color: cs.error),
+            const SizedBox(height: AppConstants.spacingLg),
+            if (transcript.isNotEmpty) ...[
+              Text(
+                '"$transcript"',
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  fontStyle: FontStyle.italic,
+                  color: cs.onSurface,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppConstants.spacingSm),
+            ],
+            Text(
+              error ?? 'Something went wrong',
+              style: theme.textTheme.bodyMedium?.copyWith(color: cs.error),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
 }
 
-// ── Reply target selector ────────────────────────────────────────────────────
+// ── Reply target toggle ──────────────────────────────────────────────────────
 
-class _ReplyTargetSelector extends StatelessWidget {
+/// Compact toggle row at the bottom of the Talk to Aksa tab.
+/// Shows "Reply on: [Device] [This Phone]" as small tappable chips.
+class _ReplyTargetToggle extends StatelessWidget {
   final _ReplyTarget target;
   final bool enabled;
   final ValueChanged<_ReplyTarget> onChanged;
 
-  const _ReplyTargetSelector({
+  const _ReplyTargetToggle({
     required this.target,
     required this.enabled,
     required this.onChanged,
@@ -1358,23 +1465,84 @@ class _ReplyTargetSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SegmentedButton<_ReplyTarget>(
-      segments: const [
-        ButtonSegment(
-          value: _ReplyTarget.device,
-          label: Text('Device'),
-          icon: Icon(Icons.speaker_rounded),
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          'Reply on',
+          style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
         ),
-        ButtonSegment(
-          value: _ReplyTarget.app,
-          label: Text('This Phone'),
-          icon: Icon(Icons.phone_android_rounded),
+        const SizedBox(width: AppConstants.spacingSm),
+        _chip(
+          context,
+          icon: Icons.speaker_rounded,
+          label: 'Device',
+          selected: target == _ReplyTarget.device,
+          onTap: enabled ? () => onChanged(_ReplyTarget.device) : null,
+        ),
+        const SizedBox(width: AppConstants.spacingXs),
+        _chip(
+          context,
+          icon: Icons.phone_android_rounded,
+          label: 'This Phone',
+          selected: target == _ReplyTarget.app,
+          onTap: enabled ? () => onChanged(_ReplyTarget.app) : null,
         ),
       ],
-      selected: {target},
-      onSelectionChanged: enabled
-          ? (selection) => onChanged(selection.first)
-          : null,
+    );
+  }
+
+  Widget _chip(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required bool selected,
+    VoidCallback? onTap,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppConstants.spacingMd,
+          vertical: AppConstants.spacingXs,
+        ),
+        decoration: BoxDecoration(
+          color: selected
+              ? cs.primaryContainer
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected
+                ? cs.primary.withValues(alpha: 0.3)
+                : cs.outlineVariant,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 14,
+              color: selected ? cs.primary : cs.onSurfaceVariant,
+            ),
+            const SizedBox(width: AppConstants.spacingXs),
+            Text(
+              label,
+              style: tt.labelSmall?.copyWith(
+                color: selected ? cs.primary : cs.onSurfaceVariant,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

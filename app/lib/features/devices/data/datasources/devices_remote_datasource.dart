@@ -240,11 +240,13 @@ class DevicesRemoteDatasource {
     String id,
     Uint8List audioBytes, {
     String replyTarget = 'device',
+    String? conversationId,
   }) async {
     try {
       final formData = FormData.fromMap({
         'audio': MultipartFile.fromBytes(audioBytes, filename: 'voice.wav'),
         'replyTarget': replyTarget,
+        if (conversationId != null) 'conversationId': conversationId,
       });
       final response = await _client.dio.post(
         '/devices/$id/voice-input',
@@ -263,6 +265,8 @@ class DevicesRemoteDatasource {
         if (data['response'] != null) 'response': data['response'] as String,
         if (data['audio'] != null) 'audio': data['audio'] as String,
         if (data['mimeType'] != null) 'mimeType': data['mimeType'] as String,
+        if (data['conversationId'] != null)
+          'conversationId': data['conversationId'] as String,
       };
     } on DioException catch (e) {
       final data = e.response?.data;

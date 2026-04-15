@@ -17,19 +17,27 @@ export class ConversationPersistence {
   ) {}
 
   async createConversation(deviceId: string): Promise<Conversation> {
-    // End any stale open conversations for this device before creating a new one
-    const stale = await this.conversationsRepo.update(
-      { deviceId, endedAt: IsNull() },
-      { endedAt: new Date() },
-    );
-    if (stale.affected && stale.affected > 0) {
+    // Find stale open conversations so we can return their IDs for memory extraction
+    const staleConversations = await this.conversationsRepo.find({
+      where: { deviceId, endedAt: IsNull() },
+      select: ['id'],
+    });
+
+    if (staleConversations.length > 0) {
+      await this.conversationsRepo.update(
+        { deviceId, endedAt: IsNull() },
+        { endedAt: new Date() },
+      );
       this.logger.log(
-        `Closed ${stale.affected} stale conversation(s) for device ${deviceId}`,
+        `Closed ${staleConversations.length} stale conversation(s) for device ${deviceId}`,
       );
     }
 
     const conversation = this.conversationsRepo.create({ deviceId });
-    return this.conversationsRepo.save(conversation);
+    const saved = await this.conversationsRepo.save(conversation);
+    // Attach closed conversation IDs for callers that need them (e.g. memory extraction)
+    (saved as any).closedConversationIds = staleConversations.map((c) => c.id);
+    return saved;
   }
 
   async endConversation(conversationId: string): Promise<void> {

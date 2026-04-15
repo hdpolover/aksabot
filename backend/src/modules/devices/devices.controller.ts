@@ -239,6 +239,7 @@ export class DevicesController {
     @CurrentUser() user: RequestUser,
     @UploadedFile() file: Express.Multer.File,
     @Body('replyTarget') replyTarget?: string,
+    @Body('conversationId') conversationId?: string,
   ) {
     await this.devicesService.findById(id, user.userId);
 
@@ -257,7 +258,7 @@ export class DevicesController {
     }
 
     if (replyTarget === 'app') {
-      return this.gateway.handleAppVoiceInputForApp(id, pcm);
+      return this.gateway.handleAppVoiceInputForApp(id, pcm, conversationId);
     }
 
     return this.gateway.handleAppVoiceInput(id, pcm);

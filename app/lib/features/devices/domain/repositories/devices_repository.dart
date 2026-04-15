@@ -60,6 +60,7 @@ abstract class DevicesRepository {
     String id,
     Uint8List audioBytes, {
     String replyTarget = 'device',
+    String? conversationId,
   });
 
   /// Request fresh logs from the device (sends log:fetch over WebSocket).
@@ -87,12 +88,16 @@ class VoiceInputResult {
   /// MIME type of [audio] (e.g. 'audio/mpeg').
   final String? mimeType;
 
+  /// Conversation ID for continuing the same conversation across messages.
+  final String? conversationId;
+
   const VoiceInputResult({
     required this.transcript,
     required this.dispatched,
     this.response,
     this.audio,
     this.mimeType,
+    this.conversationId,
   });
 
   factory VoiceInputResult.fromJson(Map<String, dynamic> json) =>
@@ -102,6 +107,7 @@ class VoiceInputResult {
         response: json['response'] as String?,
         audio: json['audio'] as String?,
         mimeType: json['mimeType'] as String?,
+        conversationId: json['conversationId'] as String?,
       );
 
   /// Whether this result contains an app-side AI response.

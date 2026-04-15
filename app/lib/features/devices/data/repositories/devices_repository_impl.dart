@@ -198,12 +198,14 @@ class DevicesRepositoryImpl implements DevicesRepository {
     String id,
     Uint8List audioBytes, {
     String replyTarget = 'device',
+    String? conversationId,
   }) async {
     try {
       final data = await _datasource.sendVoiceInput(
         id,
         audioBytes,
         replyTarget: replyTarget,
+        conversationId: conversationId,
       );
       return Right(VoiceInputResult.fromJson(data));
     } on ServerException catch (e) {

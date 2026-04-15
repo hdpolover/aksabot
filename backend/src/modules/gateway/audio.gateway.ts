@@ -1963,13 +1963,21 @@ export class AudioGateway
   async handleAppVoiceInputForApp(
     deviceId: string,
     pcm: Buffer,
+    existingConversationId?: string,
   ): Promise<{
     transcript: string;
     response: string;
     audio: string;
     mimeType: string;
+    conversationId: string;
   }> {
-    const empty = { transcript: '', response: '', audio: '', mimeType: '' };
+    const empty = {
+      transcript: '',
+      response: '',
+      audio: '',
+      mimeType: '',
+      conversationId: existingConversationId ?? '',
+    };
 
     // 1. STT
     const sttResult = await this.aiService.transcribeOnce(pcm, {
@@ -2000,16 +2008,17 @@ export class AudioGateway
     };
 
     // 3. Fetch memories, history, mood in parallel
-    // Use the device's active conversation if one exists (from a device session),
-    // otherwise history will be empty — that's fine for a standalone app interaction.
+    // Use the ongoing app conversation for history context, falling back to
+    // the device's active session conversation if one exists.
     const session = this.sessions.get(deviceId);
-    const existingConvId = session?.conversationId;
+    const historyConvId =
+      existingConversationId || session?.conversationId;
 
     const [memories, moodHistory, history] = await Promise.all([
       this.memoriesService.getRelevant(deviceId),
       this.moodJournal.getRecentMoods(deviceId).catch(() => []),
-      existingConvId
-        ? this.persistence.getRecentHistory(existingConvId)
+      historyConvId
+        ? this.persistence.getRecentHistory(historyConvId)
         : Promise.resolve([]),
     ]);
 
@@ -2031,10 +2040,29 @@ export class AudioGateway
       await this.aiService.refreshWeather(context.latitude, context.longitude);
     }
 
-    // 5. Create conversation and save user message
-    const conversation = await this.persistence.createConversation(deviceId);
+    // 5. Reuse existing conversation or create a new one
+    let conversationId: string;
+    if (existingConversationId) {
+      conversationId = existingConversationId;
+    } else {
+      const conversation = await this.persistence.createConversation(deviceId);
+      conversationId = conversation.id;
+      // Extract memories from any stale conversations that were just closed
+      const closedIds = (conversation as any).closedConversationIds as
+        | string[]
+        | undefined;
+      if (closedIds?.length) {
+        for (const closedId of closedIds) {
+          this.memoriesService
+            .extractFromConversation(closedId, deviceId)
+            .catch((err) =>
+              this.logger.warn(`Memory extraction failed: ${err.message}`),
+            );
+        }
+      }
+    }
     await this.persistence.saveMessage(
-      conversation.id,
+      conversationId,
       'user',
       sttResult.transcript,
     );
@@ -2065,6 +2093,7 @@ export class AudioGateway
         response: '',
         audio: '',
         mimeType: '',
+        conversationId,
       };
     }
 
@@ -2085,17 +2114,15 @@ export class AudioGateway
       // Graceful degradation: return text without audio
     }
 
-    // 8. Save assistant message and extract memories
-    await this.persistence.saveMessage(conversation.id, 'assistant', fullText);
-    this.memoriesService
-      .extractFromConversation(conversation.id, deviceId)
-      .catch(() => {});
+    // 8. Save assistant message
+    await this.persistence.saveMessage(conversationId, 'assistant', fullText);
 
     return {
       transcript: sttResult.transcript,
       response: fullText,
       audio: audioBase64,
       mimeType,
+      conversationId,
     };
   }
 
