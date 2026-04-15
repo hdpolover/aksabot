@@ -1092,6 +1092,10 @@ static void onTouchEvent(touch::Event event) {
                 wake_word::startListening();  // resume — won't go through normal playback path
                 Serial.println("[Main] Interrupted by tap");
             }
+            else if (display::getMode() == display::Mode::GLANCE) {
+                // Dismiss the time/weather glance early — return to home screen
+                display::setMode(display::getHomeMode());
+            }
             else if (display::getMode() == display::Mode::REMINDER) {
                 // Dismiss reminder
                 display::setMode(display::getHomeMode());
