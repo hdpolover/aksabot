@@ -9,5 +9,9 @@ export interface TtsOptions {
 }
 
 export interface ITtsProvider {
-  synthesize(text: string, options?: TtsOptions, signal?: AbortSignal): Promise<Buffer>;
+  synthesize(
+    text: string,
+    options?: TtsOptions,
+    signal?: AbortSignal,
+  ): Promise<Buffer>;
 }

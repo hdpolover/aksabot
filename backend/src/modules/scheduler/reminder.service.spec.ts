@@ -69,7 +69,10 @@ describe('ReminderService', () => {
     it('picks from the response pool using the given type', async () => {
       await service.generate(DEVICE_ID, 'hydration');
 
-      expect(mockResponsePool.pickLru).toHaveBeenCalledWith(DEVICE_ID, 'hydration');
+      expect(mockResponsePool.pickLru).toHaveBeenCalledWith(
+        DEVICE_ID,
+        'hydration',
+      );
     });
 
     it('synthesizes audio via TTS on cache miss', async () => {
@@ -90,7 +93,9 @@ describe('ReminderService', () => {
 
     it('returns cached audio when existing ttsCacheKey hits cache', async () => {
       const cachedAudio = Buffer.from('cached-opus');
-      mockResponsePool.pickLru.mockResolvedValue(makePoolEntry({ ttsCacheKey: 'existing-key' }));
+      mockResponsePool.pickLru.mockResolvedValue(
+        makePoolEntry({ ttsCacheKey: 'existing-key' }),
+      );
       mockTtsCache.get.mockResolvedValue(cachedAudio);
 
       const result = await service.generate(DEVICE_ID, 'stand_up');
@@ -101,7 +106,9 @@ describe('ReminderService', () => {
     });
 
     it('falls back to synthesis when existing cache key is a miss', async () => {
-      mockResponsePool.pickLru.mockResolvedValue(makePoolEntry({ ttsCacheKey: 'stale-key' }));
+      mockResponsePool.pickLru.mockResolvedValue(
+        makePoolEntry({ ttsCacheKey: 'stale-key' }),
+      );
       mockTtsCache.get.mockResolvedValue(null); // both key lookups miss
 
       const result = await service.generate(DEVICE_ID, 'stand_up');
@@ -128,11 +135,16 @@ describe('ReminderService', () => {
       // updateCacheKey is called non-blocking
       await Promise.resolve();
 
-      expect(mockResponsePool.updateCacheKey).toHaveBeenCalledWith('rp-1', CACHE_KEY);
+      expect(mockResponsePool.updateCacheKey).toHaveBeenCalledWith(
+        'rp-1',
+        CACHE_KEY,
+      );
     });
 
     it('does not call updateCacheKey when pool entry already has a cache key', async () => {
-      mockResponsePool.pickLru.mockResolvedValue(makePoolEntry({ ttsCacheKey: 'existing-key' }));
+      mockResponsePool.pickLru.mockResolvedValue(
+        makePoolEntry({ ttsCacheKey: 'existing-key' }),
+      );
       mockTtsCache.get.mockResolvedValue(Buffer.from('cached'));
 
       await service.generate(DEVICE_ID, 'stand_up');
@@ -142,7 +154,13 @@ describe('ReminderService', () => {
     });
 
     it('attaches correct display config for each reminder type', async () => {
-      const types = ['stand_up', 'hydration', 'eye_break', 'stretch', 'posture'] as const;
+      const types = [
+        'stand_up',
+        'hydration',
+        'eye_break',
+        'stretch',
+        'posture',
+      ] as const;
       for (const type of types) {
         const result = await service.generate(DEVICE_ID, type);
         expect(result.display).toEqual(REMINDER_DISPLAY[type]);
@@ -173,13 +191,19 @@ describe('ReminderService', () => {
     it('picks from pomodoro_focus pool on focus phase', async () => {
       await service.generatePomodoro(DEVICE_ID, focusState);
 
-      expect(mockResponsePool.pickLru).toHaveBeenCalledWith(DEVICE_ID, 'pomodoro_focus');
+      expect(mockResponsePool.pickLru).toHaveBeenCalledWith(
+        DEVICE_ID,
+        'pomodoro_focus',
+      );
     });
 
     it('picks from pomodoro_break pool on break phase', async () => {
       await service.generatePomodoro(DEVICE_ID, breakState);
 
-      expect(mockResponsePool.pickLru).toHaveBeenCalledWith(DEVICE_ID, 'pomodoro_break');
+      expect(mockResponsePool.pickLru).toHaveBeenCalledWith(
+        DEVICE_ID,
+        'pomodoro_break',
+      );
     });
 
     it('returns focused display for focus phase', async () => {
@@ -213,7 +237,9 @@ describe('ReminderService', () => {
 
     it('uses cached audio when pool entry has a cache key', async () => {
       const cachedAudio = Buffer.from('pomodoro-cached');
-      mockResponsePool.pickLru.mockResolvedValue(makePoolEntry({ ttsCacheKey: 'pom-key' }));
+      mockResponsePool.pickLru.mockResolvedValue(
+        makePoolEntry({ ttsCacheKey: 'pom-key' }),
+      );
       mockTtsCache.get.mockResolvedValue(cachedAudio);
 
       const result = await service.generatePomodoro(DEVICE_ID, focusState);
@@ -231,7 +257,10 @@ describe('ReminderService', () => {
       await service.generatePomodoro(DEVICE_ID, focusState);
       await Promise.resolve();
 
-      expect(mockResponsePool.updateCacheKey).toHaveBeenCalledWith('rp-1', CACHE_KEY);
+      expect(mockResponsePool.updateCacheKey).toHaveBeenCalledWith(
+        'rp-1',
+        CACHE_KEY,
+      );
     });
   });
 
@@ -239,7 +268,9 @@ describe('ReminderService', () => {
 
   describe('audio caching behaviour', () => {
     it('does not call TTS when both cache lookups succeed on first hit', async () => {
-      mockResponsePool.pickLru.mockResolvedValue(makePoolEntry({ ttsCacheKey: 'key-hit' }));
+      mockResponsePool.pickLru.mockResolvedValue(
+        makePoolEntry({ ttsCacheKey: 'key-hit' }),
+      );
       mockTtsCache.get.mockResolvedValue(Buffer.from('cached-audio'));
 
       await service.generate(DEVICE_ID, 'stand_up');
@@ -258,13 +289,19 @@ describe('ReminderService', () => {
     it('does not throw when ttsCache.set rejects', async () => {
       mockTtsCache.set.mockRejectedValue(new Error('Redis write error'));
 
-      await expect(service.generate(DEVICE_ID, 'posture')).resolves.toBeDefined();
+      await expect(
+        service.generate(DEVICE_ID, 'posture'),
+      ).resolves.toBeDefined();
     });
 
     it('does not throw when updateCacheKey rejects', async () => {
-      mockResponsePool.updateCacheKey.mockRejectedValue(new Error('DB write error'));
+      mockResponsePool.updateCacheKey.mockRejectedValue(
+        new Error('DB write error'),
+      );
 
-      await expect(service.generate(DEVICE_ID, 'stretch')).resolves.toBeDefined();
+      await expect(
+        service.generate(DEVICE_ID, 'stretch'),
+      ).resolves.toBeDefined();
     });
   });
 });

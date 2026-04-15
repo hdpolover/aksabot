@@ -8,7 +8,10 @@ import { MemoryDecayJob } from './memory-decay.job';
 import { MemoriesController } from './memories.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Conversation, Memory, Message]), AiModule],
+  imports: [
+    TypeOrmModule.forFeature([Conversation, Memory, Message]),
+    AiModule,
+  ],
   controllers: [MemoriesController],
   providers: [MemoriesService, MemoryExtractorService, MemoryDecayJob],
   exports: [MemoriesService],

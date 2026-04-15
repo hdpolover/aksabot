@@ -28,9 +28,16 @@ describe('DevicesController', () => {
       remove: jest.fn(),
     };
 
-    const mockGateway = { sendToDevice: jest.fn(), onSettingsUpdated: jest.fn() };
+    const mockGateway = {
+      sendToDevice: jest.fn(),
+      onSettingsUpdated: jest.fn(),
+    };
     const mockTts = { synthesize: jest.fn() };
-    controller = new DevicesController(devicesService as any, mockGateway as any, mockTts as any);
+    controller = new DevicesController(
+      devicesService as any,
+      mockGateway as any,
+      mockTts as any,
+    );
   });
 
   describe('create', () => {
@@ -40,7 +47,9 @@ describe('DevicesController', () => {
 
       const result = await controller.create(mockUser, { name: 'My Bot' });
 
-      expect(devicesService.create).toHaveBeenCalledWith('user-1', { name: 'My Bot' });
+      expect(devicesService.create).toHaveBeenCalledWith('user-1', {
+        name: 'My Bot',
+      });
       expect(result).toEqual(response);
     });
   });
@@ -68,12 +77,17 @@ describe('DevicesController', () => {
 
       const result = await controller.findOne('device-1', mockUser);
 
-      expect(devicesService.findById).toHaveBeenCalledWith('device-1', 'user-1');
+      expect(devicesService.findById).toHaveBeenCalledWith(
+        'device-1',
+        'user-1',
+      );
       expect(result).toEqual(mockDevice);
     });
 
     it('throws NotFoundException when device does not exist', async () => {
-      devicesService.findById.mockRejectedValue(new NotFoundException('Device not found'));
+      devicesService.findById.mockRejectedValue(
+        new NotFoundException('Device not found'),
+      );
 
       await expect(controller.findOne('bad-id', mockUser)).rejects.toThrow(
         NotFoundException,
@@ -81,7 +95,9 @@ describe('DevicesController', () => {
     });
 
     it('throws ForbiddenException when device belongs to another user', async () => {
-      devicesService.findById.mockRejectedValue(new ForbiddenException('Not your device'));
+      devicesService.findById.mockRejectedValue(
+        new ForbiddenException('Not your device'),
+      );
 
       await expect(controller.findOne('device-1', mockUser)).rejects.toThrow(
         ForbiddenException,
@@ -91,14 +107,15 @@ describe('DevicesController', () => {
 
   describe('updateSettings', () => {
     it('merges settings and returns updated device', async () => {
-      const updated = { ...mockDevice, settingsJson: { volume: 80, brightness: 50 } };
+      const updated = {
+        ...mockDevice,
+        settingsJson: { volume: 80, brightness: 50 },
+      };
       devicesService.updateSettings.mockResolvedValue(updated);
 
-      const result = await controller.updateSettings(
-        'device-1',
-        mockUser,
-        { brightness: 50 } as any,
-      );
+      const result = await controller.updateSettings('device-1', mockUser, {
+        brightness: 50,
+      } as any);
 
       expect(devicesService.updateSettings).toHaveBeenCalledWith(
         'device-1',
@@ -113,9 +130,14 @@ describe('DevicesController', () => {
     it('claims a device by token for the authenticated user', async () => {
       devicesService.claimByToken.mockResolvedValue(mockDevice);
 
-      const result = await controller.claim(mockUser, { deviceToken: 'tok-123' });
+      const result = await controller.claim(mockUser, {
+        deviceToken: 'tok-123',
+      });
 
-      expect(devicesService.claimByToken).toHaveBeenCalledWith('user-1', 'tok-123');
+      expect(devicesService.claimByToken).toHaveBeenCalledWith(
+        'user-1',
+        'tok-123',
+      );
       expect(result).toEqual(mockDevice);
     });
 
@@ -142,7 +164,10 @@ describe('DevicesController', () => {
 
       const result = await controller.getStats('device-1', mockUser);
 
-      expect(devicesService.getStats).toHaveBeenCalledWith('device-1', 'user-1');
+      expect(devicesService.getStats).toHaveBeenCalledWith(
+        'device-1',
+        'user-1',
+      );
       expect(result).toEqual(stats);
     });
   });
@@ -158,7 +183,9 @@ describe('DevicesController', () => {
     });
 
     it('throws NotFoundException when device does not exist', async () => {
-      devicesService.remove.mockRejectedValue(new NotFoundException('Device not found'));
+      devicesService.remove.mockRejectedValue(
+        new NotFoundException('Device not found'),
+      );
 
       await expect(controller.remove('bad-id', mockUser)).rejects.toThrow(
         NotFoundException,

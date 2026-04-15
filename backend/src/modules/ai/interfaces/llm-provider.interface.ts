@@ -9,10 +9,7 @@ export interface LlmResponse {
 }
 
 export interface ILlmProvider {
-  generate(
-    systemPrompt: string,
-    messages: ChatMessage[],
-  ): Promise<LlmResponse>;
+  generate(systemPrompt: string, messages: ChatMessage[]): Promise<LlmResponse>;
 
   generateStream(
     systemPrompt: string,

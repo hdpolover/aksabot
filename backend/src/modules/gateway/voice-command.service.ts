@@ -73,15 +73,11 @@ const COMMANDS: CommandPattern[] = [
   },
   {
     command: 'cancel',
-    patterns: [
-      /^(never\s*mind|cancel|nah|forget it|nvm)\s*[.!?]*$/i,
-    ],
+    patterns: [/^(never\s*mind|cancel|nah|forget it|nvm)\s*[.!?]*$/i],
   },
   {
     command: 'reminder:set',
-    patterns: [
-      /\b(remind me|set a reminder|reminder)\b(.+)/i,
-    ],
+    patterns: [/\b(remind me|set a reminder|reminder)\b(.+)/i],
   },
 ];
 
@@ -107,7 +103,9 @@ export class VoiceCommandService {
             args = m[2].trim().replace(/^(to|that|about)\s+/i, '');
           }
 
-          this.logger.log(`Voice command matched: "${command}" from "${cleaned.slice(0, 50)}"`);
+          this.logger.log(
+            `Voice command matched: "${command}" from "${cleaned.slice(0, 50)}"`,
+          );
           return { command, args };
         }
       }

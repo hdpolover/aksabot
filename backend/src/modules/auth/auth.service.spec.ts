@@ -33,7 +33,9 @@ describe('AuthService', () => {
 
     jwtService = {
       signAsync: jest.fn().mockResolvedValue('mock-token'),
-      verify: jest.fn().mockReturnValue({ sub: 'user-1', email: 'test@example.com' }),
+      verify: jest
+        .fn()
+        .mockReturnValue({ sub: 'user-1', email: 'test@example.com' }),
     };
 
     const configService = {

@@ -47,7 +47,9 @@ describe('AiService', () => {
 
       const result = service.createSttStream({ languages: ['en-US'] });
       expect(result).toBe(mockStream);
-      expect(mockStt.createStream).toHaveBeenCalledWith({ languages: ['en-US'] });
+      expect(mockStt.createStream).toHaveBeenCalledWith({
+        languages: ['en-US'],
+      });
     });
   });
 
@@ -128,9 +130,7 @@ describe('AiService', () => {
       }
       mockLlm.generateStream.mockReturnValue(fakeStream());
 
-      await collectEvents(
-        service.processTranscript('Hi', [], []),
-      );
+      await collectEvents(service.processTranscript('Hi', [], []));
 
       // 2 sentences = 2 TTS calls + 2 codec encode calls
       expect(mockTts.synthesize).toHaveBeenCalledTimes(2);
@@ -146,9 +146,7 @@ describe('AiService', () => {
       mockLlm.generateStream.mockReturnValue(fakeStream());
 
       const history = [{ role: 'user', content: 'Previous' }];
-      await collectEvents(
-        service.processTranscript('Current', [], history),
-      );
+      await collectEvents(service.processTranscript('Current', [], history));
 
       expect(mockLlm.generateStream).toHaveBeenCalledWith(
         expect.stringContaining('gen-z energy'),

@@ -31,7 +31,11 @@ describe('SchedulerService', () => {
         text: 'Time to stand!',
         audio: Buffer.from('audio'),
         cacheKey: 'key-1',
-        display: { expression: 'encouraging', screenMode: 'reminder', durationMs: 10_000 },
+        display: {
+          expression: 'encouraging',
+          screenMode: 'reminder',
+          durationMs: 10_000,
+        },
       }),
     };
 
@@ -77,7 +81,10 @@ describe('SchedulerService', () => {
       await jest.advanceTimersByTimeAsync(20 * 60_000);
 
       // Reminder should have fired for eye_break
-      expect(mockReminderService.generate).toHaveBeenCalledWith('device-1', 'eye_break');
+      expect(mockReminderService.generate).toHaveBeenCalledWith(
+        'device-1',
+        'eye_break',
+      );
     });
 
     it('sends reminder event to device when timer fires', async () => {
@@ -130,7 +137,9 @@ describe('SchedulerService', () => {
       devicesRepo.findOne.mockResolvedValue(null);
 
       // Should not throw
-      await expect(service.startDeviceSchedule('device-1')).resolves.toBeUndefined();
+      await expect(
+        service.startDeviceSchedule('device-1'),
+      ).resolves.toBeUndefined();
     });
 
     it('skips disabled reminders', async () => {
@@ -149,7 +158,10 @@ describe('SchedulerService', () => {
       // eye_break is disabled; with default config the first interval is posture at 30m
       jest.advanceTimersByTime(19 * 60_000);
 
-      expect(mockReminderService.generate).not.toHaveBeenCalledWith('device-1', 'eye_break');
+      expect(mockReminderService.generate).not.toHaveBeenCalledWith(
+        'device-1',
+        'eye_break',
+      );
     });
   });
 
@@ -164,7 +176,9 @@ describe('SchedulerService', () => {
       jest.advanceTimersByTime(120 * 60_000);
 
       expect(mockReminderService.generate).not.toHaveBeenCalled();
-      expect(mockPomodoroService.stopAllForDevice).toHaveBeenCalledWith('device-1');
+      expect(mockPomodoroService.stopAllForDevice).toHaveBeenCalledWith(
+        'device-1',
+      );
     });
 
     it('does not throw for an unregistered device', () => {
@@ -190,7 +204,9 @@ describe('SchedulerService', () => {
     it('sends focus:start event immediately', () => {
       service.startFocusMode('device-1', 30);
 
-      expect(sendToDevice).toHaveBeenCalledWith('device-1', 'focus:start', { durationMinutes: 30 });
+      expect(sendToDevice).toHaveBeenCalledWith('device-1', 'focus:start', {
+        durationMinutes: 30,
+      });
     });
 
     it('reports isFocusMode as true while active', () => {
@@ -304,7 +320,9 @@ describe('SchedulerService', () => {
     });
 
     it('does not throw when pool refill rejects', async () => {
-      mockResponsePool.refillIfNeeded.mockRejectedValue(new Error('Redis down'));
+      mockResponsePool.refillIfNeeded.mockRejectedValue(
+        new Error('Redis down'),
+      );
       await service.startDeviceSchedule('device-1');
 
       await expect(service.handlePoolRefill()).resolves.toBeUndefined();

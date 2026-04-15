@@ -67,7 +67,9 @@ export class FirmwareService {
     });
 
     const saved = await this.repo.save(release);
-    this.logger.log(`Firmware ${version} uploaded (${file.size} bytes, sha256=${sha256.slice(0, 16)}...)`);
+    this.logger.log(
+      `Firmware ${version} uploaded (${file.size} bytes, sha256=${sha256.slice(0, 16)}...)`,
+    );
     return saved;
   }
 
@@ -81,7 +83,8 @@ export class FirmwareService {
 
   async findById(id: string): Promise<FirmwareRelease> {
     const release = await this.repo.findOne({ where: { id } });
-    if (!release) throw new NotFoundException(`Firmware release ${id} not found`);
+    if (!release)
+      throw new NotFoundException(`Firmware release ${id} not found`);
     return release;
   }
 
@@ -104,7 +107,9 @@ export class FirmwareService {
       : await this.findLatest();
 
     if (!release) {
-      throw new NotFoundException('No firmware releases available. Upload a .bin first.');
+      throw new NotFoundException(
+        'No firmware releases available. Upload a .bin first.',
+      );
     }
 
     const baseUrl = process.env.BACKEND_URL ?? 'http://localhost:4280';
@@ -124,7 +129,9 @@ export class FirmwareService {
       version: release.version,
     });
 
-    this.logger.log(`OTA triggered: device=${deviceId} version=${release.version}`);
+    this.logger.log(
+      `OTA triggered: device=${deviceId} version=${release.version}`,
+    );
     return { triggered: true, version: release.version };
   }
 

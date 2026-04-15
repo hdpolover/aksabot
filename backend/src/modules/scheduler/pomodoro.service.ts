@@ -16,11 +16,8 @@ export class PomodoroService {
   private sessions = new Map<string, PomodoroState>();
 
   // Injected later by SchedulerService to avoid circular dep
-  private sendToDevice: (
-    deviceId: string,
-    event: string,
-    data: any,
-  ) => void = () => {};
+  private sendToDevice: (deviceId: string, event: string, data: any) => void =
+    () => {};
 
   // Injected from gateway — fires LLM-generated celebration/taunt via TTS
   private sendPomodoroReaction: (
@@ -35,7 +32,9 @@ export class PomodoroService {
     this.sendToDevice = fn;
   }
 
-  setSendPomodoroReaction(fn: (deviceId: string, won: boolean, cycle: number) => Promise<void>) {
+  setSendPomodoroReaction(
+    fn: (deviceId: string, won: boolean, cycle: number) => Promise<void>,
+  ) {
     this.sendPomodoroReaction = fn;
   }
 
@@ -78,8 +77,7 @@ export class PomodoroService {
       const completedCycle = state.cycle;
 
       // Switch to break
-      const isLongBreak =
-        state.cycle % state.cyclesBeforeLongBreak === 0;
+      const isLongBreak = state.cycle % state.cyclesBeforeLongBreak === 0;
       state.phase = isLongBreak ? 'long_break' : 'short_break';
       const breakMinutes = isLongBreak
         ? state.longBreakMinutes

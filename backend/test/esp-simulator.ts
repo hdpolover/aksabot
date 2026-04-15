@@ -72,7 +72,9 @@ async function http(
   if (res.status === 204) return null;
   const json = await res.json();
   if (!res.ok) {
-    throw new Error(`${res.status} ${method} ${endpoint}: ${JSON.stringify(json)}`);
+    throw new Error(
+      `${res.status} ${method} ${endpoint}: ${JSON.stringify(json)}`,
+    );
   }
   return json;
 }
@@ -114,7 +116,12 @@ async function setup(): Promise<SavedState> {
 
   // Create device
   const deviceName = `ESP Simulator ${new Date().toLocaleTimeString()}`;
-  const deviceRes = await http('POST', '/devices', { name: deviceName }, accessToken);
+  const deviceRes = await http(
+    'POST',
+    '/devices',
+    { name: deviceName },
+    accessToken,
+  );
   const { device, deviceToken } = deviceRes.data;
   log('ok', `Created device: ${device.name} (${device.id})`);
 
@@ -150,7 +157,10 @@ function connect(state: SavedState) {
     log('info', `║  Device Name:  ${state.deviceName.padEnd(35)}║`);
     log('info', '╚══════════════════════════════════════════════════╝');
     log('info', '');
-    log('info', 'Use the Device Token above in the app\'s "Add via Wi-Fi" flow.');
+    log(
+      'info',
+      'Use the Device Token above in the app\'s "Add via Wi-Fi" flow.',
+    );
 
     // Keepalive ping every 30 seconds
     const interval = setInterval(() => {
@@ -170,11 +180,19 @@ function connect(state: SavedState) {
   ws.on('message', (raw: Buffer | string) => {
     try {
       const msg = JSON.parse(raw.toString());
-      log('ws', `← ${msg.event}: ${JSON.stringify(msg.data ?? {}).slice(0, 100)}`);
+      log(
+        'ws',
+        `← ${msg.event}: ${JSON.stringify(msg.data ?? {}).slice(0, 100)}`,
+      );
 
       // Auto-respond to proactive events with acknowledgment
       if (msg.event?.startsWith('proactive:')) {
-        ws.send(JSON.stringify({ event: 'proactive:ack', data: { event: msg.event } }));
+        ws.send(
+          JSON.stringify({
+            event: 'proactive:ack',
+            data: { event: msg.event },
+          }),
+        );
       }
     } catch {
       log('ws', `← (binary ${(raw as Buffer).length} bytes)`);
@@ -198,7 +216,10 @@ async function main() {
     connect(state);
   } catch (err: any) {
     log('error', `Setup failed: ${err.message}`);
-    log('info', 'Is the backend running? (npm run start:dev + docker-compose up)');
+    log(
+      'info',
+      'Is the backend running? (npm run start:dev + docker-compose up)',
+    );
     process.exit(1);
   }
 }

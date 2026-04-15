@@ -79,8 +79,16 @@ export class ReminderService {
 
     const display =
       state.phase === 'focus'
-        ? { expression: 'focused', screenMode: 'reminder' as const, durationMs: 8_000 }
-        : { expression: 'encouraging', screenMode: 'reminder' as const, durationMs: 8_000 };
+        ? {
+            expression: 'focused',
+            screenMode: 'reminder' as const,
+            durationMs: 8_000,
+          }
+        : {
+            expression: 'encouraging',
+            screenMode: 'reminder' as const,
+            durationMs: 8_000,
+          };
 
     return {
       type: category,

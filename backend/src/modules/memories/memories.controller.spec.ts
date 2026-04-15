@@ -31,7 +31,10 @@ describe('MemoriesController', () => {
 
       const result = await controller.findByDevice('device-1');
 
-      expect(memoriesService.findByDevice).toHaveBeenCalledWith('device-1', undefined);
+      expect(memoriesService.findByDevice).toHaveBeenCalledWith(
+        'device-1',
+        undefined,
+      );
       expect(result).toEqual([mockMemory]);
     });
 
@@ -41,7 +44,10 @@ describe('MemoriesController', () => {
 
       const result = await controller.findByDevice('device-1', 'work');
 
-      expect(memoriesService.findByDevice).toHaveBeenCalledWith('device-1', 'work');
+      expect(memoriesService.findByDevice).toHaveBeenCalledWith(
+        'device-1',
+        'work',
+      );
       expect(result).toEqual([workMemory]);
     });
 
@@ -69,7 +75,9 @@ describe('MemoriesController', () => {
       const updated = { ...mockMemory, fact: 'User is a senior developer' };
       memoriesService.update.mockResolvedValue(updated);
 
-      const result = await controller.update('mem-1', { fact: 'User is a senior developer' });
+      const result = await controller.update('mem-1', {
+        fact: 'User is a senior developer',
+      });
 
       expect(memoriesService.update).toHaveBeenCalledWith('mem-1', {
         fact: 'User is a senior developer',
@@ -83,7 +91,9 @@ describe('MemoriesController', () => {
 
       const result = await controller.update('mem-1', { category: 'personal' });
 
-      expect(memoriesService.update).toHaveBeenCalledWith('mem-1', { category: 'personal' });
+      expect(memoriesService.update).toHaveBeenCalledWith('mem-1', {
+        category: 'personal',
+      });
       expect(result.category).toBe('personal');
     });
 
@@ -104,7 +114,9 @@ describe('MemoriesController', () => {
     });
 
     it('throws NotFoundException when memory does not exist', async () => {
-      memoriesService.update.mockRejectedValue(new NotFoundException('Memory not found'));
+      memoriesService.update.mockRejectedValue(
+        new NotFoundException('Memory not found'),
+      );
 
       await expect(
         controller.update('bad-id', { fact: 'Anything' }),
@@ -123,9 +135,13 @@ describe('MemoriesController', () => {
     });
 
     it('throws NotFoundException when memory does not exist', async () => {
-      memoriesService.remove.mockRejectedValue(new NotFoundException('Memory not found'));
+      memoriesService.remove.mockRejectedValue(
+        new NotFoundException('Memory not found'),
+      );
 
-      await expect(controller.remove('bad-id')).rejects.toThrow(NotFoundException);
+      await expect(controller.remove('bad-id')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

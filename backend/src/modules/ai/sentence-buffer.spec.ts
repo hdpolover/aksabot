@@ -72,7 +72,17 @@ describe('SentenceBuffer', () => {
   });
 
   it('handles token-by-token streaming', () => {
-    const tokens = ['I', ' am', ' fine', '.', ' How', ' are', ' you', '?', ' Good'];
+    const tokens = [
+      'I',
+      ' am',
+      ' fine',
+      '.',
+      ' How',
+      ' are',
+      ' you',
+      '?',
+      ' Good',
+    ];
     const sentences: string[] = [];
     for (const t of tokens) {
       const result = buffer.feed(t);

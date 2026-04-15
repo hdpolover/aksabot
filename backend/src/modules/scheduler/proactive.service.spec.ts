@@ -209,7 +209,9 @@ describe('ProactiveService', () => {
     });
 
     it('sends end-of-day briefing to active idle devices', async () => {
-      mockLlm.generate.mockResolvedValue({ text: 'Great work today! What did you accomplish?' });
+      mockLlm.generate.mockResolvedValue({
+        text: 'Great work today! What did you accomplish?',
+      });
 
       await service.handleEndOfDay();
 
@@ -278,7 +280,11 @@ describe('ProactiveService', () => {
       jest.setSystemTime(ts('2026-04-10T13:05:00'));
       await service.checkIdleNudges();
 
-      expect(sendToDevice).not.toHaveBeenCalledWith(DEVICE_ID, 'proactive:nudge', expect.anything());
+      expect(sendToDevice).not.toHaveBeenCalledWith(
+        DEVICE_ID,
+        'proactive:nudge',
+        expect.anything(),
+      );
     });
   });
 });

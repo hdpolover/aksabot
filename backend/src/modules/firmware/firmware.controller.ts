@@ -53,7 +53,9 @@ export class FirmwareController {
       }),
       limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB max
       fileFilter: (_req, file, cb) => {
-        const ok = extname(file.originalname).toLowerCase() === '.bin' || file.mimetype === 'application/octet-stream';
+        const ok =
+          extname(file.originalname).toLowerCase() === '.bin' ||
+          file.mimetype === 'application/octet-stream';
         cb(null, ok);
       },
     }),
@@ -98,7 +100,9 @@ export class FirmwareController {
     @Res() res: Response,
   ) {
     const release = await this.firmwareService.findById(id);
-    const { path, exists } = this.firmwareService.resolveFirmwarePath(release.filename);
+    const { path, exists } = this.firmwareService.resolveFirmwarePath(
+      release.filename,
+    );
 
     if (!exists) {
       res.status(404).json({ message: 'Firmware file not found on server' });
@@ -106,7 +110,10 @@ export class FirmwareController {
     }
 
     res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="firmware-${release.version}.bin"`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="firmware-${release.version}.bin"`,
+    );
     res.setHeader('Content-Length', release.size);
     res.setHeader('X-Firmware-Version', release.version);
     res.setHeader('X-Firmware-SHA256', release.sha256);
@@ -127,7 +134,11 @@ export class FirmwareController {
     @CurrentUser() user: RequestUser,
     @Body() body: { releaseId?: string },
   ) {
-    return this.firmwareService.triggerOta(deviceId, user.userId, body.releaseId);
+    return this.firmwareService.triggerOta(
+      deviceId,
+      user.userId,
+      body.releaseId,
+    );
   }
 
   /** Poll OTA progress for a device.

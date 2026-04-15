@@ -17,7 +17,9 @@ describe('DevicesService', () => {
 
   beforeEach(() => {
     repo = {
-      create: jest.fn().mockImplementation((data) => ({ ...mockDevice, ...data })),
+      create: jest
+        .fn()
+        .mockImplementation((data) => ({ ...mockDevice, ...data })),
       save: jest.fn().mockImplementation((device) => Promise.resolve(device)),
       find: jest.fn().mockResolvedValue([mockDevice]),
       findOne: jest.fn(),
@@ -25,8 +27,17 @@ describe('DevicesService', () => {
     };
 
     const emptyRepo = {} as any;
-    const mockSessionManager = { get: jest.fn().mockReturnValue(undefined) } as any;
-    service = new DevicesService(repo as any, emptyRepo, emptyRepo, emptyRepo, emptyRepo, mockSessionManager);
+    const mockSessionManager = {
+      get: jest.fn().mockReturnValue(undefined),
+    } as any;
+    service = new DevicesService(
+      repo as any,
+      emptyRepo,
+      emptyRepo,
+      emptyRepo,
+      emptyRepo,
+      mockSessionManager,
+    );
   });
 
   describe('create', () => {
@@ -80,7 +91,10 @@ describe('DevicesService', () => {
 
   describe('updateSettings', () => {
     it('merges settings and saves', async () => {
-      repo.findOne.mockResolvedValue({ ...mockDevice, settingsJson: { volume: 80 } });
+      repo.findOne.mockResolvedValue({
+        ...mockDevice,
+        settingsJson: { volume: 80 },
+      });
       const result = await service.updateSettings('device-1', 'user-1', {
         brightness: 50,
       } as any);

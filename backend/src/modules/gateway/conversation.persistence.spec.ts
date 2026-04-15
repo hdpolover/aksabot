@@ -31,13 +31,17 @@ describe('ConversationPersistence', () => {
 
   beforeEach(() => {
     conversationsRepo = {
-      create: jest.fn().mockImplementation((data) => ({ ...mockConversation, ...data })),
+      create: jest
+        .fn()
+        .mockImplementation((data) => ({ ...mockConversation, ...data })),
       save: jest.fn().mockImplementation((entity) => Promise.resolve(entity)),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
 
     messagesRepo = {
-      create: jest.fn().mockImplementation((data) => ({ ...mockMessage, ...data })),
+      create: jest
+        .fn()
+        .mockImplementation((data) => ({ ...mockMessage, ...data })),
       save: jest.fn().mockImplementation((entity) => Promise.resolve(entity)),
       find: jest.fn().mockResolvedValue([mockMessage]),
     };
@@ -58,7 +62,9 @@ describe('ConversationPersistence', () => {
     it('creates and saves a conversation for the given device', async () => {
       const result = await service.createConversation('device-1');
 
-      expect(conversationsRepo.create).toHaveBeenCalledWith({ deviceId: 'device-1' });
+      expect(conversationsRepo.create).toHaveBeenCalledWith({
+        deviceId: 'device-1',
+      });
       expect(conversationsRepo.save).toHaveBeenCalled();
       expect(result.deviceId).toBe('device-1');
     });
@@ -102,8 +108,15 @@ describe('ConversationPersistence', () => {
     });
 
     it('creates and saves an assistant message', async () => {
-      messagesRepo.create.mockImplementation((data) => ({ ...mockMessage, ...data }));
-      const result = await service.saveMessage('conv-1', 'assistant', 'Hi there!');
+      messagesRepo.create.mockImplementation((data) => ({
+        ...mockMessage,
+        ...data,
+      }));
+      const result = await service.saveMessage(
+        'conv-1',
+        'assistant',
+        'Hi there!',
+      );
 
       expect(messagesRepo.create).toHaveBeenCalledWith({
         conversationId: 'conv-1',
@@ -158,7 +171,9 @@ describe('ConversationPersistence', () => {
     it('returns the device by id', async () => {
       const result = await service.getDevice('device-1');
 
-      expect(devicesRepo.findOne).toHaveBeenCalledWith({ where: { id: 'device-1' } });
+      expect(devicesRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'device-1' },
+      });
       expect(result).toEqual(mockDevice);
     });
 

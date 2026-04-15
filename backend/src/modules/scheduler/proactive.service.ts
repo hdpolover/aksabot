@@ -22,24 +22,24 @@ export class ProactiveService {
   private workHoursEnd = 18;
 
   // ── Screen time tracking ─────────────────────────────
-  private presenceStart = new Map<string, number>();        // when user sat down
-  private lastScreenNag = new Map<string, number>();        // last nag timestamp
+  private presenceStart = new Map<string, number>(); // when user sat down
+  private lastScreenNag = new Map<string, number>(); // last nag timestamp
   private static readonly SCREEN_NAG_INTERVAL_MS = 90 * 60_000; // 90 min between nags
 
   // ── Idle personality chat ────────────────────────────
   private idleChatTimers = new Map<string, NodeJS.Timeout>();
 
   // ── New proactive interaction state ──────────────────
-  private lastConversationEndAt = new Map<string, number>();   // timestamp of last AI response complete
-  private lastMorningHypeDate = new Map<string, string>();     // YYYY-MM-DD: fired morning hype
-  private lastLateNightDate = new Map<string, string>();       // YYYY-MM-DD: fired late-night roast
+  private lastConversationEndAt = new Map<string, number>(); // timestamp of last AI response complete
+  private lastMorningHypeDate = new Map<string, string>(); // YYYY-MM-DD: fired morning hype
+  private lastLateNightDate = new Map<string, string>(); // YYYY-MM-DD: fired late-night roast
   private lastWeatherState = new Map<string, { code: number; temp: number }>(); // last known weather per device
 
   // Frequency presets: [minMs, maxMs]
   private static readonly IDLE_FREQ: Record<string, [number, number]> = {
-    rare:     [15 * 60_000, 25 * 60_000],
-    normal:   [8 * 60_000,  15 * 60_000],
-    frequent: [3 * 60_000,  8 * 60_000],
+    rare: [15 * 60_000, 25 * 60_000],
+    normal: [8 * 60_000, 15 * 60_000],
+    frequent: [3 * 60_000, 8 * 60_000],
   };
 
   private static readonly IDLE_PROMPTS = [
@@ -68,14 +68,14 @@ export class ProactiveService {
   ];
 
   private static readonly IDLE_EXPRESSIONS = [
-    'encouraging', 'happy', 'calm', 'idle',
+    'encouraging',
+    'happy',
+    'calm',
+    'idle',
   ];
 
-  private sendToDevice: (
-    deviceId: string,
-    event: string,
-    data: any,
-  ) => void = () => {};
+  private sendToDevice: (deviceId: string, event: string, data: any) => void =
+    () => {};
 
   constructor(
     @InjectRepository(Device)
@@ -97,7 +97,9 @@ export class ProactiveService {
       : ' Respond in English. Never use text abbreviations — spell everything out, this is voice output.';
   }
 
-  private getLocalHour(timezone: string = process.env.TZ || 'Asia/Jakarta'): number {
+  private getLocalHour(
+    timezone: string = process.env.TZ || 'Asia/Jakarta',
+  ): number {
     const parts = new Intl.DateTimeFormat('en-US', {
       timeZone: timezone,
       hour: 'numeric',
@@ -106,7 +108,9 @@ export class ProactiveService {
     return parseInt(parts.find((p) => p.type === 'hour')!.value, 10);
   }
 
-  private getLocalDateString(timezone: string = process.env.TZ || 'Asia/Jakarta'): string {
+  private getLocalDateString(
+    timezone: string = process.env.TZ || 'Asia/Jakarta',
+  ): string {
     return new Date().toLocaleDateString('en-CA', { timeZone: timezone }); // en-CA gives YYYY-MM-DD
   }
 
@@ -141,7 +145,9 @@ export class ProactiveService {
         [{ role: 'user', content: `${memoryContext}\n\n${prompt}` }],
       );
 
-      this.logger.log(`Greeting for device ${deviceId}: ${text.slice(0, 50)}...`);
+      this.logger.log(
+        `Greeting for device ${deviceId}: ${text.slice(0, 50)}...`,
+      );
       return text;
     } catch (err: any) {
       this.logger.warn(`Greeting failed: ${err.message}`);
@@ -162,14 +168,16 @@ export class ProactiveService {
   ): Promise<string | null> {
     const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
     const settings = device?.settingsJson ?? {};
-    const language = (settings.language as 'en' | 'id' | undefined);
-    const timezone = (settings.timezone as string | undefined) ?? 'Asia/Jakarta';
+    const language = settings.language as 'en' | 'id' | undefined;
+    const timezone =
+      (settings.timezone as string | undefined) ?? 'Asia/Jakarta';
     const hour = this.getLocalHour(timezone);
     const today = this.getLocalDateString(timezone);
 
     // Morning first-presence detection (6 AM – 11 AM)
     const isMorningFirstPresence =
-      hour >= 6 && hour <= 11 &&
+      hour >= 6 &&
+      hour <= 11 &&
       this.lastMorningHypeDate.get(deviceId) !== today &&
       settings.idle_chat_enabled !== false;
 
@@ -260,14 +268,20 @@ export class ProactiveService {
 
     for (const [deviceId, lastTime] of this.lastActivity.entries()) {
       const session = this.sessions.get(deviceId);
-      if (!session || session.state !== 'idle' || this.sessions.isClockMode(deviceId)) continue;
+      if (
+        !session ||
+        session.state !== 'idle' ||
+        this.sessions.isClockMode(deviceId)
+      )
+        continue;
 
       const idleMinutes = (now - lastTime) / 60_000;
       if (idleMinutes >= 180) {
         // 3+ hours idle
-        const nudgeText = session.language === 'id'
-          ? 'Bro lo ngilang ke mana? Sepi banget di sini.'
-          : "Bro you ghosting me? It's been mad quiet over here.";
+        const nudgeText =
+          session.language === 'id'
+            ? 'Bro lo ngilang ke mana? Sepi banget di sini.'
+            : "Bro you ghosting me? It's been mad quiet over here.";
         this.sendToDevice(deviceId, 'proactive:nudge', {
           text: nudgeText,
           display: {
@@ -314,7 +328,12 @@ export class ProactiveService {
 
     for (const [deviceId, startTime] of this.presenceStart.entries()) {
       const session = this.sessions.get(deviceId);
-      if (!session || session.state !== 'idle' || this.sessions.isClockMode(deviceId)) continue;
+      if (
+        !session ||
+        session.state !== 'idle' ||
+        this.sessions.isClockMode(deviceId)
+      )
+        continue;
 
       const deskMinutes = Math.round((now - startTime) / 60_000);
       if (deskMinutes < 90) continue;
@@ -355,7 +374,9 @@ export class ProactiveService {
           `Screen time nag for ${deviceId} (${timeStr}): ${text.slice(0, 50)}...`,
         );
       } catch (err: any) {
-        this.logger.warn(`Screen time nag failed for ${deviceId}: ${err.message}`);
+        this.logger.warn(
+          `Screen time nag failed for ${deviceId}: ${err.message}`,
+        );
       }
     }
   }
@@ -366,7 +387,12 @@ export class ProactiveService {
   async handleEndOfDay() {
     for (const [deviceId] of this.lastActivity.entries()) {
       const session = this.sessions.get(deviceId);
-      if (!session || session.state !== 'idle' || this.sessions.isClockMode(deviceId)) continue;
+      if (
+        !session ||
+        session.state !== 'idle' ||
+        this.sessions.isClockMode(deviceId)
+      )
+        continue;
 
       try {
         const device = await this.devicesRepo.findOne({
@@ -380,7 +406,10 @@ export class ProactiveService {
             ? `The user has been working on: ${memories.map((m) => m.fact).join(', ')}`
             : '';
 
-        const language = (device?.settingsJson?.language as 'en' | 'id' | undefined);
+        const language = device?.settingsJson?.language as
+          | 'en'
+          | 'id'
+          | undefined;
         const { text } = await this.llm.generate(
           `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses.${this.getLangInstruction(language)}`,
           [
@@ -405,12 +434,12 @@ export class ProactiveService {
         this.moodJournal
           .extractDailyMood(deviceId, settings.timezone as string)
           .catch((err) =>
-            this.logger.warn(`Mood extraction failed for ${deviceId}: ${err.message}`),
+            this.logger.warn(
+              `Mood extraction failed for ${deviceId}: ${err.message}`,
+            ),
           );
       } catch (err: any) {
-        this.logger.warn(
-          `End of day failed for ${deviceId}: ${err.message}`,
-        );
+        this.logger.warn(`End of day failed for ${deviceId}: ${err.message}`);
       }
     }
   }
@@ -448,7 +477,8 @@ export class ProactiveService {
     if (settings.idle_chat_enabled === false) return;
 
     const freq = (settings.idle_chat_frequency as string) ?? 'normal';
-    const [minMs, maxMs] = ProactiveService.IDLE_FREQ[freq] ?? ProactiveService.IDLE_FREQ.normal;
+    const [minMs, maxMs] =
+      ProactiveService.IDLE_FREQ[freq] ?? ProactiveService.IDLE_FREQ.normal;
     const delayMs = minMs + Math.floor(Math.random() * (maxMs - minMs));
 
     this.logger.debug(
@@ -471,8 +501,14 @@ export class ProactiveService {
     this.idleChatTimers.delete(deviceId);
 
     const session = this.sessions.get(deviceId);
-    if (!session || session.state !== 'idle' || this.sessions.isClockMode(deviceId)) {
-      this.logger.debug(`Idle chat skipped for ${deviceId} — not idle or clock mode, rescheduling`);
+    if (
+      !session ||
+      session.state !== 'idle' ||
+      this.sessions.isClockMode(deviceId)
+    ) {
+      this.logger.debug(
+        `Idle chat skipped for ${deviceId} — not idle or clock mode, rescheduling`,
+      );
       // Reschedule so idle chat resumes after the current speaking/listening slot.
       // Without this, the timer stays dead until the next user conversation.
       this.startIdleChat(deviceId).catch(() => {});
@@ -480,7 +516,9 @@ export class ProactiveService {
     }
 
     try {
-      const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+      const device = await this.devicesRepo.findOne({
+        where: { id: deviceId },
+      });
       const settings = device?.settingsJson ?? {};
       const memories = await this.memoriesService.getRelevant(deviceId, 3);
 
@@ -489,7 +527,8 @@ export class ProactiveService {
           ? `You know these things about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
           : '';
 
-      const timezone = (settings.timezone as string | undefined) ?? 'Asia/Jakarta';
+      const timezone =
+        (settings.timezone as string | undefined) ?? 'Asia/Jakarta';
       const hour = this.getLocalHour(timezone);
       const today = this.getLocalDateString(timezone);
 
@@ -509,9 +548,13 @@ export class ProactiveService {
         }
       }
 
-      const contextBlock = [memoryContext, moodHint, weatherHint].filter(Boolean).join('\n');
+      const contextBlock = [memoryContext, moodHint, weatherHint]
+        .filter(Boolean)
+        .join('\n');
 
-      const promptIdx = Math.floor(Math.random() * ProactiveService.IDLE_PROMPTS.length);
+      const promptIdx = Math.floor(
+        Math.random() * ProactiveService.IDLE_PROMPTS.length,
+      );
       const prompt = ProactiveService.IDLE_PROMPTS[promptIdx];
 
       const language = session.language;
@@ -525,10 +568,14 @@ export class ProactiveService {
         ],
       );
 
-      const exprIdx = Math.floor(Math.random() * ProactiveService.IDLE_EXPRESSIONS.length);
+      const exprIdx = Math.floor(
+        Math.random() * ProactiveService.IDLE_EXPRESSIONS.length,
+      );
       const expression = ProactiveService.IDLE_EXPRESSIONS[exprIdx];
 
-      this.logger.log(`Idle chat for ${deviceId}: "${text.slice(0, 50)}..." (expr=${expression})`);
+      this.logger.log(
+        `Idle chat for ${deviceId}: "${text.slice(0, 50)}..." (expr=${expression})`,
+      );
 
       await this.sendIdleAudio(deviceId, text, expression);
     } catch (err: any) {
@@ -551,7 +598,8 @@ export class ProactiveService {
 
     const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
     const settings = device?.settingsJson ?? {};
-    const language = (settings.language as 'en' | 'id' | undefined) ?? session.language;
+    const language =
+      (settings.language as 'en' | 'id' | undefined) ?? session.language;
 
     const prompt = won
       ? `Hendra just finished pomodoro focus cycle ${cycle}. Celebrate with him — hype energy, like a friend who's genuinely proud. One sentence, max 10 words.`
@@ -564,10 +612,14 @@ export class ProactiveService {
       );
 
       const expression = won ? 'happy' : 'shrug';
-      this.logger.log(`Pomodoro reaction for ${deviceId} (won=${won}): "${text.slice(0, 50)}..."`);
+      this.logger.log(
+        `Pomodoro reaction for ${deviceId} (won=${won}): "${text.slice(0, 50)}..."`,
+      );
       await this.sendIdleAudio(deviceId, text, expression).catch(() => {});
     } catch (err: any) {
-      this.logger.warn(`Pomodoro reaction failed for ${deviceId}: ${err.message}`);
+      this.logger.warn(
+        `Pomodoro reaction failed for ${deviceId}: ${err.message}`,
+      );
     }
   }
 
@@ -582,20 +634,29 @@ export class ProactiveService {
       if (now - lastTime > 3 * 60 * 60_000) continue;
 
       const session = this.sessions.get(deviceId);
-      if (!session || session.state !== 'idle' || this.sessions.isClockMode(deviceId)) continue;
+      if (
+        !session ||
+        session.state !== 'idle' ||
+        this.sessions.isClockMode(deviceId)
+      )
+        continue;
 
-      const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+      const device = await this.devicesRepo.findOne({
+        where: { id: deviceId },
+      });
       const settings = device?.settingsJson ?? {};
       if (settings.idle_chat_enabled === false) continue;
 
-      const timezone = (settings.timezone as string | undefined) ?? 'Asia/Jakarta';
+      const timezone =
+        (settings.timezone as string | undefined) ?? 'Asia/Jakarta';
       const today = this.getLocalDateString(timezone);
 
       // Fire at most once per night
       if (this.lastLateNightDate.get(deviceId) === today) continue;
       this.lastLateNightDate.set(deviceId, today);
 
-      const language = (settings.language as 'en' | 'id' | undefined) ?? session.language;
+      const language =
+        (settings.language as 'en' | 'id' | undefined) ?? session.language;
 
       try {
         const { text } = await this.llm.generate(
@@ -608,10 +669,14 @@ export class ProactiveService {
           ],
         );
 
-        this.logger.log(`Late-night roast for ${deviceId}: "${text.slice(0, 50)}..."`);
+        this.logger.log(
+          `Late-night roast for ${deviceId}: "${text.slice(0, 50)}..."`,
+        );
         await this.sendIdleAudio(deviceId, text, 'calm').catch(() => {});
       } catch (err: any) {
-        this.logger.warn(`Late-night check failed for ${deviceId}: ${err.message}`);
+        this.logger.warn(
+          `Late-night check failed for ${deviceId}: ${err.message}`,
+        );
       }
     }
   }
@@ -624,20 +689,28 @@ export class ProactiveService {
 
     for (const [deviceId, endedAt] of this.lastConversationEndAt.entries()) {
       const session = this.sessions.get(deviceId);
-      if (!session || session.state !== 'idle' || this.sessions.isClockMode(deviceId)) continue;
+      if (
+        !session ||
+        session.state !== 'idle' ||
+        this.sessions.isClockMode(deviceId)
+      )
+        continue;
 
       const silentMinutes = (now - endedAt) / 60_000;
       // React only in the 15–30 min window after a conversation ended
       if (silentMinutes < 15 || silentMinutes > 30) continue;
 
-      const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+      const device = await this.devicesRepo.findOne({
+        where: { id: deviceId },
+      });
       const settings = device?.settingsJson ?? {};
       if (settings.idle_chat_enabled === false) continue;
 
       // Fire once — remove so it doesn't repeat
       this.lastConversationEndAt.delete(deviceId);
 
-      const language = (settings.language as 'en' | 'id' | undefined) ?? session.language;
+      const language =
+        (settings.language as 'en' | 'id' | undefined) ?? session.language;
 
       try {
         const { text } = await this.llm.generate(
@@ -650,10 +723,14 @@ export class ProactiveService {
           ],
         );
 
-        this.logger.log(`Post-convo silence check-in for ${deviceId}: "${text.slice(0, 50)}..."`);
+        this.logger.log(
+          `Post-convo silence check-in for ${deviceId}: "${text.slice(0, 50)}..."`,
+        );
         await this.sendIdleAudio(deviceId, text, 'idle').catch(() => {});
       } catch (err: any) {
-        this.logger.warn(`Post-convo silence failed for ${deviceId}: ${err.message}`);
+        this.logger.warn(
+          `Post-convo silence failed for ${deviceId}: ${err.message}`,
+        );
       }
     }
   }
@@ -667,15 +744,30 @@ export class ProactiveService {
       if (Date.now() - lastTime > 4 * 60 * 60_000) continue;
 
       const session = this.sessions.get(deviceId);
-      if (!session || session.state !== 'idle' || this.sessions.isClockMode(deviceId)) continue;
+      if (
+        !session ||
+        session.state !== 'idle' ||
+        this.sessions.isClockMode(deviceId)
+      )
+        continue;
 
-      const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+      const device = await this.devicesRepo.findOne({
+        where: { id: deviceId },
+      });
       const settings = device?.settingsJson ?? {};
       if (settings.idle_chat_enabled === false) continue;
-      if (!settings.integrations_weather || !settings.latitude || !settings.longitude) continue;
+      if (
+        !settings.integrations_weather ||
+        !settings.latitude ||
+        !settings.longitude
+      )
+        continue;
 
       try {
-        await this.ai.refreshWeather(settings.latitude as number, settings.longitude as number);
+        await this.ai.refreshWeather(
+          settings.latitude as number,
+          settings.longitude as number,
+        );
         const weather = this.ai.getWeatherData();
         if (!weather) continue;
 
@@ -683,7 +775,10 @@ export class ProactiveService {
 
         // Set baseline on first check — don't react yet
         if (!prev) {
-          this.lastWeatherState.set(deviceId, { code: weather.weatherCode, temp: weather.temp });
+          this.lastWeatherState.set(deviceId, {
+            code: weather.weatherCode,
+            temp: weather.temp,
+          });
           continue;
         }
 
@@ -695,13 +790,17 @@ export class ProactiveService {
         if (tempDelta < 5 && !conditionChanged) continue;
 
         // Update baseline
-        this.lastWeatherState.set(deviceId, { code: weather.weatherCode, temp: weather.temp });
+        this.lastWeatherState.set(deviceId, {
+          code: weather.weatherCode,
+          temp: weather.temp,
+        });
 
         const changeDesc = conditionChanged
           ? `Weather outside just shifted from ${prevGroup} to ${nowGroup} (now ${weather.description}, ${weather.temp}°C)`
           : `Temperature just ${weather.temp > prev.temp ? 'jumped' : 'dropped'} from ${prev.temp}°C to ${weather.temp}°C (${weather.description})`;
 
-        const language = (settings.language as 'en' | 'id' | undefined) ?? session.language;
+        const language =
+          (settings.language as 'en' | 'id' | undefined) ?? session.language;
         const { text } = await this.llm.generate(
           `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses.${this.getLangInstruction(language)}`,
           [
@@ -712,10 +811,14 @@ export class ProactiveService {
           ],
         );
 
-        this.logger.log(`Weather reaction for ${deviceId} (${changeDesc}): "${text.slice(0, 50)}..."`);
+        this.logger.log(
+          `Weather reaction for ${deviceId} (${changeDesc}): "${text.slice(0, 50)}..."`,
+        );
         await this.sendIdleAudio(deviceId, text, 'idle').catch(() => {});
       } catch (err: any) {
-        this.logger.warn(`Weather change check failed for ${deviceId}: ${err.message}`);
+        this.logger.warn(
+          `Weather change check failed for ${deviceId}: ${err.message}`,
+        );
       }
     }
   }

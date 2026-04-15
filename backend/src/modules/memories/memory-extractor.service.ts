@@ -22,9 +22,7 @@ const VALID_CATEGORIES = [
 export class MemoryExtractorService {
   private readonly logger = new Logger(MemoryExtractorService.name);
 
-  constructor(
-    @Inject(LLM_PROVIDER) private readonly llm: ILlmProvider,
-  ) {}
+  constructor(@Inject(LLM_PROVIDER) private readonly llm: ILlmProvider) {}
 
   async extractFromTranscript(
     transcript: { role: string; content: string }[],
@@ -74,7 +72,7 @@ ${conversationText}`;
       if (!response.text || response.text.trim() === '') {
         this.logger.warn(
           `LLM returned empty response for extraction (${transcript.length} messages). ` +
-          `Likely blocked by safety filter or no content generated.`,
+            `Likely blocked by safety filter or no content generated.`,
         );
         return [];
       }
@@ -85,9 +83,7 @@ ${conversationText}`;
 
       return this.parseExtraction(response.text);
     } catch (err: any) {
-      this.logger.error(
-        `Memory extraction LLM call failed: ${err.message}`,
-      );
+      this.logger.error(`Memory extraction LLM call failed: ${err.message}`);
       return [];
     }
   }
@@ -145,7 +141,7 @@ ${conversationText}`;
     } catch (err: any) {
       this.logger.warn(
         `Failed to parse extraction response: ${err.message} | ` +
-        `Raw (${raw.length} chars): ${raw.slice(0, 300)}`,
+          `Raw (${raw.length} chars): ${raw.slice(0, 300)}`,
       );
       return [];
     }

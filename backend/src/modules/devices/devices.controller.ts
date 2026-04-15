@@ -44,7 +44,8 @@ const UPLOADS_DIR = join(process.cwd(), 'uploads', 'device-images');
 const IMAGE_TTL_MS = 5 * 60 * 1000; // 5 min — long enough for the ESP32 to download it
 
 /** Sample phrase used for every voice preview. Short, punchy, Aksa-style. */
-const PREVIEW_PHRASE = "Yo, I'm Aksa — Hendra's desk companion. Built different, for real.";
+const PREVIEW_PHRASE =
+  "Yo, I'm Aksa — Hendra's desk companion. Built different, for real.";
 
 @Controller('devices')
 @UseGuards(JwtAuthGuard, RateLimitGuard)
@@ -81,7 +82,11 @@ export class DevicesController {
     @CurrentUser() user: RequestUser,
     @Body() dto: UpdateSettingsDto,
   ) {
-    const device = await this.devicesService.updateSettings(id, user.userId, dto);
+    const device = await this.devicesService.updateSettings(
+      id,
+      user.userId,
+      dto,
+    );
     // Push only the changed keys to the ESP32 (not the entire settings blob)
     this.gateway.sendToDevice(id, 'config:update', dto);
     // Keep the in-memory session in sync for language changes
@@ -151,7 +156,11 @@ export class DevicesController {
       speed: dto.voice_speed,
       stability: dto.voice_stability,
     };
-    const playing = await this.gateway.sendVoicePreviewToDevice(id, voiceOpts, dto.text);
+    const playing = await this.gateway.sendVoicePreviewToDevice(
+      id,
+      voiceOpts,
+      dto.text,
+    );
     return { playing };
   }
 
@@ -198,9 +207,10 @@ export class DevicesController {
     let pcm = file.buffer;
     if (pcm.length > 44 && pcm.subarray(0, 4).toString('ascii') === 'RIFF') {
       const dataIdx = pcm.indexOf(Buffer.from('data'));
-      pcm = dataIdx !== -1 && dataIdx + 8 <= pcm.length
-        ? pcm.subarray(dataIdx + 8)  // skip "data" marker + 4-byte chunk size
-        : pcm.subarray(44);          // fallback: standard 44-byte header
+      pcm =
+        dataIdx !== -1 && dataIdx + 8 <= pcm.length
+          ? pcm.subarray(dataIdx + 8) // skip "data" marker + 4-byte chunk size
+          : pcm.subarray(44); // fallback: standard 44-byte header
     }
 
     const framedOpus = this.codec.encode(pcm);
@@ -238,9 +248,10 @@ export class DevicesController {
     let pcm = file.buffer;
     if (pcm.length > 44 && pcm.subarray(0, 4).toString('ascii') === 'RIFF') {
       const dataIdx = pcm.indexOf(Buffer.from('data'));
-      pcm = dataIdx !== -1 && dataIdx + 8 <= pcm.length
-        ? pcm.subarray(dataIdx + 8)
-        : pcm.subarray(44);
+      pcm =
+        dataIdx !== -1 && dataIdx + 8 <= pcm.length
+          ? pcm.subarray(dataIdx + 8)
+          : pcm.subarray(44);
     }
 
     return this.gateway.handleAppVoiceInput(id, pcm);
@@ -255,7 +266,8 @@ export class DevicesController {
   async reportPresence(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: RequestUser,
-    @Body() body: { event: 'arrived' | 'departed'; awayDurationSeconds?: number },
+    @Body()
+    body: { event: 'arrived' | 'departed'; awayDurationSeconds?: number },
   ) {
     await this.devicesService.findById(id, user.userId);
     if (body.event === 'arrived') {
@@ -403,30 +415,43 @@ export class DevicesController {
     await this.devicesService.findById(id, user.userId);
 
     if (!file) {
-      throw new NotFoundException('No image file provided or unsupported format (use JPEG, PNG, or BMP)');
+      throw new NotFoundException(
+        'No image file provided or unsupported format (use JPEG, PNG, or BMP)',
+      );
     }
 
     const durationMs = durationMsRaw ? parseInt(durationMsRaw, 10) : 10000;
 
     // Derive base URL from the incoming request so it works in every environment
     // without needing BACKEND_URL. Respects X-Forwarded-Proto/Host set by Traefik.
-    const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0].trim()
-      ?? (req.secure ? 'https' : 'http');
-    const host = (req.headers['x-forwarded-host'] as string | undefined)?.split(',')[0].trim()
-      ?? req.headers.host
-      ?? 'localhost:4280';
+    const proto =
+      (req.headers['x-forwarded-proto'] as string | undefined)
+        ?.split(',')[0]
+        .trim() ?? (req.secure ? 'https' : 'http');
+    const host =
+      (req.headers['x-forwarded-host'] as string | undefined)
+        ?.split(',')[0]
+        .trim() ??
+      req.headers.host ??
+      'localhost:4280';
     const baseUrl = `${proto}://${host}`;
     const imageUrl = `${baseUrl}/devices/${id}/device-images/${file.filename}`;
 
     // Push to device — fire and forget (device may be offline; user sees image when it reconnects)
-    this.gateway.sendToDevice(id, 'display:image', { url: imageUrl, durationMs });
+    this.gateway.sendToDevice(id, 'display:image', {
+      url: imageUrl,
+      durationMs,
+    });
 
     // Schedule file cleanup
     setTimeout(() => {
       unlink(file.path, (err) => {
-        if (err && (err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        if (err && err.code !== 'ENOENT') {
           // Ignore "file not found" (already cleaned up), log other errors
-          console.warn(`[PushImage] cleanup failed for ${file.filename}:`, err.message);
+          console.warn(
+            `[PushImage] cleanup failed for ${file.filename}:`,
+            err.message,
+          );
         }
       });
     }, IMAGE_TTL_MS);
@@ -457,8 +482,10 @@ export class DevicesController {
 
     const ext = extname(filename).toLowerCase();
     const mimeMap: Record<string, string> = {
-      '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-      '.png': 'image/png', '.bmp': 'image/bmp',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.bmp': 'image/bmp',
     };
     const { size } = statSync(filePath);
     res.setHeader('Content-Type', mimeMap[ext] ?? 'application/octet-stream');

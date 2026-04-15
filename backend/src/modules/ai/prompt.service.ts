@@ -7,11 +7,11 @@ export interface MemoryEntry {
 }
 
 export interface ContextInfo {
-  timezone?: string;          // e.g. 'Asia/Jakarta'
+  timezone?: string; // e.g. 'Asia/Jakarta'
   weatherEnabled?: boolean;
   latitude?: number;
   longitude?: number;
-  language?: 'en' | 'id';    // response language; defaults to 'en'
+  language?: 'en' | 'id'; // response language; defaults to 'en'
 }
 
 export interface MoodHistoryEntry {
@@ -21,10 +21,10 @@ export interface MoodHistoryEntry {
 }
 
 export interface WeatherData {
-  description: string;        // e.g. "Partly cloudy"
-  temp: number;               // °C
-  humidity: number;           // %
-  weatherCode: number;        // WMO weather code
+  description: string; // e.g. "Partly cloudy"
+  temp: number; // °C
+  humidity: number; // %
+  weatherCode: number; // WMO weather code
 }
 
 /** Fixed bot name — no user customization. */
@@ -96,10 +96,19 @@ Rules:
 @Injectable()
 export class PromptService {
   private readonly logger = new Logger(PromptService.name);
-  private weatherCache: { text: string; data: WeatherData; timezone: string | null; fetchedAt: number } | null = null;
+  private weatherCache: {
+    text: string;
+    data: WeatherData;
+    timezone: string | null;
+    fetchedAt: number;
+  } | null = null;
   private static readonly WEATHER_TTL_MS = 15 * 60 * 1000; // 15 min cache
 
-  buildSystemPrompt(memories: MemoryEntry[], context?: ContextInfo, moodHistory?: MoodHistoryEntry[]): string {
+  buildSystemPrompt(
+    memories: MemoryEntry[],
+    context?: ContextInfo,
+    moodHistory?: MoodHistoryEntry[],
+  ): string {
     const memoryBlock =
       memories.length > 0
         ? `\n\nYou know this about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
@@ -144,12 +153,15 @@ export class PromptService {
     const energyBlock = this.getTimeOfDayEnergy(hour);
 
     // Weather context — only if enabled and cached
-    const weatherBlock = this.weatherCache ? `\nCurrent weather: ${this.weatherCache.text}` : '';
+    const weatherBlock = this.weatherCache
+      ? `\nCurrent weather: ${this.weatherCache.text}`
+      : '';
 
     // Mood history — recent days' mood so you can notice patterns
-    const moodBlock = moodHistory && moodHistory.length > 0
-      ? `\n\nUser's recent mood journal:\n${moodHistory.map((m) => `- ${m.date}: ${m.mood}${m.note ? ` (${m.note})` : ''}`).join('\n')}\nUse this to be emotionally aware. If you notice patterns (e.g. tired every Thursday), mention it naturally. Don't bring it up every response — only when relevant.`
-      : '';
+    const moodBlock =
+      moodHistory && moodHistory.length > 0
+        ? `\n\nUser's recent mood journal:\n${moodHistory.map((m) => `- ${m.date}: ${m.mood}${m.note ? ` (${m.note})` : ''}`).join('\n')}\nUse this to be emotionally aware. If you notice patterns (e.g. tired every Thursday), mention it naturally. Don't bring it up every response — only when relevant.`
+        : '';
 
     const sfxInstruction = `
 
@@ -185,9 +197,10 @@ Available tags: [happy] [sad] [excited] [calm] [confused] [focused] [sarcastic] 
 Example: "Bruh that's actually sick! [excited] OK so basically here's how it works. [focused]"
 Always include the tag — never skip it. The tag is stripped before TTS, the user won't hear it.`;
 
-    const languageInstruction = context?.language === 'id'
-      ? `\n\nRespond in Bahasa Indonesia. All sentences must be in Indonesian — do NOT switch to full English sentences. You may use English only for tech/code nouns (framework names, variable names, error messages, etc.) embedded inside Indonesian sentences — that's natural for Indonesian devs. Use lo/gue pronouns and casual gen-z Indonesian slang.`
-      : `\n\nRespond in English.`;
+    const languageInstruction =
+      context?.language === 'id'
+        ? `\n\nRespond in Bahasa Indonesia. All sentences must be in Indonesian — do NOT switch to full English sentences. You may use English only for tech/code nouns (framework names, variable names, error messages, etc.) embedded inside Indonesian sentences — that's natural for Indonesian devs. Use lo/gue pronouns and casual gen-z Indonesian slang.`
+        : `\n\nRespond in English.`;
 
     return `${SYSTEM_PROMPT}${USER_PROFILE}${energyBlock}${memoryBlock}${moodBlock}${timeBlock}${weatherBlock}${sfxInstruction}${emotionInstruction}${languageInstruction}`;
   }
@@ -198,7 +211,10 @@ Always include the tag — never skip it. The tag is stripped before TTS, the us
    */
   async refreshWeather(lat: number, lon: number): Promise<void> {
     // Skip if cache is fresh
-    if (this.weatherCache && Date.now() - this.weatherCache.fetchedAt < PromptService.WEATHER_TTL_MS) {
+    if (
+      this.weatherCache &&
+      Date.now() - this.weatherCache.fetchedAt < PromptService.WEATHER_TTL_MS
+    ) {
       return;
     }
 
@@ -206,7 +222,7 @@ Always include the tag — never skip it. The tag is stripped before TTS, the us
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&timezone=auto`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json() as any;
+      const data = await res.json();
       const c = data.current;
 
       const desc = this.weatherCodeToText(c.weather_code);
@@ -221,7 +237,12 @@ Always include the tag — never skip it. The tag is stripped before TTS, the us
       // Open-Meteo returns IANA timezone from lat/lon (e.g. "Asia/Jakarta")
       const detectedTz: string | null = data.timezone ?? null;
 
-      this.weatherCache = { text, data: weatherData, timezone: detectedTz, fetchedAt: Date.now() };
+      this.weatherCache = {
+        text,
+        data: weatherData,
+        timezone: detectedTz,
+        fetchedAt: Date.now(),
+      };
       this.logger.debug(`Weather updated: ${text} (tz: ${detectedTz})`);
     } catch (err: any) {
       this.logger.warn(`Weather fetch failed: ${err.message}`);
@@ -264,7 +285,11 @@ Always include the tag — never skip it. The tag is stripped before TTS, the us
   /** Get structured weather data for context:sync to device. */
   getWeatherData(): WeatherData | null {
     if (!this.weatherCache) return null;
-    if (Date.now() - this.weatherCache.fetchedAt > PromptService.WEATHER_TTL_MS * 2) return null;
+    if (
+      Date.now() - this.weatherCache.fetchedAt >
+      PromptService.WEATHER_TTL_MS * 2
+    )
+      return null;
     return this.weatherCache.data;
   }
 
@@ -275,17 +300,41 @@ Always include the tag — never skip it. The tag is stripped before TTS, the us
 
   /** Format time and date for device display using the given timezone. */
   formatTimeForDevice(timezone?: string): { time: string; date: string } {
-    const tz = timezone || this.weatherCache?.timezone || process.env.TZ || 'Asia/Jakarta';
+    const tz =
+      timezone ||
+      this.weatherCache?.timezone ||
+      process.env.TZ ||
+      'Asia/Jakarta';
     const now = new Date();
     let time: string;
     let date: string;
     try {
-      time = now.toLocaleString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
-      date = now.toLocaleString('en-US', { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short' });
+      time = now.toLocaleString('en-GB', {
+        timeZone: tz,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+      date = now.toLocaleString('en-US', {
+        timeZone: tz,
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+      });
     } catch {
       const fallback = process.env.TZ || 'Asia/Jakarta';
-      time = now.toLocaleString('en-GB', { timeZone: fallback, hour: '2-digit', minute: '2-digit', hour12: false });
-      date = now.toLocaleString('en-US', { timeZone: fallback, weekday: 'short', day: 'numeric', month: 'short' });
+      time = now.toLocaleString('en-GB', {
+        timeZone: fallback,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+      date = now.toLocaleString('en-US', {
+        timeZone: fallback,
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+      });
     }
     return { time, date };
   }

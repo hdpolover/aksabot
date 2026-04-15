@@ -84,10 +84,7 @@ export class DevicesService {
     return this.devicesRepo.save(device);
   }
 
-  async claimByToken(
-    userId: string,
-    deviceToken: string,
-  ): Promise<Device> {
+  async claimByToken(userId: string, deviceToken: string): Promise<Device> {
     const device = await this.devicesRepo.findOne({
       where: { deviceToken, tokenRevoked: false },
     });

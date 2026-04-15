@@ -79,10 +79,7 @@ export class GoogleSttProvider implements ISttProvider {
     this.client = new SpeechClient();
   }
 
-  async transcribe(
-    pcmAudio: Buffer,
-    options?: SttOptions,
-  ): Promise<SttResult> {
+  async transcribe(pcmAudio: Buffer, options?: SttOptions): Promise<SttResult> {
     const [response] = await this.client.recognize({
       audio: { content: pcmAudio.toString('base64') },
       config: this.buildConfig(options),

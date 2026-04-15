@@ -32,7 +32,9 @@ interface ClientState {
  * The app signals end by sending `intercom:stop` or closing the socket.
  */
 @WebSocketGateway({ path: '/intercom' })
-export class IntercomGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class IntercomGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   private readonly logger = new Logger(IntercomGateway.name);
 
   /** 320 samples × 2 bytes = 640 bytes of 16-bit PCM per 20 ms frame */
@@ -61,7 +63,7 @@ export class IntercomGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     let payload: { sub: string };
     try {
-      payload = this.jwtService.verify(token) as { sub: string };
+      payload = this.jwtService.verify(token);
     } catch {
       client.close(1008, 'Invalid or expired token');
       return;
@@ -135,7 +137,12 @@ export class IntercomGateway implements OnGatewayConnection, OnGatewayDisconnect
     data: { deviceId?: string },
   ) {
     if (!data?.deviceId) {
-      client.send(JSON.stringify({ event: 'error', data: { message: 'deviceId required' } }));
+      client.send(
+        JSON.stringify({
+          event: 'error',
+          data: { message: 'deviceId required' },
+        }),
+      );
       return;
     }
 
@@ -144,7 +151,12 @@ export class IntercomGateway implements OnGatewayConnection, OnGatewayDisconnect
       where: { id: data.deviceId, userId: state.userId },
     });
     if (!device) {
-      client.send(JSON.stringify({ event: 'error', data: { message: 'Device not found' } }));
+      client.send(
+        JSON.stringify({
+          event: 'error',
+          data: { message: 'Device not found' },
+        }),
+      );
       return;
     }
 
@@ -155,10 +167,14 @@ export class IntercomGateway implements OnGatewayConnection, OnGatewayDisconnect
     // Register so AudioGateway can push device replies back to this client
     this.intercomSessions.register(data.deviceId, client);
 
-    this.audioGateway.sendToDevice(data.deviceId, 'response:start', { type: 'intercom' });
+    this.audioGateway.sendToDevice(data.deviceId, 'response:start', {
+      type: 'intercom',
+    });
     client.send(JSON.stringify({ event: 'intercom:ready' }));
 
-    this.logger.log(`Intercom started: user ${state.userId} → device ${data.deviceId}`);
+    this.logger.log(
+      `Intercom started: user ${state.userId} → device ${data.deviceId}`,
+    );
   }
 
   private handlePcmChunk(state: ClientState, chunk: Buffer) {
@@ -168,7 +184,9 @@ export class IntercomGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     while (state.pcmBuffer.length >= IntercomGateway.FRAME_BYTES) {
       const frame = state.pcmBuffer.subarray(0, IntercomGateway.FRAME_BYTES);
-      state.pcmBuffer = Buffer.from(state.pcmBuffer.subarray(IntercomGateway.FRAME_BYTES));
+      state.pcmBuffer = Buffer.from(
+        state.pcmBuffer.subarray(IntercomGateway.FRAME_BYTES),
+      );
 
       try {
         // codec.encode returns [2-byte BE length][opus frame]
@@ -201,7 +219,9 @@ export class IntercomGateway implements OnGatewayConnection, OnGatewayDisconnect
             framedOpus.subarray(2, 2 + frameLen),
           );
         }
-      } catch { /* best-effort */ }
+      } catch {
+        /* best-effort */
+      }
     }
 
     this.audioGateway.sendToDevice(state.deviceId, 'response:end', {

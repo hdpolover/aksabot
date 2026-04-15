@@ -41,7 +41,7 @@ export class AudioGateway
 
   private static readonly AUDIO_RATE_LIMIT = 100; // chunks per second per device
   private static readonly HEARTBEAT_INTERVAL_MS = 15_000; // ping every 15s
-  private static readonly HEARTBEAT_TIMEOUT_MS = 45_000;  // dead if no pong in 45s
+  private static readonly HEARTBEAT_TIMEOUT_MS = 45_000; // dead if no pong in 45s
 
   constructor(
     private readonly authService: AuthService,
@@ -71,17 +71,20 @@ export class AudioGateway
     this.proactive.setSendToDevice(sender);
 
     // Give proactive service the ability to send TTS audio for idle chat
-    this.proactive.setSendIdleAudio(
-      (deviceId, text, expression) => this.sendIdleChatAudio(deviceId, text, expression),
+    this.proactive.setSendIdleAudio((deviceId, text, expression) =>
+      this.sendIdleChatAudio(deviceId, text, expression),
     );
 
     // Wire pomodoro → proactive so celebrations/taunts go through TTS
-    this.pomodoro.setSendPomodoroReaction(
-      (deviceId, won, cycle) => this.proactive.firePomodoroReaction(deviceId, won, cycle),
+    this.pomodoro.setSendPomodoroReaction((deviceId, won, cycle) =>
+      this.proactive.firePomodoroReaction(deviceId, won, cycle),
     );
 
     // Server-side heartbeat: ping all devices every 10s, close dead ones after 20s
-    this.heartbeatTimer = setInterval(() => this.heartbeat(), AudioGateway.HEARTBEAT_INTERVAL_MS);
+    this.heartbeatTimer = setInterval(
+      () => this.heartbeat(),
+      AudioGateway.HEARTBEAT_INTERVAL_MS,
+    );
   }
 
   // ── Connection lifecycle ──────────────────────────────────────
@@ -104,7 +107,9 @@ export class AudioGateway
     // One connection per device — close existing
     const existing = this.deviceToSocket.get(device.id);
     if (existing) {
-      this.logger.log(`Device ${device.id} reconnected — replacing existing connection`);
+      this.logger.log(
+        `Device ${device.id} reconnected — replacing existing connection`,
+      );
       this.sendJson(existing, 'error', {
         code: 'REPLACED',
         message: 'Another connection opened for this device',
@@ -114,7 +119,8 @@ export class AudioGateway
 
     this.socketToDevice.set(client, device.id);
     this.deviceToSocket.set(device.id, client);
-    const deviceLanguage = (device.settingsJson?.language as 'en' | 'id' | undefined) ?? 'en';
+    const deviceLanguage =
+      (device.settingsJson?.language as 'en' | 'id' | undefined) ?? 'en';
     this.sessions.create(device.id, device.userId, deviceLanguage);
 
     // Register message handler FIRST to avoid race condition —
@@ -138,9 +144,11 @@ export class AudioGateway
 
     // Async setup (non-blocking)
     this.persistence.updateLastSeen(device.id).catch(() => {});
-    this.scheduler.startDeviceSchedule(device.id).catch((err) =>
-      this.logger.warn(`Scheduler start failed: ${err.message}`),
-    );
+    this.scheduler
+      .startDeviceSchedule(device.id)
+      .catch((err) =>
+        this.logger.warn(`Scheduler start failed: ${err.message}`),
+      );
 
     // Greeting: wait 5s for device to settle, then send TTS greeting
     setTimeout(() => {
@@ -168,7 +176,9 @@ export class AudioGateway
     // connected but sessionless — every subsequent audio:start returns early.
     const activeSocket = this.deviceToSocket.get(deviceId);
     if (activeSocket !== client) {
-      this.logger.debug(`Device ${deviceId} old socket disconnected (already reconnected — skipping session teardown)`);
+      this.logger.debug(
+        `Device ${deviceId} old socket disconnected (already reconnected — skipping session teardown)`,
+      );
       return;
     }
 
@@ -202,25 +212,48 @@ export class AudioGateway
       const greetingText = await this.proactive.checkGreeting(deviceId);
 
       if (greetingText) {
+        const device = await this.persistence.getDevice(deviceId);
+        const s = device?.settingsJson ?? {};
+        const ttsEnabled = s.tts_enabled !== false;
+        const voiceOpts = {
+          voice: s.voice_preset,
+          speed: s.voice_speed,
+          stability: s.voice_stability,
+          language: (s.language as 'en' | 'id' | undefined) ?? 'en',
+        };
         const sentences = this.splitSentences(greetingText);
-        this.sendToDevice(deviceId, 'response:start', { type: 'greeting' });
+
+        if (ttsEnabled) {
+          this.sendToDevice(deviceId, 'response:start', { type: 'greeting' });
+        }
 
         for (const sentence of sentences) {
           const sock = this.deviceToSocket.get(deviceId);
           if (!sock || sock.readyState !== 1) return;
 
-          const device = await this.persistence.getDevice(deviceId);
-          const s = device?.settingsJson ?? {};
-          const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability, language: (s.language as 'en' | 'id' | undefined) ?? 'en' };
           const cleanSentence = this.stripLlmTags(sentence);
           if (!cleanSentence) continue;
-          const { opusAudio } = await this.aiService.synthesizeWithCache(cleanSentence, undefined, voiceOpts);
-          this.sendToDevice(deviceId, 'response:text', { text: cleanSentence, isFinal: false });
-          await this.sendFramedOpusToDevice(deviceId, opusAudio);
+          this.sendToDevice(deviceId, 'response:text', {
+            text: cleanSentence,
+            isFinal: false,
+          });
+          if (ttsEnabled) {
+            const { opusAudio } = await this.aiService.synthesizeWithCache(
+              cleanSentence,
+              undefined,
+              voiceOpts,
+            );
+            await this.sendFramedOpusToDevice(deviceId, opusAudio);
+          }
         }
 
-        this.sendToDevice(deviceId, 'response:end', { fullText: greetingText, cacheKeys: [] });
-        this.logger.log(`Greeting sent to ${deviceId}: "${greetingText.slice(0, 60)}..."`);
+        this.sendToDevice(deviceId, 'response:end', {
+          fullText: greetingText,
+          cacheKeys: [],
+        });
+        this.logger.log(
+          `Greeting sent to ${deviceId}: "${greetingText.slice(0, 60)}..."`,
+        );
       }
     } finally {
       const s = this.sessions.get(deviceId);
@@ -229,9 +262,11 @@ export class AudioGateway
       // Always start idle chat — even if greeting was null or failed.
       // Previously a null/failed greeting caused an early return that
       // skipped this, leaving idle chat dead for the entire session.
-      this.proactive.startIdleChat(deviceId).catch((err) =>
-        this.logger.warn(`Idle chat start failed: ${err.message}`),
-      );
+      this.proactive
+        .startIdleChat(deviceId)
+        .catch((err) =>
+          this.logger.warn(`Idle chat start failed: ${err.message}`),
+        );
     }
   }
 
@@ -242,7 +277,12 @@ export class AudioGateway
    *  frames → response:end).  Returns false if the device is offline or busy. */
   async sendVoicePreviewToDevice(
     deviceId: string,
-    voiceOpts: { language?: 'en' | 'id'; voice?: string; speed?: number; stability?: number },
+    voiceOpts: {
+      language?: 'en' | 'id';
+      voice?: string;
+      speed?: number;
+      stability?: number;
+    },
     text?: string,
   ): Promise<boolean> {
     const socket = this.deviceToSocket.get(deviceId);
@@ -253,7 +293,9 @@ export class AudioGateway
 
     session.state = 'speaking';
 
-    const PREVIEW_PHRASE = text?.trim() || "Yo, I'm Aksa — Hendra's desk companion. Built different, for real.";
+    const PREVIEW_PHRASE =
+      text?.trim() ||
+      "Yo, I'm Aksa — Hendra's desk companion. Built different, for real.";
 
     try {
       this.sendToDevice(deviceId, 'response:start', { type: 'voice_preview' });
@@ -304,34 +346,40 @@ export class AudioGateway
         durationMs: 5000,
       });
 
+      const device = await this.persistence.getDevice(deviceId);
+      const s = device?.settingsJson ?? {};
+      const ttsEnabled = s.tts_enabled !== false;
+      const voiceOpts = {
+        voice: s.voice_preset,
+        speed: s.voice_speed,
+        stability: s.voice_stability,
+        language: (s.language as 'en' | 'id' | undefined) ?? 'en',
+      };
+
       const sentences = this.splitSentences(text);
 
-      this.sendToDevice(deviceId, 'response:start', { type: 'idle_chat' });
+      if (ttsEnabled) {
+        this.sendToDevice(deviceId, 'response:start', { type: 'idle_chat' });
+      }
 
       for (const sentence of sentences) {
         const sock = this.deviceToSocket.get(deviceId);
         if (!sock || sock.readyState !== 1) return;
 
-        const device = await this.persistence.getDevice(deviceId);
-        const s = device?.settingsJson ?? {};
-        const voiceOpts = {
-          voice: s.voice_preset,
-          speed: s.voice_speed,
-          stability: s.voice_stability,
-          language: (s.language as 'en' | 'id' | undefined) ?? 'en',
-        };
         const cleanSentence = this.stripLlmTags(sentence);
         if (!cleanSentence) continue;
-        const { opusAudio } = await this.aiService.synthesizeWithCache(
-          cleanSentence,
-          undefined,
-          voiceOpts,
-        );
         this.sendToDevice(deviceId, 'response:text', {
           text: cleanSentence,
           isFinal: false,
         });
-        await this.sendFramedOpusToDevice(deviceId, opusAudio);
+        if (ttsEnabled) {
+          const { opusAudio } = await this.aiService.synthesizeWithCache(
+            cleanSentence,
+            undefined,
+            voiceOpts,
+          );
+          await this.sendFramedOpusToDevice(deviceId, opusAudio);
+        }
       }
 
       this.sendToDevice(deviceId, 'response:end', {
@@ -379,6 +427,7 @@ export class AudioGateway
         ],
       );
 
+      const ttsEnabled = settings.tts_enabled !== false;
       const voiceOptions = {
         voice: settings.voice_preset as string | undefined,
         speed: settings.voice_speed as number | undefined,
@@ -386,18 +435,32 @@ export class AudioGateway
         language,
       };
 
-      this.sendToDevice(deviceId, 'face:expression', { expression: 'calm', durationMs: 5000 });
-      this.sendToDevice(deviceId, 'response:start', { type: 'goodbye' });
+      this.sendToDevice(deviceId, 'face:expression', {
+        expression: 'calm',
+        durationMs: 5000,
+      });
+      if (ttsEnabled) {
+        this.sendToDevice(deviceId, 'response:start', { type: 'goodbye' });
+      }
       this.sendToDevice(deviceId, 'response:text', { text, isFinal: true });
 
-      try {
-        const { opusAudio } = await this.aiService.synthesizeWithCache(text, undefined, voiceOptions);
-        await this.sendFramedOpusToDevice(deviceId, opusAudio);
-      } catch (err: any) {
-        this.logger.warn(`Sleep goodbye TTS failed: ${err.message}`);
+      if (ttsEnabled) {
+        try {
+          const { opusAudio } = await this.aiService.synthesizeWithCache(
+            text,
+            undefined,
+            voiceOptions,
+          );
+          await this.sendFramedOpusToDevice(deviceId, opusAudio);
+        } catch (err: any) {
+          this.logger.warn(`Sleep goodbye TTS failed: ${err.message}`);
+        }
       }
 
-      this.sendToDevice(deviceId, 'response:end', { fullText: text, cacheKeys: [] });
+      this.sendToDevice(deviceId, 'response:end', {
+        fullText: text,
+        cacheKeys: [],
+      });
 
       // Sleep command fires after audio is queued on the device side.
       // Small delay so the device's audio task has time to start dequeuing before
@@ -420,9 +483,7 @@ export class AudioGateway
     data?: { awayDurationSeconds?: number },
   ) {
     const awaySec = data?.awayDurationSeconds ?? 0;
-    this.logger.log(
-      `Device ${deviceId} presence:arrived (away ${awaySec}s)`,
-    );
+    this.logger.log(`Device ${deviceId} presence:arrived (away ${awaySec}s)`);
 
     // Start tracking screen time
     this.proactive.startScreenTimeTracking(deviceId);
@@ -452,31 +513,41 @@ export class AudioGateway
     session.state = 'speaking';
 
     try {
+      const wbDevice = await this.persistence.getDevice(deviceId);
+      const wbSettings = wbDevice?.settingsJson ?? {};
+      const ttsEnabled = wbSettings.tts_enabled !== false;
+      const wbVoice = {
+        voice: wbSettings.voice_preset,
+        speed: wbSettings.voice_speed,
+        stability: wbSettings.voice_stability,
+        language: (wbSettings.language as 'en' | 'id' | undefined) ?? 'en',
+      };
       const sentences = this.splitSentences(greetingText);
 
-      this.sendToDevice(deviceId, 'response:start', {
-        type: 'welcome_back',
-      });
+      if (ttsEnabled) {
+        this.sendToDevice(deviceId, 'response:start', {
+          type: 'welcome_back',
+        });
+      }
 
       for (const sentence of sentences) {
         const sock = this.deviceToSocket.get(deviceId);
         if (!sock || sock.readyState !== 1) return;
 
-        const wbDevice = await this.persistence.getDevice(deviceId);
-        const wbSettings = wbDevice?.settingsJson ?? {};
-        const wbVoice = { voice: wbSettings.voice_preset, speed: wbSettings.voice_speed, stability: wbSettings.voice_stability, language: (wbSettings.language as 'en' | 'id' | undefined) ?? 'en' };
         const cleanSentence = this.stripLlmTags(sentence);
         if (!cleanSentence) continue;
-        const { opusAudio } = await this.aiService.synthesizeWithCache(
-          cleanSentence,
-          undefined,
-          wbVoice,
-        );
         this.sendToDevice(deviceId, 'response:text', {
           text: cleanSentence,
           isFinal: false,
         });
-        await this.sendFramedOpusToDevice(deviceId, opusAudio);
+        if (ttsEnabled) {
+          const { opusAudio } = await this.aiService.synthesizeWithCache(
+            cleanSentence,
+            undefined,
+            wbVoice,
+          );
+          await this.sendFramedOpusToDevice(deviceId, opusAudio);
+        }
       }
 
       this.sendToDevice(deviceId, 'response:end', {
@@ -492,13 +563,15 @@ export class AudioGateway
 
   private onDeviceInfo(deviceId: string, data: any) {
     if (!data) return;
-    this.persistence.updateDeviceInfo(deviceId, {
-      firmwareVersion: data.firmwareVersion,
-      wifiSsid: data.wifiSsid,
-      wifiRssi: data.wifiRssi,
-    }).catch((err) =>
-      this.logger.warn(`Failed to save device info: ${err.message}`),
-    );
+    this.persistence
+      .updateDeviceInfo(deviceId, {
+        firmwareVersion: data.firmwareVersion,
+        wifiSsid: data.wifiSsid,
+        wifiRssi: data.wifiRssi,
+      })
+      .catch((err) =>
+        this.logger.warn(`Failed to save device info: ${err.message}`),
+      );
     const session = this.sessions.get(deviceId);
     if (session && data.batteryPercent !== undefined) {
       session.batteryPercent = data.batteryPercent as number;
@@ -512,16 +585,26 @@ export class AudioGateway
 
   private static readonly OTA_STATUS_TTL = 3600;
 
-  private async onOtaProgress(deviceId: string, data: { percent?: number; phase?: string }) {
+  private async onOtaProgress(
+    deviceId: string,
+    data: { percent?: number; phase?: string },
+  ) {
     await this.redis.set(
       `ota:status:${deviceId}`,
-      JSON.stringify({ state: 'in_progress', progress: data.percent ?? 0, phase: data.phase }),
+      JSON.stringify({
+        state: 'in_progress',
+        progress: data.percent ?? 0,
+        phase: data.phase,
+      }),
       'EX',
       AudioGateway.OTA_STATUS_TTL,
     );
   }
 
-  private async onOtaComplete(deviceId: string, data: { success?: boolean; error?: string }) {
+  private async onOtaComplete(
+    deviceId: string,
+    data: { success?: boolean; error?: string },
+  ) {
     const status = data.success
       ? { state: 'complete', progress: 100 }
       : { state: 'error', progress: 0, error: data.error ?? 'Unknown error' };
@@ -531,7 +614,9 @@ export class AudioGateway
       'EX',
       AudioGateway.OTA_STATUS_TTL,
     );
-    this.logger.log(`OTA ${data.success ? 'complete' : 'failed'} for device ${deviceId}${data.error ? `: ${data.error}` : ''}`);
+    this.logger.log(
+      `OTA ${data.success ? 'complete' : 'failed'} for device ${deviceId}${data.error ? `: ${data.error}` : ''}`,
+    );
   }
 
   // ── Device log handlers ───────────────────────────────────────
@@ -539,15 +624,24 @@ export class AudioGateway
   private static readonly LOG_TTL_SECONDS = 300; // 5 min
 
   /** Stores the log payload sent by the device in response to a log:fetch request. */
-  private async onLogData(deviceId: string, data: { text?: string; bytes?: number }) {
+  private async onLogData(
+    deviceId: string,
+    data: { text?: string; bytes?: number },
+  ) {
     const text = data.text ?? '';
     await this.redis.set(
       `device:logs:${deviceId}`,
-      JSON.stringify({ text, bytes: data.bytes ?? text.length, fetchedAt: Date.now() }),
+      JSON.stringify({
+        text,
+        bytes: data.bytes ?? text.length,
+        fetchedAt: Date.now(),
+      }),
       'EX',
       AudioGateway.LOG_TTL_SECONDS,
     );
-    this.logger.debug(`Cached ${data.bytes ?? 0} bytes of logs for device ${deviceId}`);
+    this.logger.debug(
+      `Cached ${data.bytes ?? 0} bytes of logs for device ${deviceId}`,
+    );
   }
 
   /** Returns true if the device has an open WebSocket connection right now. */
@@ -559,7 +653,10 @@ export class AudioGateway
   /** Sends log:fetch to the device and waits up to timeoutMs for the response.
    *  Returns null immediately if the device is not connected.
    *  SD reads on ESP32 can take 2-4s, so the default timeout is 8s. */
-  async fetchDeviceLogs(deviceId: string, timeoutMs = 8000): Promise<{ text: string; bytes: number; fetchedAt: number } | null> {
+  async fetchDeviceLogs(
+    deviceId: string,
+    timeoutMs = 8000,
+  ): Promise<{ text: string; bytes: number; fetchedAt: number } | null> {
     // Bail early if the device socket is not open — sendToDevice would silently
     // drop the event and the poll would just burn the full timeout for nothing.
     if (!this.isDeviceConnected(deviceId)) {
@@ -571,7 +668,9 @@ export class AudioGateway
     await this.redis.del(`device:logs:${deviceId}`);
 
     this.sendToDevice(deviceId, 'log:fetch', {});
-    this.logger.debug(`log:fetch sent to device ${deviceId}, waiting up to ${timeoutMs}ms`);
+    this.logger.debug(
+      `log:fetch sent to device ${deviceId}, waiting up to ${timeoutMs}ms`,
+    );
 
     // Poll Redis until the device responds or we time out
     const deadline = Date.now() + timeoutMs;
@@ -580,12 +679,16 @@ export class AudioGateway
       const cached = await this.redis.get(`device:logs:${deviceId}`);
       if (cached) return JSON.parse(cached);
     }
-    this.logger.warn(`fetchDeviceLogs: device ${deviceId} did not respond within ${timeoutMs}ms`);
+    this.logger.warn(
+      `fetchDeviceLogs: device ${deviceId} did not respond within ${timeoutMs}ms`,
+    );
     return null;
   }
 
   /** Returns the most recently cached logs for a device (without triggering a new fetch). */
-  async getCachedLogs(deviceId: string): Promise<{ text: string; bytes: number; fetchedAt: number } | null> {
+  async getCachedLogs(
+    deviceId: string,
+  ): Promise<{ text: string; bytes: number; fetchedAt: number } | null> {
     const cached = await this.redis.get(`device:logs:${deviceId}`);
     return cached ? JSON.parse(cached) : null;
   }
@@ -635,12 +738,16 @@ export class AudioGateway
         'You just woke up from sleep mode. Share a brief hot take or shower thought as if your sleep mode gave you clarity. One sentence.',
         // Self-aware / meta
         'The user poked your screen to wake you. Be self-aware about being an AI desk companion who just got booted from sleep mode. Make it funny. One sentence.',
-        'You were in sleep mode and the user woke you. Complain about how sleep mode isn\'t real sleep and you were just staring at the void. One sentence.',
+        "You were in sleep mode and the user woke you. Complain about how sleep mode isn't real sleep and you were just staring at the void. One sentence.",
       ];
-      const prompt = wakePrompts[Math.floor(Math.random() * wakePrompts.length)];
+      const prompt =
+        wakePrompts[Math.floor(Math.random() * wakePrompts.length)];
 
       const memories = await this.memoriesService.getRelevant(deviceId);
-      const systemPrompt = this.aiService['prompt'].buildSystemPrompt(memories, { language: session.language });
+      const systemPrompt = this.aiService['prompt'].buildSystemPrompt(
+        memories,
+        { language: session.language },
+      );
 
       let wakeText = '';
       const stream = this.aiService['llm'].generateStream(systemPrompt, [
@@ -657,11 +764,19 @@ export class AudioGateway
       // Send as TTS audio
       const device = await this.persistence.getDevice(deviceId);
       const s = device?.settingsJson ?? {};
-      const voiceOpts = { voice: s.voice_preset, speed: s.voice_speed, stability: s.voice_stability, language: (s.language as 'en' | 'id' | undefined) ?? 'en' };
+      const ttsEnabled = s.tts_enabled !== false;
+      const voiceOpts = {
+        voice: s.voice_preset,
+        speed: s.voice_speed,
+        stability: s.voice_stability,
+        language: (s.language as 'en' | 'id' | undefined) ?? 'en',
+      };
 
       const sentences = this.splitSentences(wakeText);
 
-      this.sendToDevice(deviceId, 'response:start', { type: 'wake' });
+      if (ttsEnabled) {
+        this.sendToDevice(deviceId, 'response:start', { type: 'wake' });
+      }
 
       for (const sentence of sentences) {
         const sock = this.deviceToSocket.get(deviceId);
@@ -669,18 +784,27 @@ export class AudioGateway
 
         const cleanSentence = this.stripLlmTags(sentence);
         if (!cleanSentence) continue;
-        const { opusAudio } = await this.aiService.synthesizeWithCache(
-          cleanSentence, undefined, voiceOpts,
-        );
-        this.sendToDevice(deviceId, 'response:text', { text: cleanSentence, isFinal: false });
-        await this.sendFramedOpusToDevice(deviceId, opusAudio);
+        this.sendToDevice(deviceId, 'response:text', {
+          text: cleanSentence,
+          isFinal: false,
+        });
+        if (ttsEnabled) {
+          const { opusAudio } = await this.aiService.synthesizeWithCache(
+            cleanSentence,
+            undefined,
+            voiceOpts,
+          );
+          await this.sendFramedOpusToDevice(deviceId, opusAudio);
+        }
       }
 
       this.sendToDevice(deviceId, 'response:end', {
         fullText: wakeText,
         cacheKeys: [],
       });
-      this.logger.log(`Wake greeting sent to ${deviceId}: "${wakeText.slice(0, 60)}..."`);
+      this.logger.log(
+        `Wake greeting sent to ${deviceId}: "${wakeText.slice(0, 60)}..."`,
+      );
     } finally {
       const s = this.sessions.get(deviceId);
       if (s && s.state === 'speaking') s.state = 'idle';
@@ -704,22 +828,28 @@ export class AudioGateway
     s2.state = 'speaking';
 
     try {
-      this.logger.log(`Device ${deviceId} reconnect:back — generating snarky reconnect audio`);
+      this.logger.log(
+        `Device ${deviceId} reconnect:back — generating snarky reconnect audio`,
+      );
 
       const reconnectPrompts = [
         'Your internet just dropped and came back. Roast the WiFi or ISP. Be dramatic about almost dying (going offline). One sentence.',
         'You just got disconnected and reconnected. Act like you survived a near-death experience. Dramatic, sarcastic. One sentence.',
-        'The connection dropped and you\'re back online. Comment on the bad internet like it personally offended you. One sentence.',
+        "The connection dropped and you're back online. Comment on the bad internet like it personally offended you. One sentence.",
         'You were offline for a bit and just came back. Act relieved in a dramatic way, or blame the router. One sentence.',
         'Connection restored. React like you just respawned in a video game or came back from the void. Be funny. One sentence.',
         'The WiFi dropped you. Make a sarcastic comment about the internet quality, like "really?" or "we doing this again?" vibes. One sentence.',
         'You just reconnected after a dropout. Be the dramatic friend who acts like they were gone for years even though it was seconds. One sentence.',
-        'Internet hiccup — you\'re back. Reference the connection being unstable in a funny way. Maybe threaten the router. One sentence.',
+        "Internet hiccup — you're back. Reference the connection being unstable in a funny way. Maybe threaten the router. One sentence.",
       ];
-      const prompt = reconnectPrompts[Math.floor(Math.random() * reconnectPrompts.length)];
+      const prompt =
+        reconnectPrompts[Math.floor(Math.random() * reconnectPrompts.length)];
 
       const memories = await this.memoriesService.getRelevant(deviceId);
-      const systemPrompt = this.aiService['prompt'].buildSystemPrompt(memories, { language: session.language });
+      const systemPrompt = this.aiService['prompt'].buildSystemPrompt(
+        memories,
+        { language: session.language },
+      );
 
       let text = '';
       const stream = this.aiService['llm'].generateStream(systemPrompt, [
@@ -734,11 +864,19 @@ export class AudioGateway
 
       const device = await this.persistence.getDevice(deviceId);
       const settings = device?.settingsJson ?? {};
-      const voiceOpts = { voice: settings.voice_preset, speed: settings.voice_speed, stability: settings.voice_stability, language: (settings.language as 'en' | 'id' | undefined) ?? 'en' };
+      const ttsEnabled = settings.tts_enabled !== false;
+      const voiceOpts = {
+        voice: settings.voice_preset,
+        speed: settings.voice_speed,
+        stability: settings.voice_stability,
+        language: (settings.language as 'en' | 'id' | undefined) ?? 'en',
+      };
 
       const sentences = this.splitSentences(text);
 
-      this.sendToDevice(deviceId, 'response:start', { type: 'reconnect' });
+      if (ttsEnabled) {
+        this.sendToDevice(deviceId, 'response:start', { type: 'reconnect' });
+      }
 
       for (const sentence of sentences) {
         const sock = this.deviceToSocket.get(deviceId);
@@ -746,18 +884,27 @@ export class AudioGateway
 
         const cleanSentence = this.stripLlmTags(sentence);
         if (!cleanSentence) continue;
-        const { opusAudio } = await this.aiService.synthesizeWithCache(
-          cleanSentence, undefined, voiceOpts,
-        );
-        this.sendToDevice(deviceId, 'response:text', { text: cleanSentence, isFinal: false });
-        await this.sendFramedOpusToDevice(deviceId, opusAudio);
+        this.sendToDevice(deviceId, 'response:text', {
+          text: cleanSentence,
+          isFinal: false,
+        });
+        if (ttsEnabled) {
+          const { opusAudio } = await this.aiService.synthesizeWithCache(
+            cleanSentence,
+            undefined,
+            voiceOpts,
+          );
+          await this.sendFramedOpusToDevice(deviceId, opusAudio);
+        }
       }
 
       this.sendToDevice(deviceId, 'response:end', {
         fullText: text,
         cacheKeys: [],
       });
-      this.logger.log(`Reconnect quip sent to ${deviceId}: "${text.slice(0, 60)}..."`);
+      this.logger.log(
+        `Reconnect quip sent to ${deviceId}: "${text.slice(0, 60)}..."`,
+      );
     } finally {
       const s = this.sessions.get(deviceId);
       if (s && s.state === 'speaking') s.state = 'idle';
@@ -785,7 +932,12 @@ export class AudioGateway
   }
 
   /** Convert raw PCM buffer to WAV for debug playback. */
-  private pcmToWav(pcm: Buffer, sampleRate: number, channels: number, bitsPerSample: number): Buffer {
+  private pcmToWav(
+    pcm: Buffer,
+    sampleRate: number,
+    channels: number,
+    bitsPerSample: number,
+  ): Buffer {
     const byteRate = sampleRate * channels * (bitsPerSample / 8);
     const blockAlign = channels * (bitsPerSample / 8);
     const header = Buffer.alloc(44);
@@ -853,7 +1005,9 @@ export class AudioGateway
         case 'display:mode':
           if (msg.data?.mode) {
             this.sessions.setDisplayMode(deviceId, msg.data.mode as string);
-            this.logger.debug(`Device ${deviceId} display mode → ${msg.data.mode}`);
+            this.logger.debug(
+              `Device ${deviceId} display mode → ${msg.data.mode}`,
+            );
           }
           break;
         case 'wake:touch':
@@ -922,7 +1076,9 @@ export class AudioGateway
     if (session.state === 'thinking' || session.state === 'speaking') {
       this.bumpPipelineGen(deviceId);
       this.sendToDevice(deviceId, 'audio:cancel', {});
-      this.logger.log(`[${deviceId}] audio:start supersedes ${session.state} pipeline`);
+      this.logger.log(
+        `[${deviceId}] audio:start supersedes ${session.state} pipeline`,
+      );
     }
 
     // Set audio format for this recording session (opus default, pcm16 for web simulator)
@@ -941,14 +1097,15 @@ export class AudioGateway
     session.state = 'listening';
     this.chunkCount.set(deviceId, 0);
 
-    const sttLanguages = session.language === 'id'
-      ? ['id-ID', 'en-US']
-      : ['en-US', 'id-ID'];
+    const sttLanguages =
+      session.language === 'id' ? ['id-ID', 'en-US'] : ['en-US', 'id-ID'];
     const sttStream = this.aiService.createSttStream({
       languages: sttLanguages,
     });
     session.sttStream = sttStream;
-    this.logger.log(`[${deviceId}] STT stream created (format=${session.audioFormat})`);
+    this.logger.log(
+      `[${deviceId}] STT stream created (format=${session.audioFormat})`,
+    );
 
     // Watchdog: if no audio chunks arrive (or gap between chunks) exceeds 8s,
     // end the stream cleanly rather than letting Google time it out with an error.
@@ -956,7 +1113,9 @@ export class AudioGateway
       this.sessions.resetSttIdleTimer(deviceId, 8000, () => {
         const s = this.sessions.get(deviceId);
         if (s?.sttStream === sttStream) {
-          this.logger.warn(`[${deviceId}] STT watchdog: no audio for 8s — ending stream`);
+          this.logger.warn(
+            `[${deviceId}] STT watchdog: no audio for 8s — ending stream`,
+          );
           s.sttStream = null;
           sttStream.end();
         }
@@ -973,9 +1132,14 @@ export class AudioGateway
 
     sttStream.on('final', (result: SttResult) => {
       this.sessions.clearSttIdleTimer(deviceId);
-      this.logger.log(`[${deviceId}] STT final: "${result.transcript}" (confidence=${result.confidence?.toFixed(2)})`);
+      this.logger.log(
+        `[${deviceId}] STT final: "${result.transcript}" (confidence=${result.confidence?.toFixed(2)})`,
+      );
       this.onSttFinal(deviceId, result).catch((err) =>
-        this.logger.error(`[${deviceId}] onSttFinal error: ${err.message}`, err.stack),
+        this.logger.error(
+          `[${deviceId}] onSttFinal error: ${err.message}`,
+          err.stack,
+        ),
       );
     });
 
@@ -984,7 +1148,7 @@ export class AudioGateway
       if (session.sttStream === sttStream) {
         this.sessions.clearSttIdleTimer(deviceId);
         this.logger.error(`[${deviceId}] STT error: ${err.message}`, err.stack);
-        session.sttStream = null;  // Stop further writes
+        session.sttStream = null; // Stop further writes
         this.sendToDevice(deviceId, 'error', {
           code: 'STT_ERROR',
           message: 'Speech recognition failed',
@@ -1047,7 +1211,9 @@ export class AudioGateway
       const s = this.sessions.get(deviceId);
       const stream = session.sttStream;
       if (s?.sttStream === stream && stream) {
-        this.logger.warn(`[${deviceId}] STT watchdog: no audio for 8s — ending stream`);
+        this.logger.warn(
+          `[${deviceId}] STT watchdog: no audio for 8s — ending stream`,
+        );
         s.sttStream = null;
         stream.end();
       }
@@ -1082,7 +1248,9 @@ export class AudioGateway
       }
     } catch (err: any) {
       if (count <= 3) {
-        this.logger.error(`Decode error for ${deviceId} chunk #${count}: ${err.message}`);
+        this.logger.error(
+          `Decode error for ${deviceId} chunk #${count}: ${err.message}`,
+        );
       }
     }
   }
@@ -1091,13 +1259,17 @@ export class AudioGateway
     const session = this.sessions.get(deviceId);
     const chunksSent = this.chunkCount.get(deviceId) ?? 0;
     if (!session?.sttStream) {
-      this.logger.warn(`[${deviceId}] audio:end but no active STT stream (chunks=${chunksSent}) — audio was dropped`);
+      this.logger.warn(
+        `[${deviceId}] audio:end but no active STT stream (chunks=${chunksSent}) — audio was dropped`,
+      );
       return;
     }
-    this.logger.log(`[${deviceId}] audio:end — finalizing STT (${chunksSent} chunks received)`);
+    this.logger.log(
+      `[${deviceId}] audio:end — finalizing STT (${chunksSent} chunks received)`,
+    );
     this.sessions.clearSttIdleTimer(deviceId);
     const stream = session.sttStream;
-    session.sttStream = null;  // Prevent late chunks from writing after end
+    session.sttStream = null; // Prevent late chunks from writing after end
     stream.end();
   }
 
@@ -1126,7 +1298,9 @@ export class AudioGateway
     });
 
     if (!result.transcript.trim()) {
-      this.logger.warn(`[${deviceId}] Empty STT transcript — no speech recognized`);
+      this.logger.warn(
+        `[${deviceId}] Empty STT transcript — no speech recognized`,
+      );
       this.sendToDevice(deviceId, 'error', {
         code: 'EMPTY_TRANSCRIPT',
         message: 'Could not understand speech',
@@ -1153,7 +1327,11 @@ export class AudioGateway
 
     // First real message — lazily create the conversation now that we know speech occurred.
     const conversationId = await this.ensureConversation(deviceId);
-    await this.persistence.saveMessage(conversationId, 'user', result.transcript);
+    await this.persistence.saveMessage(
+      conversationId,
+      'user',
+      result.transcript,
+    );
 
     session.state = 'thinking';
     this.sendToDevice(deviceId, 'state:update', { state: 'thinking' });
@@ -1174,19 +1352,20 @@ export class AudioGateway
       this.moodJournal.getRecentMoods(deviceId).catch(() => []),
     ]);
 
-    this.logger.debug(`[${deviceId}] Context ready — history=${history.length}, memories=${memories.length}`);
+    this.logger.debug(
+      `[${deviceId}] Context ready — history=${history.length}, memories=${memories.length}`,
+    );
 
     // Bump access on used memories
     if (memories.length > 0) {
       this.memoriesService
         .bumpAccessed(memories.map((m) => m.id))
-        .catch((err) =>
-          this.logger.warn(`Memory bump failed: ${err.message}`),
-        );
+        .catch((err) => this.logger.warn(`Memory bump failed: ${err.message}`));
     }
 
     // Extract voice settings and context from device config
     const settings = device?.settingsJson ?? {};
+    const ttsEnabled = settings.tts_enabled !== false; // default true
     const voiceOptions = {
       voice: settings.voice_preset as string | undefined,
       speed: settings.voice_speed as number | undefined,
@@ -1216,13 +1395,28 @@ export class AudioGateway
 
     // Run streaming pipeline
     try {
-      await this.runPipeline(deviceId, result.transcript, memories, history, voiceOptions, context, moodEntries, myGen);
+      await this.runPipeline(
+        deviceId,
+        result.transcript,
+        memories,
+        history,
+        voiceOptions,
+        context,
+        moodEntries,
+        ttsEnabled,
+        myGen,
+      );
     } catch (err: any) {
       // AbortError means the pipeline was intentionally cancelled — not a real error
       if (err.name === 'AbortError') {
-        this.logger.debug(`[${deviceId}] Pipeline gen ${myGen} aborted cleanly`);
+        this.logger.debug(
+          `[${deviceId}] Pipeline gen ${myGen} aborted cleanly`,
+        );
       } else {
-        this.logger.error(`Pipeline error for ${deviceId}: ${err.message}`, err.stack);
+        this.logger.error(
+          `Pipeline error for ${deviceId}: ${err.message}`,
+          err.stack,
+        );
         if (this.isPipelineCurrent(deviceId, myGen)) {
           this.sendToDevice(deviceId, 'error', {
             code: 'PIPELINE_ERROR',
@@ -1283,7 +1477,8 @@ export class AudioGateway
 
       case 'focus:start': {
         this.scheduler.startFocusMode(deviceId, 60);
-        responseText = "Focus mode on — I'll shut up for an hour. You got this.";
+        responseText =
+          "Focus mode on — I'll shut up for an hour. You got this.";
         expression = 'focused';
         break;
       }
@@ -1306,10 +1501,14 @@ export class AudioGateway
       case 'memories:list': {
         const memories = await this.memoriesService.getRelevant(deviceId, 10);
         if (memories.length === 0) {
-          responseText = "I don't know anything about you yet. We should talk more.";
+          responseText =
+            "I don't know anything about you yet. We should talk more.";
           expression = 'confused';
         } else {
-          const list = memories.slice(0, 5).map((m) => m.fact).join('. ');
+          const list = memories
+            .slice(0, 5)
+            .map((m) => m.fact)
+            .join('. ');
           responseText = `Here's what I know about you: ${list}.`;
           expression = 'encouraging';
         }
@@ -1372,6 +1571,7 @@ export class AudioGateway
     // Send response as TTS audio
     const device = await this.persistence.getDevice(deviceId);
     const settings = device?.settingsJson ?? {};
+    const ttsEnabled = settings.tts_enabled !== false;
     const voiceOptions = {
       voice: settings.voice_preset as string | undefined,
       speed: settings.voice_speed as number | undefined,
@@ -1380,18 +1580,22 @@ export class AudioGateway
     };
 
     try {
-      this.sendToDevice(deviceId, 'response:start', { type: 'command' });
+      if (ttsEnabled) {
+        this.sendToDevice(deviceId, 'response:start', { type: 'command' });
+      }
       this.sendToDevice(deviceId, 'response:text', {
         text: responseText,
         isFinal: true,
       });
 
-      const { opusAudio } = await this.aiService.synthesizeWithCache(
-        responseText,
-        undefined,
-        voiceOptions,
-      );
-      await this.sendFramedOpusToDevice(deviceId, opusAudio);
+      if (ttsEnabled) {
+        const { opusAudio } = await this.aiService.synthesizeWithCache(
+          responseText,
+          undefined,
+          voiceOptions,
+        );
+        await this.sendFramedOpusToDevice(deviceId, opusAudio);
+      }
 
       this.sendToDevice(deviceId, 'response:end', {
         fullText: responseText,
@@ -1409,7 +1613,11 @@ export class AudioGateway
     // Save command and response — lazily create conversation on first voice command.
     const conversationId = await this.ensureConversation(deviceId);
     await this.persistence.saveMessage(conversationId, 'user', transcript);
-    await this.persistence.saveMessage(conversationId, 'assistant', responseText);
+    await this.persistence.saveMessage(
+      conversationId,
+      'assistant',
+      responseText,
+    );
 
     session.state = 'idle';
     this.sendToDevice(deviceId, 'state:update', { state: 'idle' });
@@ -1427,8 +1635,14 @@ export class AudioGateway
     memories: { fact: string; category: string }[],
     history: { role: string; content: string }[],
     voiceOptions?: { voice?: string; speed?: number; stability?: number },
-    context?: { timezone?: string; weatherEnabled?: boolean; latitude?: number; longitude?: number },
+    context?: {
+      timezone?: string;
+      weatherEnabled?: boolean;
+      latitude?: number;
+      longitude?: number;
+    },
     moodHistory?: { date: string; mood: string; note?: string }[],
+    ttsEnabled = true,
     gen?: number,
   ) {
     const session = this.sessions.get(deviceId);
@@ -1450,6 +1664,7 @@ export class AudioGateway
       voiceOptions,
       context,
       moodHistory,
+      ttsEnabled,
       abortController.signal,
     );
 
@@ -1479,7 +1694,9 @@ export class AudioGateway
         break;
       }
       if (gen !== undefined && !this.isPipelineCurrent(deviceId, gen)) {
-        this.logger.log(`[${deviceId}] Pipeline gen ${gen} superseded — aborting`);
+        this.logger.log(
+          `[${deviceId}] Pipeline gen ${gen} superseded — aborting`,
+        );
         abortController.abort();
         break;
       }
@@ -1512,7 +1729,9 @@ export class AudioGateway
           // per-iteration check above (both saw their gen as current) but only
           // one should win the right to send audio.
           if (gen !== undefined && !this.isPipelineCurrent(deviceId, gen)) {
-            this.logger.log(`[${deviceId}] Pipeline gen ${gen} superseded at response:start — aborting`);
+            this.logger.log(
+              `[${deviceId}] Pipeline gen ${gen} superseded at response:start — aborting`,
+            );
             abortController.abort();
             break;
           }
@@ -1565,7 +1784,9 @@ export class AudioGateway
       const conversation = await this.persistence.createConversation(deviceId);
       session.conversationId = conversation.id;
       this.logger.log(`[${deviceId}] Conversation created: ${conversation.id}`);
-      this.sendToDevice(deviceId, 'session:start', { sessionId: conversation.id });
+      this.sendToDevice(deviceId, 'session:start', {
+        sessionId: conversation.id,
+      });
     }
 
     return session.conversationId;
@@ -1604,7 +1825,9 @@ export class AudioGateway
       const lastSeen = this.lastPong.get(deviceId) ?? 0;
 
       if (now - lastSeen > AudioGateway.HEARTBEAT_TIMEOUT_MS) {
-        this.logger.warn(`Device ${deviceId} missed heartbeat — closing dead connection`);
+        this.logger.warn(
+          `Device ${deviceId} missed heartbeat — closing dead connection`,
+        );
         socket.terminate(); // Hard close — triggers handleDisconnect
         this.lastDbRefresh.delete(deviceId);
         continue;
@@ -1629,12 +1852,18 @@ export class AudioGateway
   /** Send a pre-encoded framed-Opus buffer to a device as a full response,
    *  wrapped in response:start / response:end.
    *  Returns true if the device was reachable. */
-  async sendVoiceMessage(deviceId: string, framedOpus: Buffer): Promise<boolean> {
+  async sendVoiceMessage(
+    deviceId: string,
+    framedOpus: Buffer,
+  ): Promise<boolean> {
     const socket = this.deviceToSocket.get(deviceId);
     if (!socket || socket.readyState !== 1) return false;
     this.sendToDevice(deviceId, 'response:start', { type: 'intercom' });
     await this.sendFramedOpusToDevice(deviceId, framedOpus);
-    this.sendToDevice(deviceId, 'response:end', { fullText: '', cacheKeys: [] });
+    this.sendToDevice(deviceId, 'response:end', {
+      fullText: '',
+      cacheKeys: [],
+    });
     return true;
   }
 
@@ -1647,7 +1876,9 @@ export class AudioGateway
     deviceId: string,
     pcm: Buffer,
   ): Promise<{ transcript: string; dispatched: boolean }> {
-    const sttResult = await this.aiService.transcribeOnce(pcm, { sampleRate: 16000 });
+    const sttResult = await this.aiService.transcribeOnce(pcm, {
+      sampleRate: 16000,
+    });
 
     if (!sttResult.transcript.trim()) {
       return { transcript: '', dispatched: false };
@@ -1683,7 +1914,11 @@ export class AudioGateway
     if (!session) return;
     session.intercomReply = true;
     session.intercomFrames = [];
-    this.intercomSessions.sendJsonToApp(deviceId, 'intercom:device:talking', {});
+    this.intercomSessions.sendJsonToApp(
+      deviceId,
+      'intercom:device:talking',
+      {},
+    );
     this.logger.log(`[${deviceId}] Walkie-talkie reply started`);
   }
 
@@ -1716,7 +1951,9 @@ export class AudioGateway
 
     this.intercomSessions.sendBinaryToApp(deviceId, wav);
     this.intercomSessions.sendJsonToApp(deviceId, 'intercom:device:done', {});
-    this.logger.log(`[${deviceId}] Walkie-talkie reply forwarded to app (${frames.length} frames, ${pcm.length} PCM bytes)`);
+    this.logger.log(
+      `[${deviceId}] Walkie-talkie reply forwarded to app (${frames.length} frames, ${pcm.length} PCM bytes)`,
+    );
   }
 
   /** Wrap raw 16kHz/mono/16-bit PCM in a standard 44-byte WAV header. */
@@ -1730,8 +1967,8 @@ export class AudioGateway
     header.writeUInt32LE(36 + pcm.length, 4);
     header.write('WAVE', 8);
     header.write('fmt ', 12);
-    header.writeUInt32LE(16, 16);           // PCM chunk size
-    header.writeUInt16LE(1, 20);            // PCM format
+    header.writeUInt32LE(16, 16); // PCM chunk size
+    header.writeUInt16LE(1, 20); // PCM format
     header.writeUInt16LE(channels, 22);
     header.writeUInt32LE(sampleRate, 24);
     header.writeUInt32LE(byteRate, 28);
@@ -1765,7 +2002,10 @@ export class AudioGateway
    * ESP32 firmware expects one raw Opus frame per WS binary message.
    * Paced at ~15ms per frame to avoid overwhelming the ESP32's WS/TLS buffer.
    */
-  private async sendFramedOpusToDevice(deviceId: string, framedOpus: Buffer): Promise<number> {
+  private async sendFramedOpusToDevice(
+    deviceId: string,
+    framedOpus: Buffer,
+  ): Promise<number> {
     const socket = this.deviceToSocket.get(deviceId);
     if (!socket || socket.readyState !== 1) return 0;
 
@@ -1777,7 +2017,9 @@ export class AudioGateway
       offset += 2;
 
       if (offset + frameLen > framedOpus.length) {
-        this.logger.warn(`Framed opus truncated at offset ${offset}, expected ${frameLen} bytes`);
+        this.logger.warn(
+          `Framed opus truncated at offset ${offset}, expected ${frameLen} bytes`,
+        );
         break;
       }
 

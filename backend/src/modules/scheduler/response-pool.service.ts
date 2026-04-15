@@ -20,10 +20,7 @@ export class ResponsePoolService {
    * Pick the least recently used response for a category.
    * If pool is empty, generates one on the fly and stores it.
    */
-  async pickLru(
-    deviceId: string,
-    category: string,
-  ): Promise<ResponsePool> {
+  async pickLru(deviceId: string, category: string): Promise<ResponsePool> {
     // Prioritize never-used responses, then oldest-used
     let response = await this.repo.findOne({
       where: { deviceId, category, lastAccessedAt: IsNull() },

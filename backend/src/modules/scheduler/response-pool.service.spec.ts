@@ -9,8 +9,14 @@ describe('ResponsePoolService', () => {
     repo = {
       findOne: jest.fn(),
       find: jest.fn().mockResolvedValue([]),
-      create: jest.fn().mockImplementation((data) => ({ id: 'rp-1', useCount: 0, ...data })),
-      save: jest.fn().mockImplementation((data) => Promise.resolve(Array.isArray(data) ? data : data)),
+      create: jest
+        .fn()
+        .mockImplementation((data) => ({ id: 'rp-1', useCount: 0, ...data })),
+      save: jest
+        .fn()
+        .mockImplementation((data) =>
+          Promise.resolve(Array.isArray(data) ? data : data),
+        ),
       count: jest.fn().mockResolvedValue(0),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
       delete: jest.fn().mockResolvedValue({ affected: 5 }),
@@ -66,7 +72,11 @@ describe('ResponsePoolService', () => {
     });
 
     it('returns empty on unknown category', async () => {
-      const result = await service.generateAndStore('device-1', 'unknown_cat', 3);
+      const result = await service.generateAndStore(
+        'device-1',
+        'unknown_cat',
+        3,
+      );
       expect(result).toEqual([]);
       expect(mockLlm.generate).not.toHaveBeenCalled();
     });

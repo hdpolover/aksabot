@@ -14,7 +14,11 @@ describe('PomodoroService', () => {
         text: 'Take a break!',
         audio: Buffer.from('audio'),
         cacheKey: 'key-1',
-        display: { expression: 'encouraging', screenMode: 'reminder', durationMs: 8000 },
+        display: {
+          expression: 'encouraging',
+          screenMode: 'reminder',
+          durationMs: 8000,
+        },
       }),
     };
 

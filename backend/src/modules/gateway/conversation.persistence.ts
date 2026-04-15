@@ -23,7 +23,9 @@ export class ConversationPersistence {
       { endedAt: new Date() },
     );
     if (stale.affected && stale.affected > 0) {
-      this.logger.log(`Closed ${stale.affected} stale conversation(s) for device ${deviceId}`);
+      this.logger.log(
+        `Closed ${stale.affected} stale conversation(s) for device ${deviceId}`,
+      );
     }
 
     const conversation = this.conversationsRepo.create({ deviceId });
@@ -80,7 +82,10 @@ export class ConversationPersistence {
     if (info.wifiSsid) device.wifiSsid = info.wifiSsid;
     // RSSI stored in settingsJson (no dedicated column — avoids migration)
     if (info.wifiRssi !== undefined) {
-      device.settingsJson = { ...device.settingsJson, wifi_rssi: info.wifiRssi };
+      device.settingsJson = {
+        ...device.settingsJson,
+        wifi_rssi: info.wifiRssi,
+      };
     }
     await this.devicesRepo.save(device);
   }

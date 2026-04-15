@@ -22,11 +22,8 @@ export class SchedulerService implements OnModuleInit {
   private focusMode = new Map<string, NodeJS.Timeout>();
 
   // Injected later to avoid circular dep with gateway
-  private sendToDevice: (
-    deviceId: string,
-    event: string,
-    data: any,
-  ) => void = () => {};
+  private sendToDevice: (deviceId: string, event: string, data: any) => void =
+    () => {};
 
   constructor(
     @InjectRepository(Device)
@@ -40,8 +37,8 @@ export class SchedulerService implements OnModuleInit {
 
   onModuleInit() {
     // Share sendToDevice with pomodoro service
-    this.pomodoroService.setSendToDevice(
-      (deviceId, event, data) => this.sendToDevice(deviceId, event, data),
+    this.pomodoroService.setSendToDevice((deviceId, event, data) =>
+      this.sendToDevice(deviceId, event, data),
     );
   }
 
@@ -79,11 +76,31 @@ export class SchedulerService implements OnModuleInit {
       );
     };
 
-    scheduleReminder('stand_up', config.standUp.enabled, config.standUp.intervalMinutes);
-    scheduleReminder('hydration', config.hydration.enabled, config.hydration.intervalMinutes);
-    scheduleReminder('eye_break', config.eyeBreak.enabled, config.eyeBreak.intervalMinutes);
-    scheduleReminder('stretch', config.stretch.enabled, config.stretch.intervalMinutes);
-    scheduleReminder('posture', config.posture.enabled, config.posture.intervalMinutes);
+    scheduleReminder(
+      'stand_up',
+      config.standUp.enabled,
+      config.standUp.intervalMinutes,
+    );
+    scheduleReminder(
+      'hydration',
+      config.hydration.enabled,
+      config.hydration.intervalMinutes,
+    );
+    scheduleReminder(
+      'eye_break',
+      config.eyeBreak.enabled,
+      config.eyeBreak.intervalMinutes,
+    );
+    scheduleReminder(
+      'stretch',
+      config.stretch.enabled,
+      config.stretch.intervalMinutes,
+    );
+    scheduleReminder(
+      'posture',
+      config.posture.enabled,
+      config.posture.intervalMinutes,
+    );
 
     this.deviceTimers.set(deviceId, timers);
     this.logger.log(`Started reminder schedule for device ${deviceId}`);
@@ -95,7 +112,9 @@ export class SchedulerService implements OnModuleInit {
 
     // Start context sync (time + weather push to device)
     this.startContextSync(deviceId).catch((err) =>
-      this.logger.warn(`Context sync start failed for ${deviceId}: ${err.message}`),
+      this.logger.warn(
+        `Context sync start failed for ${deviceId}: ${err.message}`,
+      ),
     );
   }
 
@@ -133,13 +152,20 @@ export class SchedulerService implements OnModuleInit {
     // Skip entirely when allDay is enabled.
     // Use device timezone so the check reflects local time, not server UTC.
     const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
-    const remConfig: Partial<import('./types').ReminderConfig> = device?.settingsJson?.reminders ?? {};
+    const remConfig: Partial<import('./types').ReminderConfig> =
+      device?.settingsJson?.reminders ?? {};
     if (!remConfig.allDay) {
       const workStart = remConfig.workHoursStart ?? 9;
       const workEnd = remConfig.workHoursEnd ?? 18;
-      const timezone = (device?.settingsJson?.timezone as string | undefined) ?? 'Asia/Jakarta';
+      const timezone =
+        (device?.settingsJson?.timezone as string | undefined) ??
+        'Asia/Jakarta';
       const hour = parseInt(
-        new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour: 'numeric', hour12: false })
+        new Intl.DateTimeFormat('en-US', {
+          timeZone: timezone,
+          hour: 'numeric',
+          hour12: false,
+        })
           .formatToParts(new Date())
           .find((p) => p.type === 'hour')!.value,
         10,
@@ -176,7 +202,11 @@ export class SchedulerService implements OnModuleInit {
     // Refresh weather first (so we have data for the initial sync)
     const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
     const settings = device?.settingsJson ?? {};
-    if (settings.integrations_weather && settings.latitude && settings.longitude) {
+    if (
+      settings.integrations_weather &&
+      settings.latitude &&
+      settings.longitude
+    ) {
       await this.ai.refreshWeather(settings.latitude, settings.longitude);
     }
 
@@ -196,37 +226,44 @@ export class SchedulerService implements OnModuleInit {
     const session = this.sessions.get(deviceId);
     if (!session) return;
 
-    const device = this.devicesRepo.findOne({ where: { id: deviceId } }).then((dev) => {
-      const settings = dev?.settingsJson ?? {};
-      const tz = settings.timezone as string | undefined;
+    const device = this.devicesRepo
+      .findOne({ where: { id: deviceId } })
+      .then((dev) => {
+        const settings = dev?.settingsJson ?? {};
+        const tz = settings.timezone as string | undefined;
 
-      const payload: Record<string, any> = {};
+        const payload: Record<string, any> = {};
 
-      if (settings.integrations_weather) {
-        // Refresh weather in background (cached, won't re-fetch if fresh)
-        if (settings.latitude && settings.longitude) {
-          this.ai.refreshWeather(settings.latitude, settings.longitude).catch(() => {});
+        if (settings.integrations_weather) {
+          // Refresh weather in background (cached, won't re-fetch if fresh)
+          if (settings.latitude && settings.longitude) {
+            this.ai
+              .refreshWeather(settings.latitude, settings.longitude)
+              .catch(() => {});
+          }
+
+          const weather = this.ai.getWeatherData();
+          if (weather) {
+            payload.weather = weather.description;
+            payload.temp = weather.temp;
+            payload.humidity = weather.humidity;
+            payload.weatherCode = weather.weatherCode;
+          }
         }
 
-        const weather = this.ai.getWeatherData();
-        if (weather) {
-          payload.weather = weather.description;
-          payload.temp = weather.temp;
-          payload.humidity = weather.humidity;
-          payload.weatherCode = weather.weatherCode;
-        }
-      }
+        // Capture time as late as possible — right before sending — so it's as fresh as it can be
+        const { time, date } = this.ai.formatTimeForDevice(tz);
+        payload.time = time;
+        payload.date = date;
 
-      // Capture time as late as possible — right before sending — so it's as fresh as it can be
-      const { time, date } = this.ai.formatTimeForDevice(tz);
-      payload.time = time;
-      payload.date = date;
-
-      this.sendToDevice(deviceId, 'context:sync', payload);
-      this.logger.debug(`Context sync sent to ${deviceId}: ${time}, ${payload.weather ?? 'no weather'}`);
-    }).catch((err: any) => {
-      this.logger.warn(`Context sync failed for ${deviceId}: ${err.message}`);
-    });
+        this.sendToDevice(deviceId, 'context:sync', payload);
+        this.logger.debug(
+          `Context sync sent to ${deviceId}: ${time}, ${payload.weather ?? 'no weather'}`,
+        );
+      })
+      .catch((err: any) => {
+        this.logger.warn(`Context sync failed for ${deviceId}: ${err.message}`);
+      });
   }
 
   // ── Focus mode ───────────────────────────────────────
@@ -296,9 +333,13 @@ export class SchedulerService implements OnModuleInit {
   async handlePoolRefill() {
     // Refill pools for all connected devices
     for (const deviceId of this.deviceTimers.keys()) {
-      this.responsePool.refillIfNeeded(deviceId).catch((err) =>
-        this.logger.warn(`Pool refill failed for ${deviceId}: ${err.message}`),
-      );
+      this.responsePool
+        .refillIfNeeded(deviceId)
+        .catch((err) =>
+          this.logger.warn(
+            `Pool refill failed for ${deviceId}: ${err.message}`,
+          ),
+        );
     }
   }
 }

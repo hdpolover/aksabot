@@ -34,7 +34,10 @@ export class MoodJournalService {
    * Analyze today's conversations for a device and extract an overall mood.
    * Stores one entry per device per day (upserts on conflict).
    */
-  async extractDailyMood(deviceId: string, timezone?: string): Promise<MoodEntry | null> {
+  async extractDailyMood(
+    deviceId: string,
+    timezone?: string,
+  ): Promise<MoodEntry | null> {
     const tz = timezone || process.env.TZ || 'Asia/Jakarta';
     const today = new Date().toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
 
@@ -59,7 +62,9 @@ export class MoodJournalService {
     });
 
     if (conversations.length === 0) {
-      this.logger.debug(`No conversations for ${deviceId} on ${today} — skipping mood extraction`);
+      this.logger.debug(
+        `No conversations for ${deviceId} on ${today} — skipping mood extraction`,
+      );
       return null;
     }
 
@@ -70,14 +75,18 @@ export class MoodJournalService {
         where: { conversationId: conv.id },
         order: { createdAt: 'ASC' },
       });
-      allMessages.push(...messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })));
+      allMessages.push(
+        ...messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+      );
     }
 
     if (allMessages.length < 2) {
-      this.logger.debug(`Too few messages for ${deviceId} on ${today} — skipping mood extraction`);
+      this.logger.debug(
+        `Too few messages for ${deviceId} on ${today} — skipping mood extraction`,
+      );
       return null;
     }
 
@@ -88,7 +97,7 @@ export class MoodJournalService {
 
     try {
       const { text } = await this.llm.generate(
-        'You are a mood analysis system. Analyze conversations and determine the user\'s overall mood for the day. Return ONLY valid JSON — no markdown, no code fences.',
+        "You are a mood analysis system. Analyze conversations and determine the user's overall mood for the day. Return ONLY valid JSON — no markdown, no code fences.",
         [
           {
             role: 'user',
@@ -115,15 +124,21 @@ ${transcript}`,
       });
 
       const saved = await this.moodRepo.save(entry);
-      this.logger.log(`Mood for ${deviceId} on ${today}: ${saved.mood} — ${saved.note}`);
+      this.logger.log(
+        `Mood for ${deviceId} on ${today}: ${saved.mood} — ${saved.note}`,
+      );
       return saved;
     } catch (err: any) {
-      this.logger.warn(`Mood extraction failed for ${deviceId}: ${err.message}`);
+      this.logger.warn(
+        `Mood extraction failed for ${deviceId}: ${err.message}`,
+      );
       return null;
     }
   }
 
-  private parseMoodResponse(raw: string): { mood: string; note: string } | null {
+  private parseMoodResponse(
+    raw: string,
+  ): { mood: string; note: string } | null {
     try {
       let cleaned = raw
         .replace(/```json\s*/gi, '')
@@ -148,7 +163,9 @@ ${transcript}`,
         note: typeof parsed.note === 'string' ? parsed.note.trim() : '',
       };
     } catch (err: any) {
-      this.logger.warn(`Failed to parse mood response: ${err.message} | Raw: ${raw.slice(0, 200)}`);
+      this.logger.warn(
+        `Failed to parse mood response: ${err.message} | Raw: ${raw.slice(0, 200)}`,
+      );
       return null;
     }
   }

@@ -14,7 +14,13 @@ import { DevicesController } from './devices.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Device, Conversation, Message, Memory, ResponsePool]),
+    TypeOrmModule.forFeature([
+      Device,
+      Conversation,
+      Message,
+      Memory,
+      ResponsePool,
+    ]),
     GatewayModule,
     AiModule,
   ],

@@ -15,7 +15,8 @@ export class EmailService {
     const pass = config.get<string>('SMTP_PASS');
     const port = config.get<number>('SMTP_PORT') ?? 587;
 
-    this.from = config.get<string>('SMTP_FROM') ?? 'Aksabot <no-reply@aksabot.app>';
+    this.from =
+      config.get<string>('SMTP_FROM') ?? 'Aksabot <no-reply@aksabot.app>';
     this.configured = !!(host && user && pass);
 
     if (this.configured) {
@@ -42,7 +43,9 @@ export class EmailService {
     code: string,
     expiresAt: Date,
   ): Promise<void> {
-    const expiryMinutes = Math.round((expiresAt.getTime() - Date.now()) / 60_000);
+    const expiryMinutes = Math.round(
+      (expiresAt.getTime() - Date.now()) / 60_000,
+    );
     const subject = 'Your Aksabot password reset code';
     const text = [
       `Hi,`,
@@ -60,7 +63,9 @@ export class EmailService {
 
     if (!this.configured || !this.transporter) {
       // Dev fallback — code is visible in server logs
-      this.logger.log(`[DEV] Password reset email to ${to} — code: ${code} (expires ${expiresAt.toISOString()})`);
+      this.logger.log(
+        `[DEV] Password reset email to ${to} — code: ${code} (expires ${expiresAt.toISOString()})`,
+      );
       return;
     }
 
@@ -73,7 +78,9 @@ export class EmailService {
       });
       this.logger.log(`Password reset email sent to ${to}`);
     } catch (err) {
-      this.logger.error(`Failed to send password reset email to ${to}: ${(err as Error).message}`);
+      this.logger.error(
+        `Failed to send password reset email to ${to}: ${(err as Error).message}`,
+      );
       // Don't rethrow — the code is stored in DB, user can retry or check via support
     }
   }

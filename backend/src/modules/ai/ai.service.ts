@@ -10,7 +10,11 @@ import {
 import type { ISttProvider, SttStream, SttOptions } from './interfaces';
 import type { ILlmProvider } from './interfaces';
 import type { ITtsProvider, TtsOptions } from './interfaces';
-import type { ContextInfo, MoodHistoryEntry, WeatherData } from './prompt.service';
+import type {
+  ContextInfo,
+  MoodHistoryEntry,
+  WeatherData,
+} from './prompt.service';
 import type { IAudioCodec } from './interfaces';
 import type { ITtsCache } from './interfaces/tts-cache.interface';
 import { PromptService } from './prompt.service';
@@ -24,7 +28,13 @@ export interface CacheEntry {
 
 export type PipelineEvent =
   | { type: 'text'; text: string; emotion?: string; sfx?: string }
-  | { type: 'audio'; data: Buffer; cacheKey?: string; emotion?: string; sfx?: string }
+  | {
+      type: 'audio';
+      data: Buffer;
+      cacheKey?: string;
+      emotion?: string;
+      sfx?: string;
+    }
   | { type: 'done'; fullText: string; cacheKeys: CacheEntry[] };
 
 // Known emotion tags → ESP32 expression mapping
@@ -52,7 +62,11 @@ const EMOTION_MAP: Record<string, string> = {
   teasing: 'sarcastic',
 };
 
-function extractEmotion(sentence: string): { text: string; emotion?: string; sfx?: string } {
+function extractEmotion(sentence: string): {
+  text: string;
+  emotion?: string;
+  sfx?: string;
+} {
   // Match [sfx:clipname] tags first (e.g. [sfx:rimshot])
   const sfxMatch = sentence.match(/\[\s*sfx:(\w+)\s*\]/i);
   const sfx = sfxMatch ? sfxMatch[1].toLowerCase() : undefined;
@@ -78,19 +92,25 @@ function extractEmotion(sentence: string): { text: string; emotion?: string; sfx
 }
 
 // Per-emotion TTS voice adjustments (speed + stability modulation)
-const EMOTION_VOICE_MODS: Record<string, { speedMul: number; stabilityMul: number }> = {
-  excited:     { speedMul: 1.15, stabilityMul: 0.7 },   // Faster, more expressive
-  happy:       { speedMul: 1.05, stabilityMul: 0.8 },   // Slightly faster, lively
-  sarcastic:   { speedMul: 0.95, stabilityMul: 0.6 },   // Slightly slower, very variable
-  calm:        { speedMul: 0.90, stabilityMul: 1.0 },   // Slower, stable
-  sympathetic: { speedMul: 0.90, stabilityMul: 0.9 },   // Slower, gentle
-  sad:         { speedMul: 0.85, stabilityMul: 0.9 },   // Slowest, subdued
-  focused:     { speedMul: 1.00, stabilityMul: 1.0 },   // Normal, precise
-  confused:    { speedMul: 0.95, stabilityMul: 0.7 },   // Slightly slower, uncertain
-  neutral:     { speedMul: 1.00, stabilityMul: 1.0 },   // No change
+const EMOTION_VOICE_MODS: Record<
+  string,
+  { speedMul: number; stabilityMul: number }
+> = {
+  excited: { speedMul: 1.15, stabilityMul: 0.7 }, // Faster, more expressive
+  happy: { speedMul: 1.05, stabilityMul: 0.8 }, // Slightly faster, lively
+  sarcastic: { speedMul: 0.95, stabilityMul: 0.6 }, // Slightly slower, very variable
+  calm: { speedMul: 0.9, stabilityMul: 1.0 }, // Slower, stable
+  sympathetic: { speedMul: 0.9, stabilityMul: 0.9 }, // Slower, gentle
+  sad: { speedMul: 0.85, stabilityMul: 0.9 }, // Slowest, subdued
+  focused: { speedMul: 1.0, stabilityMul: 1.0 }, // Normal, precise
+  confused: { speedMul: 0.95, stabilityMul: 0.7 }, // Slightly slower, uncertain
+  neutral: { speedMul: 1.0, stabilityMul: 1.0 }, // No change
 };
 
-function applyEmotionToVoice(base: TtsOptions | undefined, emotion?: string): TtsOptions {
+function applyEmotionToVoice(
+  base: TtsOptions | undefined,
+  emotion?: string,
+): TtsOptions {
   const opts: TtsOptions = { ...base };
   if (!emotion) return opts;
   const mod = EMOTION_VOICE_MODS[emotion];
@@ -98,10 +118,10 @@ function applyEmotionToVoice(base: TtsOptions | undefined, emotion?: string): Tt
   opts.speed = (opts.speed ?? 0.7) * mod.speedMul;
   opts.stability = (opts.stability ?? 0.6) * mod.stabilityMul;
   // Clamp to ElevenLabs ranges
-  if (opts.speed! < 0.5) opts.speed = 0.5;
-  if (opts.speed! > 1.5) opts.speed = 1.5;
-  if (opts.stability! < 0.0) opts.stability = 0.0;
-  if (opts.stability! > 1.0) opts.stability = 1.0;
+  if (opts.speed < 0.5) opts.speed = 0.5;
+  if (opts.speed > 1.5) opts.speed = 1.5;
+  if (opts.stability < 0.0) opts.stability = 0.0;
+  if (opts.stability > 1.0) opts.stability = 1.0;
   return opts;
 }
 
@@ -126,7 +146,10 @@ export class AiService {
     return this.stt.transcribe(pcmAudio, options);
   }
 
-  generateOnce(systemPrompt: string, messages: { role: 'user' | 'assistant'; content: string }[]) {
+  generateOnce(
+    systemPrompt: string,
+    messages: { role: 'user' | 'assistant'; content: string }[],
+  ) {
     return this.llm.generate(systemPrompt, messages);
   }
 
@@ -173,7 +196,10 @@ export class AiService {
     signal?: AbortSignal,
   ): Promise<{ opusAudio: Buffer; pcmAudio: Buffer; cacheKey: string }> {
     // Only override language if explicitly provided — don't clobber voiceOptions.language with undefined
-    const ttsOpts: TtsOptions = { ...voiceOptions, ...(language !== undefined ? { language } : {}) };
+    const ttsOpts: TtsOptions = {
+      ...voiceOptions,
+      ...(language !== undefined ? { language } : {}),
+    };
     const cacheKey = this.ttsCacheKey(sentence, ttsOpts);
 
     // Check cache (cache hits are instant, signal not needed)
@@ -191,9 +217,11 @@ export class AiService {
 
     // Store in cache (non-blocking)
     if (this.ttsCache) {
-      this.ttsCache.set(cacheKey, opusAudio).catch((err) =>
-        this.logger.warn(`TTS cache store failed: ${err.message}`),
-      );
+      this.ttsCache
+        .set(cacheKey, opusAudio)
+        .catch((err) =>
+          this.logger.warn(`TTS cache store failed: ${err.message}`),
+        );
     }
 
     return { opusAudio, pcmAudio, cacheKey };
@@ -213,9 +241,14 @@ export class AiService {
     voiceOptions?: TtsOptions,
     context?: ContextInfo,
     moodHistory?: MoodHistoryEntry[],
+    ttsEnabled = true,
     signal?: AbortSignal,
   ): AsyncGenerator<PipelineEvent> {
-    const systemPrompt = this.prompt.buildSystemPrompt(memories, context, moodHistory);
+    const systemPrompt = this.prompt.buildSystemPrompt(
+      memories,
+      context,
+      moodHistory,
+    );
     const messages = this.prompt.buildMessages(history, transcript);
 
     const sentenceBuffer = new SentenceBuffer();
@@ -233,18 +266,22 @@ export class AiService {
       if (rawSentence) {
         if (signal?.aborted) return;
         const { text: cleanText, emotion, sfx } = extractEmotion(rawSentence);
-        const emotionVoice = applyEmotionToVoice(voiceOptions, emotion);
-        // synthesizeWithCache passes signal to fetch — aborts the HTTP request if cancelled
-        const { opusAudio, cacheKey } = await this.synthesizeWithCache(
-          cleanText,
-          undefined,
-          emotionVoice,
-          signal,
-        );
-        cacheKeys.push({ hash: cacheKey, sentence: cleanText });
 
+        // Text event always sent — device uses it for transcript overlay and face expressions
         yield { type: 'text', text: cleanText, emotion, sfx };
-        yield { type: 'audio', data: opusAudio, cacheKey, emotion, sfx };
+
+        if (ttsEnabled) {
+          const emotionVoice = applyEmotionToVoice(voiceOptions, emotion);
+          // synthesizeWithCache passes signal to fetch — aborts the HTTP request if cancelled
+          const { opusAudio, cacheKey } = await this.synthesizeWithCache(
+            cleanText,
+            undefined,
+            emotionVoice,
+            signal,
+          );
+          cacheKeys.push({ hash: cacheKey, sentence: cleanText });
+          yield { type: 'audio', data: opusAudio, cacheKey, emotion, sfx };
+        }
       }
     }
 
@@ -253,17 +290,20 @@ export class AiService {
     const remaining = sentenceBuffer.flush();
     if (remaining) {
       const { text: cleanText, emotion, sfx } = extractEmotion(remaining);
-      const emotionVoice = applyEmotionToVoice(voiceOptions, emotion);
-      const { opusAudio, cacheKey } = await this.synthesizeWithCache(
-        cleanText,
-        undefined,
-        emotionVoice,
-        signal,
-      );
-      cacheKeys.push({ hash: cacheKey, sentence: cleanText });
 
       yield { type: 'text', text: cleanText, emotion, sfx };
-      yield { type: 'audio', data: opusAudio, cacheKey, emotion, sfx };
+
+      if (ttsEnabled) {
+        const emotionVoice = applyEmotionToVoice(voiceOptions, emotion);
+        const { opusAudio, cacheKey } = await this.synthesizeWithCache(
+          cleanText,
+          undefined,
+          emotionVoice,
+          signal,
+        );
+        cacheKeys.push({ hash: cacheKey, sentence: cleanText });
+        yield { type: 'audio', data: opusAudio, cacheKey, emotion, sfx };
+      }
     }
 
     yield { type: 'done', fullText: fullResponseText, cacheKeys };

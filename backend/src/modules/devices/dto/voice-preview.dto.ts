@@ -1,4 +1,12 @@
-import { IsIn, IsNumber, IsOptional, IsString, MaxLength, Min, Max } from 'class-validator';
+import {
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  Max,
+} from 'class-validator';
 
 export class VoicePreviewDto {
   @IsIn(['en', 'id'])

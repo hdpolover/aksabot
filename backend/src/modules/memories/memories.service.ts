@@ -101,9 +101,7 @@ export class MemoriesService {
     }
 
     // Find the last user message to link as source
-    const lastUserMessage = messages
-      .filter((m) => m.role === 'user')
-      .pop();
+    const lastUserMessage = messages.filter((m) => m.role === 'user').pop();
 
     // Save new memories
     const newMemories = extracted.map((e) =>
@@ -158,7 +156,9 @@ export class MemoriesService {
       }
     }
 
-    this.logger.log(`Scan complete: ${scanned} conversations, ${extracted} new memories`);
+    this.logger.log(
+      `Scan complete: ${scanned} conversations, ${extracted} new memories`,
+    );
     return { scanned, extracted };
   }
 
@@ -173,7 +173,10 @@ export class MemoriesService {
     });
 
     if (conversations.length === 0) {
-      return { error: 'No conversations found for this device', conversations: [] };
+      return {
+        error: 'No conversations found for this device',
+        conversations: [],
+      };
     }
 
     // Check message counts for each

@@ -58,9 +58,7 @@ async function post(
 
   const json = await res.json();
   if (!res.ok) {
-    throw new Error(
-      `${res.status} ${endpoint}: ${JSON.stringify(json)}`,
-    );
+    throw new Error(`${res.status} ${endpoint}: ${JSON.stringify(json)}`);
   }
   return json;
 }
@@ -70,9 +68,7 @@ async function post(
 async function loadOrCreateState(): Promise<SavedState> {
   // Try loading existing state
   if (fs.existsSync(STATE_FILE)) {
-    const saved: SavedState = JSON.parse(
-      fs.readFileSync(STATE_FILE, 'utf-8'),
-    );
+    const saved: SavedState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
     // Verify token still works by refreshing
     try {
       const refreshRes = await post('/auth/refresh', {
@@ -81,7 +77,10 @@ async function loadOrCreateState(): Promise<SavedState> {
       saved.accessToken = refreshRes.data.accessToken;
       saved.refreshToken = refreshRes.data.refreshToken;
       fs.writeFileSync(STATE_FILE, JSON.stringify(saved, null, 2));
-      log('info', `Reusing saved state (user: ${saved.userId}, device: ${saved.deviceId})`);
+      log(
+        'info',
+        `Reusing saved state (user: ${saved.userId}, device: ${saved.deviceId})`,
+      );
       return saved;
     } catch {
       log('warn', 'Saved state expired, re-creating...');
@@ -173,8 +172,8 @@ function writeWavHeader(pcmLength: number): Buffer {
   header.writeUInt32LE(36 + pcmLength, 4);
   header.write('WAVE', 8);
   header.write('fmt ', 12);
-  header.writeUInt32LE(16, 16);        // chunk size
-  header.writeUInt16LE(1, 20);         // PCM format
+  header.writeUInt32LE(16, 16); // chunk size
+  header.writeUInt16LE(1, 20); // PCM format
   header.writeUInt16LE(channels, 22);
   header.writeUInt32LE(sampleRate, 24);
   header.writeUInt32LE(byteRate, 28);
@@ -282,7 +281,7 @@ function attachListeners(ws: WebSocket) {
           log('stt', `(final) ${data.text}`);
           break;
         case 'response:start':
-          responseAudioChunks = [];  // reset for new response
+          responseAudioChunks = []; // reset for new response
           log('recv', `Response started (${data.type})`);
           break;
         case 'response:text':
@@ -354,7 +353,10 @@ function sendAudioFile(ws: WebSocket, filePath: string) {
   const isPcm = absolutePath.endsWith('.pcm');
 
   if (!isPcm) {
-    log('error', 'Only .pcm files supported. Convert with: ffmpeg -i input.m4a -ar 16000 -ac 1 -f s16le output.pcm');
+    log(
+      'error',
+      'Only .pcm files supported. Convert with: ffmpeg -i input.m4a -ar 16000 -ac 1 -f s16le output.pcm',
+    );
     return;
   }
 
@@ -364,7 +366,10 @@ function sendAudioFile(ws: WebSocket, filePath: string) {
   const totalFrames = Math.floor(audioData.length / FRAME_BYTES);
   const durationMs = totalFrames * 20;
 
-  log('info', `Sending ${absolutePath} (${totalFrames} frames, ~${(durationMs / 1000).toFixed(1)}s)`);
+  log(
+    'info',
+    `Sending ${absolutePath} (${totalFrames} frames, ~${(durationMs / 1000).toFixed(1)}s)`,
+  );
 
   sendEvent(ws, 'audio:start');
 
@@ -471,15 +476,15 @@ function startRepl(ws: WebSocket) {
 // ── Logging ─────────────────────────────────────────────────────
 
 const COLORS = {
-  ok: '\x1b[32m',    // green
-  info: '\x1b[36m',  // cyan
-  warn: '\x1b[33m',  // yellow
+  ok: '\x1b[32m', // green
+  info: '\x1b[36m', // cyan
+  warn: '\x1b[33m', // yellow
   error: '\x1b[31m', // red
-  send: '\x1b[35m',  // magenta
-  recv: '\x1b[34m',  // blue
+  send: '\x1b[35m', // magenta
+  recv: '\x1b[34m', // blue
   state: '\x1b[33m', // yellow
-  stt: '\x1b[36m',   // cyan
-  llm: '\x1b[32m',   // green
+  stt: '\x1b[36m', // cyan
+  llm: '\x1b[32m', // green
   reset: '\x1b[0m',
 };
 
@@ -507,7 +512,9 @@ async function main() {
       console.log('\nDevice token for manual testing:');
       console.log(`  ${state.deviceToken}\n`);
       console.log('WebSocket connection:');
-      console.log(`  wscat -c ${WS_URL} -H "Authorization: DeviceToken ${state.deviceToken}"\n`);
+      console.log(
+        `  wscat -c ${WS_URL} -H "Authorization: DeviceToken ${state.deviceToken}"\n`,
+      );
       return;
     }
 

@@ -26,6 +26,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
   double _volume = 70;
   double _brightness = 70;
   bool _showTranscript = false;
+  bool _ttsEnabled = true;
   String _idleTimeout = '30';
 
 
@@ -53,11 +54,13 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
         final vol = (s['volume'] as num?)?.toDouble();
         final br = (s['brightness'] as num?)?.toDouble();
         final tr = s['display_transcript'] as bool?;
+        final tts = s['tts_enabled'] as bool?;
         final minutes = timeoutSec != null ? (timeoutSec ~/ 60) : 30;
         setState(() {
           _volume = vol ?? 70;
           _brightness = br ?? 70;
           _showTranscript = tr ?? false;
+          _ttsEnabled = tts ?? true;
           _idleTimeout =
               const ['1', '5', '10', '30'].contains(minutes.toString())
                   ? minutes.toString()
@@ -78,6 +81,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
       'volume': _volume.round(),
       'brightness': _brightness.round(),
       'display_transcript': _showTranscript,
+      'tts_enabled': _ttsEnabled,
       'idle_timeout_seconds': int.parse(_idleTimeout) * 60,
     });
     if (!mounted) return;
@@ -201,6 +205,26 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
                         value: _showTranscript,
                         onChanged: (v) =>
                             setState(() => _showTranscript = v),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Voice responses',
+                              style: theme.textTheme.bodyMedium),
+                          Text('Play audio via ElevenLabs TTS',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colors.onSurfaceVariant,
+                              )),
+                        ],
+                      ),
+                      Switch(
+                        value: _ttsEnabled,
+                        onChanged: (v) => setState(() => _ttsEnabled = v),
                       ),
                     ],
                   ),

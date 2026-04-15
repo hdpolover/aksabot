@@ -32,7 +32,11 @@ export class SessionManager {
   /** Default idle timeout before ending a conversation (5 minutes). */
   private readonly IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
-  create(deviceId: string, userId: string, language: 'en' | 'id' = 'en'): DeviceSession {
+  create(
+    deviceId: string,
+    userId: string,
+    language: 'en' | 'id' = 'en',
+  ): DeviceSession {
     const session: DeviceSession = {
       deviceId,
       userId,
@@ -81,11 +85,7 @@ export class SessionManager {
   }
 
   /** Start (or reset) the per-stream watchdog. If no audio arrives within ms, calls onTimeout. */
-  resetSttIdleTimer(
-    deviceId: string,
-    ms: number,
-    onTimeout: () => void,
-  ): void {
+  resetSttIdleTimer(deviceId: string, ms: number, onTimeout: () => void): void {
     const session = this.sessions.get(deviceId);
     if (!session) return;
     this.clearSttIdleTimer(session);
@@ -95,8 +95,7 @@ export class SessionManager {
   clearSttIdleTimer(deviceId: string): void;
   clearSttIdleTimer(session: DeviceSession): void;
   clearSttIdleTimer(arg: string | DeviceSession): void {
-    const session =
-      typeof arg === 'string' ? this.sessions.get(arg) : arg;
+    const session = typeof arg === 'string' ? this.sessions.get(arg) : arg;
     if (!session) return;
     if (session.sttIdleTimer) {
       clearTimeout(session.sttIdleTimer);
@@ -104,10 +103,7 @@ export class SessionManager {
     }
   }
 
-  setState(
-    deviceId: string,
-    state: DeviceSession['state'],
-  ): void {
+  setState(deviceId: string, state: DeviceSession['state']): void {
     const session = this.sessions.get(deviceId);
     if (session) session.state = state;
   }

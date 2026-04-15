@@ -28,7 +28,9 @@ export class MemoriesController {
     @Param('deviceId', ParseUUIDPipe) deviceId: string,
     @Body('conversationId') conversationId: string,
   ) {
-    this.logger.log(`Manual extraction for device ${deviceId}, conversation ${conversationId}`);
+    this.logger.log(
+      `Manual extraction for device ${deviceId}, conversation ${conversationId}`,
+    );
     const memories = await this.memoriesService.extractFromConversation(
       conversationId,
       deviceId,
@@ -41,9 +43,7 @@ export class MemoriesController {
    * Safe to call multiple times — extractor deduplicates against existing memories.
    */
   @Post('devices/:deviceId/memories/scan')
-  async scanAll(
-    @Param('deviceId', ParseUUIDPipe) deviceId: string,
-  ) {
+  async scanAll(@Param('deviceId', ParseUUIDPipe) deviceId: string) {
     this.logger.log(`Memory scan triggered for device ${deviceId}`);
     return this.memoriesService.scanAllConversations(deviceId);
   }
@@ -53,10 +53,9 @@ export class MemoriesController {
    * Hit this to test extraction without needing to know a conversation ID.
    */
   @Post('devices/:deviceId/memories/extract-latest')
-  async extractFromLatest(
-    @Param('deviceId', ParseUUIDPipe) deviceId: string,
-  ) {
-    const result = await this.memoriesService.extractFromLatestConversation(deviceId);
+  async extractFromLatest(@Param('deviceId', ParseUUIDPipe) deviceId: string) {
+    const result =
+      await this.memoriesService.extractFromLatestConversation(deviceId);
     return result;
   }
 
@@ -69,10 +68,7 @@ export class MemoriesController {
   }
 
   @Put('memories/:id')
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateMemoryDto,
-  ) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateMemoryDto) {
     return this.memoriesService.update(id, dto);
   }
 

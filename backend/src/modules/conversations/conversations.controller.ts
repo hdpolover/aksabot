@@ -17,9 +17,7 @@ import { ConversationsService } from './conversations.service';
 @Controller()
 @UseGuards(JwtAuthGuard)
 export class ConversationsController {
-  constructor(
-    private readonly conversationsService: ConversationsService,
-  ) {}
+  constructor(private readonly conversationsService: ConversationsService) {}
 
   @Get('devices/:deviceId/conversations')
   findByDevice(

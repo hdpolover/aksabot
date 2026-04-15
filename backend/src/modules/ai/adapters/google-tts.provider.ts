@@ -12,7 +12,11 @@ export class GoogleTtsProvider implements ITtsProvider {
 
   // signal is accepted to satisfy the ITtsProvider interface but Google Cloud
   // client library does not expose request-level abort — ignored here.
-  async synthesize(text: string, options?: TtsOptions, _signal?: AbortSignal): Promise<Buffer> {
+  async synthesize(
+    text: string,
+    options?: TtsOptions,
+    _signal?: AbortSignal,
+  ): Promise<Buffer> {
     const [response] = await this.client.synthesizeSpeech({
       input: { text },
       voice: {
@@ -23,8 +27,8 @@ export class GoogleTtsProvider implements ITtsProvider {
       audioConfig: {
         audioEncoding: 'LINEAR16' as const,
         sampleRateHertz: 16000,
-        pitch: 3.0,          // slightly higher — gives a compact, robotic quality
-        speakingRate: 1.1,   // slightly fast — crisp, bot-like cadence
+        pitch: 3.0, // slightly higher — gives a compact, robotic quality
+        speakingRate: 1.1, // slightly fast — crisp, bot-like cadence
       },
     });
 

@@ -15,7 +15,9 @@ async function bootstrap() {
     const start = Date.now();
     res.on('finish', () => {
       const ms = Date.now() - start;
-      httpLogger.log(`${req.method} ${req.originalUrl} → ${res.statusCode} (${ms}ms)`);
+      httpLogger.log(
+        `${req.method} ${req.originalUrl} → ${res.statusCode} (${ms}ms)`,
+      );
     });
     next();
   });

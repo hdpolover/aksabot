@@ -1,10 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import {
-  Conversation,
-  Message,
-  Device,
-} from '../../core/database/entities';
+import { Conversation, Message, Device } from '../../core/database/entities';
 import { AuthModule } from '../auth/auth.module';
 import { AiModule } from '../ai/ai.module';
 import { MemoriesModule } from '../memories/memories.module';
@@ -24,7 +20,14 @@ import { VoiceCommandService } from './voice-command.service';
     MemoriesModule,
     forwardRef(() => SchedulerModule),
   ],
-  providers: [AudioGateway, IntercomGateway, IntercomSessionService, SessionManager, ConversationPersistence, VoiceCommandService],
+  providers: [
+    AudioGateway,
+    IntercomGateway,
+    IntercomSessionService,
+    SessionManager,
+    ConversationPersistence,
+    VoiceCommandService,
+  ],
   exports: [AudioGateway, SessionManager],
 })
 export class GatewayModule {}

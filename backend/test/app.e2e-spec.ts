@@ -86,7 +86,7 @@ const store = {
 
 function makeRepo<T extends { id: string }>(dataMap: Map<string, T>) {
   return {
-    create: (partial: Partial<T>) => ({ ...partial } as T),
+    create: (partial: Partial<T>) => ({ ...partial }) as T,
     save: jest.fn(async (entity: T) => {
       if (!entity.id) (entity as any).id = randomUUID();
       dataMap.set(entity.id, entity);
@@ -217,7 +217,8 @@ class MockMemoriesService {
   }
 
   async remove(id: string) {
-    if (!store.memories.has(id)) throw new NotFoundException('Memory not found');
+    if (!store.memories.has(id))
+      throw new NotFoundException('Memory not found');
     store.memories.delete(id);
   }
 }
@@ -245,14 +246,17 @@ class MockMemoriesService {
       ],
       // Skip schema validation — required vars have defaults above
       ignoreEnvFile: true,
-      validate: () => ({} as any),
+      validate: () => ({}) as any,
     }),
     ScheduleModule.forRoot(),
     PassportModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (cfg: ConfigService) => ({
-        secret: cfg.get<string>('JWT_SECRET', 'e2e-test-secret-do-not-use-in-prod'),
+        secret: cfg.get<string>(
+          'JWT_SECRET',
+          'e2e-test-secret-do-not-use-in-prod',
+        ),
         signOptions: { expiresIn: '15m' },
       }),
     }),
@@ -573,7 +577,10 @@ describe('Aksabot API (E2E)', () => {
       });
 
       it('should reject unauthenticated requests (401)', async () => {
-        await request(app.getHttpServer()).post('/devices').send({}).expect(401);
+        await request(app.getHttpServer())
+          .post('/devices')
+          .send({})
+          .expect(401);
       });
     });
 
@@ -896,7 +903,9 @@ describe('Aksabot API (E2E)', () => {
           .set('Authorization', bearer(accessToken))
           .expect(200);
 
-        expect(res.body.data.every((m: any) => m.category === 'preference')).toBe(true);
+        expect(
+          res.body.data.every((m: any) => m.category === 'preference'),
+        ).toBe(true);
       });
 
       it('should reject unauthenticated requests (401)', async () => {
@@ -954,12 +963,16 @@ describe('Aksabot API (E2E)', () => {
 
     beforeAll(async () => {
       const [resA, resB] = await Promise.all([
-        request(app.getHttpServer())
-          .post('/auth/register')
-          .send({ email: testEmail(), password: 'UserA1234!!', name: 'User A' }),
-        request(app.getHttpServer())
-          .post('/auth/register')
-          .send({ email: testEmail(), password: 'UserB1234!!', name: 'User B' }),
+        request(app.getHttpServer()).post('/auth/register').send({
+          email: testEmail(),
+          password: 'UserA1234!!',
+          name: 'User A',
+        }),
+        request(app.getHttpServer()).post('/auth/register').send({
+          email: testEmail(),
+          password: 'UserB1234!!',
+          name: 'User B',
+        }),
       ]);
       tokenA = resA.body.data.accessToken;
       tokenB = resB.body.data.accessToken;

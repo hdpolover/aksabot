@@ -1,6 +1,12 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { RegisterDto, LoginDto, RefreshDto, ForgotPasswordDto, ResetPasswordDto } from './dto';
+import {
+  RegisterDto,
+  LoginDto,
+  RefreshDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
+} from './dto';
 import {
   RateLimit,
   RateLimitGuard,

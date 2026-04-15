@@ -20,10 +20,14 @@ describe('MemoriesService', () => {
     memoriesRepo = {
       find: jest.fn().mockResolvedValue([mockMemory]),
       findOne: jest.fn(),
-      create: jest.fn().mockImplementation((data) => ({ ...mockMemory, ...data })),
-      save: jest.fn().mockImplementation((data) =>
-        Array.isArray(data) ? Promise.resolve(data) : Promise.resolve(data),
-      ),
+      create: jest
+        .fn()
+        .mockImplementation((data) => ({ ...mockMemory, ...data })),
+      save: jest
+        .fn()
+        .mockImplementation((data) =>
+          Array.isArray(data) ? Promise.resolve(data) : Promise.resolve(data),
+        ),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
       createQueryBuilder: jest.fn().mockReturnValue({
         update: jest.fn().mockReturnThis(),
@@ -92,14 +96,27 @@ describe('MemoriesService', () => {
 
   describe('extractFromConversation', () => {
     it('returns empty for conversation with no messages', async () => {
-      const result = await service.extractFromConversation('conv-1', 'device-1');
+      const result = await service.extractFromConversation(
+        'conv-1',
+        'device-1',
+      );
       expect(result).toEqual([]);
     });
 
     it('extracts and saves memories', async () => {
       messagesRepo.find.mockResolvedValue([
-        { id: 'msg-1', role: 'user', content: 'I am a developer', createdAt: new Date() },
-        { id: 'msg-2', role: 'assistant', content: 'Cool!', createdAt: new Date() },
+        {
+          id: 'msg-1',
+          role: 'user',
+          content: 'I am a developer',
+          createdAt: new Date(),
+        },
+        {
+          id: 'msg-2',
+          role: 'assistant',
+          content: 'Cool!',
+          createdAt: new Date(),
+        },
       ]);
       memoriesRepo.find.mockResolvedValue([]); // no existing memories
       extractor.extractFromTranscript.mockResolvedValue([
@@ -156,9 +173,7 @@ describe('MemoriesService', () => {
 
     it('throws NotFoundException if not found', async () => {
       memoriesRepo.delete.mockResolvedValue({ affected: 0 });
-      await expect(service.remove('bad-id')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.remove('bad-id')).rejects.toThrow(NotFoundException);
     });
   });
 });

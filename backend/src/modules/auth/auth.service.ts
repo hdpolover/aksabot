@@ -12,7 +12,12 @@ import * as bcrypt from 'bcrypt';
 import { randomBytes, randomInt } from 'crypto';
 import { User } from '../../core/database/entities';
 import { Device } from '../../core/database/entities';
-import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto } from './dto';
+import {
+  RegisterDto,
+  LoginDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
+} from './dto';
 import { EmailService } from '../../core/email/email.service';
 
 export interface TokenPair {
@@ -101,7 +106,9 @@ export class AuthService {
     }
   }
 
-  async getProfile(userId: string): Promise<{ id: string; email: string; name: string }> {
+  async getProfile(
+    userId: string,
+  ): Promise<{ id: string; email: string; name: string }> {
     const user = await this.usersRepo.findOne({ where: { id: userId } });
     if (!user) {
       throw new UnauthorizedException('User not found');

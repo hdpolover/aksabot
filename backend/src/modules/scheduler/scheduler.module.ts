@@ -1,6 +1,12 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Device, ResponsePool, MoodEntry, Conversation, Message } from '../../core/database/entities';
+import {
+  Device,
+  ResponsePool,
+  MoodEntry,
+  Conversation,
+  Message,
+} from '../../core/database/entities';
 import { AiModule } from '../ai/ai.module';
 import { MemoriesModule } from '../memories/memories.module';
 import { GatewayModule } from '../gateway/gateway.module';
@@ -14,7 +20,13 @@ import { SchedulerController } from './scheduler.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ResponsePool, Device, MoodEntry, Conversation, Message]),
+    TypeOrmModule.forFeature([
+      ResponsePool,
+      Device,
+      MoodEntry,
+      Conversation,
+      Message,
+    ]),
     AiModule,
     MemoriesModule,
     forwardRef(() => GatewayModule),
@@ -28,6 +40,11 @@ import { SchedulerController } from './scheduler.controller';
     MoodJournalService,
     SchedulerService,
   ],
-  exports: [SchedulerService, PomodoroService, ProactiveService, MoodJournalService],
+  exports: [
+    SchedulerService,
+    PomodoroService,
+    ProactiveService,
+    MoodJournalService,
+  ],
 })
 export class SchedulerModule {}
