@@ -237,7 +237,10 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
             // Play MP3 audio if available
             if (data.audio != null && data.audio!.isNotEmpty) {
               final audioBytes = base64Decode(data.audio!);
-              _appReplyPlayer.play(BytesSource(Uint8List.fromList(audioBytes)));
+              _appReplyPlayer.play(BytesSource(
+                Uint8List.fromList(audioBytes),
+                mimeType: data.mimeType ?? 'audio/mpeg',
+              ));
             }
           } else {
             setState(() {

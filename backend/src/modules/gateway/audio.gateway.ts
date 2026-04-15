@@ -2040,7 +2040,9 @@ export class AudioGateway
     );
 
     // 6. Run LLM (text only, no TTS — we'll synthesize MP3 separately)
-    let fullText = '';
+    //    Collect cleaned text from 'text' events (emotion/sfx tags stripped)
+    //    rather than 'done.fullText' which is the raw LLM output with tags.
+    const cleanSentences: string[] = [];
     const pipeline = this.aiService.processTranscript(
       sttResult.transcript,
       memories,
@@ -2051,10 +2053,11 @@ export class AudioGateway
       false, // ttsEnabled = false
     );
     for await (const event of pipeline) {
-      if (event.type === 'done') {
-        fullText = event.fullText;
+      if (event.type === 'text') {
+        cleanSentences.push(event.text);
       }
     }
+    const fullText = cleanSentences.join(' ');
 
     if (!fullText) {
       return {
