@@ -312,13 +312,22 @@ static void imageDownloadTask(void* pvParams) {
     ImageDownloadParams* p = static_cast<ImageDownloadParams*>(pvParams);
     Serial.printf("[ImgDL] Task: downloading %s\n", p->url);
 
+    // Wait for the bot to finish speaking/thinking before disconnecting WS.
+    // Disconnecting mid-response aborts audio and wastes the LLM call.
+    for (int i = 0; i < 60; i++) {  // max 30s wait (60 × 500ms)
+        BotState st = appState.botState;
+        if (st == BotState::IDLE || st == BotState::OFFLINE || st == BotState::SLEEPING) break;
+        if (i == 0) Serial.println("[ImgDL] Waiting for bot to finish speaking...");
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
     // Two concurrent TLS sessions won't fit in internal DRAM.  The pre-compiled
     // libmbedtls.a uses hardware AES which calls heap_caps_malloc(MALLOC_CAP_DMA)
     // directly — can't be routed to PSRAM via sdkconfig or the mbedTLS allocator.
     //
     // Fix: temporarily disconnect the WebSocket (frees its TLS session + AES
     // contexts + socket buffers), download the image as the sole TLS user,
-    // then reconnect.  The WS auto-reconnect is robust and takes ~1-2s.
+    // then let the wsLoop poll task auto-reconnect.
     Serial.println("[ImgDL] Disconnecting WS to free TLS resources");
     s_silentReconnect = true;
     ws_client::waitForPollIdle();
@@ -335,9 +344,12 @@ static void imageDownloadTask(void* pvParams) {
         Serial.println("[ImgDL] Task: download failed");
     }
 
-    // Reconnect WebSocket
-    Serial.println("[ImgDL] Reconnecting WS");
-    ws_client::connect();
+    // Re-enable auto-reconnect — the wsLoop poll task will handle the actual
+    // connection on its next cycle. Don't call ws_client::connect() directly:
+    // it takes wsMutex, and releasing it from this task while wsLoop (same core,
+    // same priority) can be time-sliced in causes xTaskPriorityDisinherit assert.
+    Serial.println("[ImgDL] Re-enabling WS auto-reconnect");
+    ws_client::enableAutoReconnect();
 
     free(p);
     s_imageDownloading = false;

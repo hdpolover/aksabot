@@ -34,6 +34,12 @@ void waitForPollIdle(uint32_t timeoutMs = 500);
 /// Disconnect gracefully.
 void disconnect();
 
+/// Re-enable auto-reconnect without taking the mutex.
+/// Safe to call from any task — the wsLoop poll task will pick it up
+/// and reconnect on its next cycle. Use this instead of connect() when
+/// calling from a non-WS task to avoid mutex ownership conflicts.
+void enableAutoReconnect();
+
 /// Re-read device token and backend URL from NVS, then reconnect.
 /// Call after receiving a new token via device_server POST /token.
 void reconnectWithToken();

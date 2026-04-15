@@ -364,6 +364,14 @@ void ws_client::disconnect() {
     }
 }
 
+void ws_client::enableAutoReconnect() {
+    shouldReconnect = true;
+    // Don't take the mutex or call doConnect() — the wsLoop poll task
+    // will see shouldReconnect=true and handle reconnection naturally
+    // on its next cycle (~5ms). This avoids mutex ownership conflicts
+    // when called from non-WS tasks (e.g. imageDownloadTask).
+}
+
 void ws_client::reconnectWithToken() {
     if (!xSemaphoreTake(wsMutex, pdMS_TO_TICKS(3000))) {
         Serial.println("[WS] reconnectWithToken: mutex timeout");

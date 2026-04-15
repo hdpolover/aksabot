@@ -844,6 +844,15 @@ export class AudioGateway
     if (!session || session.state !== 'idle') return;
     if (this.sessions.isClockMode(deviceId)) return;
 
+    // 30% chance of commenting on the reconnect — keeps it fun without
+    // being annoying on flaky connections that drop frequently.
+    if (Math.random() > 0.3) {
+      this.logger.debug(
+        `Device ${deviceId} reconnect:back — skipped (probability roll)`,
+      );
+      return;
+    }
+
     // Skip if a connection greeting is already queued (from handleConnection)
     // Give 3s buffer for the greeting to fire first
     await new Promise((r) => setTimeout(r, 3000));
