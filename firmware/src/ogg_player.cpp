@@ -7,6 +7,7 @@
 #include <SD_MMC.h>
 #define SD SD_MMC
 #include <Arduino.h>
+#include <esp_heap_caps.h>
 
 // ── Streaming Ogg page reader ─────────────────────────────────────────────────
 //
@@ -14,7 +15,7 @@
 // An Ogg page is at most 65,536 bytes but in practice Opus pages are ~4 KB
 // (enough for ~250ms of 16kbps audio). We read the 27-byte fixed header, then
 // the segment table, then the page body.  Total heap for one page: ~8 KB max,
-// allocated statically so no fragmentation.
+// allocated once from PSRAM so no fragmentation.
 //
 // SDIO 4-bit throughput on ESP32-S3: ~20 MB/s.  A 4 KB page reads in < 0.5ms,
 // which is ~800× faster than the audio it contains (16 kbps ≈ 2 KB/s).
@@ -23,7 +24,7 @@
 static int16_t  s_pcm[OPUS_FRAME_SAMPLES];
 static uint8_t  s_pktBuf[512];   // max Opus packet at 16 kbps
 static uint8_t  s_segTable[255]; // Ogg segment table (up to 255 entries)
-static uint8_t  s_pageBody[65536]; // full page body — static, not stack
+static uint8_t* s_pageBody = nullptr; // 64KB page body — allocated from PSRAM in init()
 
 /// Decode and play all audio pages from an already-opened File.
 /// Caller is responsible for open/close and guard checks.
@@ -95,7 +96,19 @@ static void streamDecode(File& f) {
 
 // ── Public API ────────────────────────────────────────────
 
+void ogg_player::init() {
+    if (!s_pageBody) {
+        s_pageBody = (uint8_t*)heap_caps_malloc(65536, MALLOC_CAP_SPIRAM);
+        if (s_pageBody) {
+            Serial.println("[OggPlayer] Page buffer allocated (64 KB PSRAM)");
+        } else {
+            Serial.println("[OggPlayer] PSRAM alloc failed — Ogg playback disabled");
+        }
+    }
+}
+
 bool ogg_player::playFile(const char* path) {
+    if (!s_pageBody) return false;
     if (appState.botState == BotState::SPEAKING)  return false;
     if (appState.botState == BotState::LISTENING) return false;
     if (!sd_storage::isMounted()) return false;
@@ -116,6 +129,7 @@ bool ogg_player::playFile(const char* path) {
 void ogg_player::playData(const uint8_t* data, size_t dataLen) {
     // PSRAM-preloaded path — no file I/O. Only block SPEAKING (resilience clips
     // may fire during THINKING, e.g. playClip(OFFLINE) when Wi-Fi drops).
+    if (!s_pageBody) return;
     if (appState.botState == BotState::SPEAKING) return;
 
     size_t pos     = 0;

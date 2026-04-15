@@ -2,6 +2,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <SD_MMC.h>
 #include <ESPmDNS.h>
 #include "config.h"
@@ -34,6 +35,7 @@
 #include "gesture.h"
 #include "ui_audio.h"
 #include <freertos/idf_additions.h>
+#include "ogg_player.h"
 #include "emotion_audio.h"
 #include "sfx_audio.h"
 #include "battery.h"
@@ -160,10 +162,11 @@ static void updateStatusBar() {
     sb.blePresent = (appState.presenceState == PresenceState::PRESENT ||
                      appState.presenceState == PresenceState::LEAVING);
     sb.blePresenceEnabled = nvs_store::getPresenceEnabled();
-    // Stall detection: speaking/thinking but no data flowing for 3+ seconds
+    // Stall detection: speaking/thinking but no data flowing for 20+ seconds
+    // (inter-sentence TTS gaps are 5-10s, so 20s avoids false positives)
     sb.connectionStalled = false;
     if (appState.botState == BotState::SPEAKING && playbackActive && !playbackDone) {
-        sb.connectionStalled = (millis() - lastFrameReceivedMs) > 3000;
+        sb.connectionStalled = (millis() - lastFrameReceivedMs) > 20000;
     } else if (appState.botState == BotState::THINKING) {
         // In thinking state, we expect response:start within reasonable time
         // (stuckCheckMs tracks when we entered the state)
@@ -176,8 +179,11 @@ static void updateStatusBar() {
 //
 // Downloads an image from a URL via HTTP and saves it to the SD card at
 // /images/remote/latest.{ext}.  Returns the saved path, or nullptr on failure.
-// Runs synchronously in the wsLoop task (Core 1).
-// Images are small (≤200 KB after app-side compression) so this blocks <2s.
+//
+// NOTE: must NOT be called from the wsLoop task — blocking the WS task while
+// holding/waiting on the send mutex causes a FreeRTOS priority-inheritance
+// assertion (vTaskPriorityDisinheritAfterTimeout).  Use imageDownloadTask()
+// to dispatch downloads onto a one-shot FreeRTOS task instead.
 
 static const char* downloadImage(const char* url) {
     if (!sd_storage::isMounted()) {
@@ -191,13 +197,30 @@ static const char* downloadImage(const char* url) {
     const char* ext = (dot && strlen(dot) <= 5) ? dot : ".jpg";
     snprintf(savedPath, sizeof(savedPath), "/images/remote/latest%s", ext);
 
+    // Use an explicit WiFiClientSecure so we can call setInsecure(), matching
+    // the WS client behaviour.  The mbedTLS buffer sizes and PSRAM routing are
+    // controlled globally via sdkconfig.defaults (CONFIG_MBEDTLS_SSL_IN/OUT_CONTENT_LEN,
+    // CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC, CONFIG_MBEDTLS_HARDWARE_AES=n).
+    WiFiClientSecure tlsClient;
+    tlsClient.setInsecure();
+
+    int code = -1;
     HTTPClient http;
-    http.begin(url);
-    http.setTimeout(10000);
-    int code = http.GET();
+    // Retry once on transient TLS/EOF failures (codes -1, -5, -29312).
+    for (int attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0) {
+            Serial.printf("[ImgDL] Retry %d…\n", attempt);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+        }
+        http.begin(tlsClient, url);
+        http.setTimeout(12000);
+        code = http.GET();
+        if (code == 200) break;
+        Serial.printf("[ImgDL] HTTP %d (attempt %d)\n", code, attempt + 1);
+        http.end();
+    }
     if (code != 200) {
         Serial.printf("[ImgDL] HTTP %d for %s\n", code, url);
-        http.end();
         return nullptr;
     }
 
@@ -219,7 +242,9 @@ static const char* downloadImage(const char* url) {
     }
 
     WiFiClient* stream = http.getStreamPtr();
-    uint8_t buf[2048];
+    // Static buffer: s_imageDownloading prevents concurrent downloads, and keeping
+    // this off the stack saves 2 KB — critical when internal SRAM is low.
+    static uint8_t buf[2048];
     int totalRead = 0;
     const int maxBytes = 2 * 1024 * 1024; // hard cap regardless of Content-Length
     // Stream until connection closes (handles both Content-Length and chunked)
@@ -254,6 +279,69 @@ static const char* downloadImage(const char* url) {
 
     Serial.printf("[ImgDL] Saved %d bytes → %s\n", totalRead, savedPath);
     return savedPath;
+}
+
+// ── Image download task ──────────────────────────────────────────────────────
+//
+// Runs the HTTP download on its own FreeRTOS task so the WS task is never
+// blocked. Guard flag prevents overlapping downloads if the user pushes
+// two images in quick succession.
+
+struct ImageDownloadParams {
+    char     url[256];
+    uint16_t durationMs;
+};
+
+static volatile bool s_imageDownloading = false;
+
+// When true, the next WS disconnect/reconnect cycle is intentional (e.g. image
+// download freeing TLS resources). Suppresses sad face, disconnect audio, and
+// the LLM reconnect roast — user shouldn't know about an internal housekeeping
+// disconnect. Cleared automatically after reconnect.
+static volatile bool s_silentReconnect = false;
+
+// Pre-allocated stack for image download task.  Lives in BSS (internal DRAM)
+// so it's guaranteed contiguous — immune to runtime heap fragmentation that
+// causes xTaskCreate to fail when only ~18KB of internal heap remains.
+// s_imageDownloading flag ensures at most one task uses this at a time.
+static constexpr size_t IMG_TASK_STACK_SIZE = 10240;
+static StackType_t s_imgTaskStackBuf[IMG_TASK_STACK_SIZE / sizeof(StackType_t)];
+static StaticTask_t s_imgTaskTCB;
+
+static void imageDownloadTask(void* pvParams) {
+    ImageDownloadParams* p = static_cast<ImageDownloadParams*>(pvParams);
+    Serial.printf("[ImgDL] Task: downloading %s\n", p->url);
+
+    // Two concurrent TLS sessions won't fit in internal DRAM.  The pre-compiled
+    // libmbedtls.a uses hardware AES which calls heap_caps_malloc(MALLOC_CAP_DMA)
+    // directly — can't be routed to PSRAM via sdkconfig or the mbedTLS allocator.
+    //
+    // Fix: temporarily disconnect the WebSocket (frees its TLS session + AES
+    // contexts + socket buffers), download the image as the sole TLS user,
+    // then reconnect.  The WS auto-reconnect is robust and takes ~1-2s.
+    Serial.println("[ImgDL] Disconnecting WS to free TLS resources");
+    s_silentReconnect = true;
+    ws_client::waitForPollIdle();
+    ws_client::disconnect();
+    vTaskDelay(pdMS_TO_TICKS(300));  // Let idle task reclaim TLS memory
+
+    size_t freeAfter = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_32BIT);
+    Serial.printf("[ImgDL] Internal heap after WS disconnect: %u B\n", (unsigned)freeAfter);
+
+    const char* savedPath = downloadImage(p->url);
+    if (savedPath) {
+        display::showImageFromSD(savedPath, p->durationMs);
+    } else {
+        Serial.println("[ImgDL] Task: download failed");
+    }
+
+    // Reconnect WebSocket
+    Serial.println("[ImgDL] Reconnecting WS");
+    ws_client::connect();
+
+    free(p);
+    s_imageDownloading = false;
+    vTaskDelete(nullptr);
 }
 
 // ── WebSocket event handlers ────────────────────────────
@@ -800,8 +888,8 @@ static void onWsJson(const char* event, const char* data) {
     // ── Remote re-provisioning request ───────────────────
     else if (strcmp(event, "log:fetch") == 0) {
         // App requested recent log lines — read tail of /logs/debug.log and send back.
-        static char logBuf[6144 + 64];  // 6 KB log tail + JSON wrapper headroom
-        static char payloadBuf[6144 + 64];
+        static char logBuf[4096 + 64];  // 4 KB log tail + JSON wrapper headroom
+        static char payloadBuf[4096 + 64];
         size_t n = debug_log::getRecentBytes(logBuf, sizeof(logBuf) - 64);
         if (n == 0) {
             ws_client::sendEvent("log:data", "{\"text\":\"(no log data)\",\"bytes\":0}");
@@ -862,13 +950,35 @@ static void onWsJson(const char* event, const char* data) {
             power_manager::recordInteraction();
 
             if (url && *url) {
-                // Download from backend, save to SD, then display
-                Serial.printf("[Main] display:image downloading: %s\n", url);
-                const char* savedPath = downloadImage(url);
-                if (savedPath) {
-                    display::showImageFromSD(savedPath, durationMs);
+                // Dispatch download to a one-shot task — never block the WS task
+                // with a synchronous HTTP download (causes mutex priority-inheritance crash).
+                if (s_imageDownloading) {
+                    Serial.println("[Main] display:image ignored — download already in progress");
                 } else {
-                    Serial.println("[Main] display:image download failed");
+                    ImageDownloadParams* p =
+                        static_cast<ImageDownloadParams*>(malloc(sizeof(ImageDownloadParams)));
+                    if (p) {
+                        strncpy(p->url, url, sizeof(p->url) - 1);
+                        p->url[sizeof(p->url) - 1] = '\0';
+                        p->durationMs = durationMs;
+                        s_imageDownloading = true;
+                        // Use xTaskCreateStaticPinnedToCore with the pre-allocated
+                        // BSS stack buffer.  xTaskCreate would need to allocate 10KB
+                        // from internal heap at runtime, but by then the heap is
+                        // fragmented to ~18KB with no contiguous 10KB block.
+                        // LwIP asserts stack is in internal SRAM (not PSRAM), so
+                        // MALLOC_CAP_SPIRAM is not an option for HTTP tasks.
+                        TaskHandle_t imgTask = xTaskCreateStaticPinnedToCore(
+                            imageDownloadTask, "imgdl", IMG_TASK_STACK_SIZE, p, 3,
+                            s_imgTaskStackBuf, &s_imgTaskTCB, 1);
+                        if (imgTask != nullptr) {
+                            Serial.printf("[Main] display:image — download task started: %s\n", url);
+                        } else {
+                            Serial.println("[Main] display:image — static task create failed");
+                            free(p);
+                            s_imageDownloading = false;
+                        }
+                    }
                 }
             } else if (path && *path) {
                 // Already on SD card
@@ -898,6 +1008,11 @@ static void onWsBinary(const uint8_t* data, size_t len) {
             xQueueReceive(playbackQueue, &discard, 0);
             xQueueSend(playbackQueue, &frame, 0);
         }
+        // Track arrival time here (on enqueue), not just on dequeue.
+        // TTS delivers audio in bursts — if the queue drains between bursts, the
+        // dequeue-only update made the stall detector fire on every inter-burst gap
+        // even though frames were actively arriving from the network.
+        lastFrameReceivedMs = millis();
     }
 
     // Accumulate raw Opus for TTS cache
@@ -1069,7 +1184,19 @@ static void onTouchEvent(touch::Event event) {
             break;
 
         case touch::Event::TAP:
-            if (appState.botState == BotState::SPEAKING ||
+            if (display::getMode() == display::Mode::TEXT_RESPONSE) {
+                // Text-mode response: always dismiss on tap regardless of botState.
+                // If the backend is still streaming (THINKING), also interrupt it.
+                display::clearTextResponse();
+                if (appState.botState == BotState::THINKING) {
+                    ws_client::sendEvent("audio:interrupt");
+                    appState.botState = BotState::IDLE;
+                    syncFaceToState();
+                    wake_word::startListening();
+                }
+                Serial.println("[Main] Text response dismissed by tap");
+            }
+            else if (appState.botState == BotState::SPEAKING ||
                 appState.botState == BotState::INTERCOM ||
                 appState.botState == BotState::THINKING) {
                 // Interrupt — stop whatever is happening and show confusion.
@@ -1100,10 +1227,6 @@ static void onTouchEvent(touch::Event event) {
                 // Dismiss reminder
                 display::setMode(display::getHomeMode());
                 ws_client::sendEvent("proactive:dismiss");
-            }
-            else if (display::getMode() == display::Mode::TEXT_RESPONSE) {
-                // Dismiss text response screen
-                display::clearTextResponse();
             }
             else if (appState.botState == BotState::IDLE) {
                 ui_audio::play(ui_audio::Clip::TAP);
@@ -1473,8 +1596,14 @@ static void audioCaptureLoop(void* param) {
 
 static void wsLoop(void* param) {
     Serial.println("[WS Task] Started on core " + String(xPortGetCoreID()));
+    bool stackLogged = false;
     for (;;) {
         ws_client::poll();
+        if (!stackLogged && millis() > 15000) {
+            UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
+            Serial.printf("[WS] Stack watermark: %u bytes free\n", hwm * 4);
+            stackLogged = true;
+        }
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
@@ -1482,8 +1611,14 @@ static void wsLoop(void* param) {
 // ── Display task (Core 1) ──────────────────────────────
 
 static void displayLoop(void* param) {
+    bool stackLogged = false;
     for (;;) {
         display::tick(millis());
+        if (!stackLogged && millis() > 15000) {
+            UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
+            Serial.printf("[Display] Stack watermark: %u bytes free\n", hwm * 4);
+            stackLogged = true;
+        }
         vTaskDelay(pdMS_TO_TICKS(33));  // ~30fps
     }
 }
@@ -1589,6 +1724,7 @@ void setup() {
     tts_cache::init();
 
     boot_screen::setStep(3, BOOT_STEPS, "Audio Buffers");
+    ogg_player::init();       // 64KB page buffer → PSRAM (before any playback)
     recording_buffer::init();
     resilience_audio::init();
 
@@ -1891,7 +2027,9 @@ void setup() {
         Serial.println("[Main] Gesture sensor not found — skipping");
     }
 
-    Serial.println("\n[Main] Boot complete.\n");
+    Serial.printf("\n[Main] Boot complete. Free heap: internal=%u B, PSRAM=%u B\n\n",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }
 
 void loop() {
@@ -2109,24 +2247,10 @@ void loop() {
         updateStatusBar();
     }
 
-    // ── Stall visual feedback ────────────────────────────────────────────────
-    // When audio frames stop arriving mid-speech (blinking orange dot), switch
-    // to CONFUSED face so there's more than just the status dot to indicate
-    // something's wrong. Restored to SPEAKING when frames resume.
-    {
-        static bool prevStalled = false;
-        const bool isStalled = appState.botState == BotState::SPEAKING &&
-                               playbackActive && !playbackDone &&
-                               (now - lastFrameReceivedMs) > 3000;
-
-        if (isStalled && !prevStalled) {
-            face::setExpression(face::Expression::CONFUSED, 300);
-            Serial.println("[Main] Playback stalled — switching to CONFUSED face");
-        } else if (!isStalled && prevStalled) {
-            syncFaceToState();  // frames resumed — restore SPEAKING expression
-        }
-        prevStalled = isStalled;
-    }
+    // Stall visual feedback removed — the audio task (Core 0) already has its
+    // own 5s starvation detection that aborts playback when frames truly stop.
+    // The main loop's duplicate check caused CONFUSED face spam during normal
+    // inter-sentence TTS gaps and wasn't actionable for the user.
 
     // Throttle status bar updates — only refresh when connectivity actually changes
     static bool prevWifi = false;
@@ -2142,7 +2266,8 @@ void loop() {
         const uint32_t CONN_AUDIO_COOLDOWN_MS = 30000;  // 30 s between connection sounds
         const bool audioAllowed = (now - lastConnAudioMs) >= CONN_AUDIO_COOLDOWN_MS;
 
-        if (appState.botState == BotState::IDLE || appState.botState == BotState::OFFLINE) {
+        if (!s_silentReconnect &&
+            (appState.botState == BotState::IDLE || appState.botState == BotState::OFFLINE)) {
             if (!appState.wifiConnected && prevWifi) {
                 // WiFi lost → sad face (+ offline clip if not spamming)
                 face::setExpression(face::Expression::SAD, 300);
@@ -2168,7 +2293,7 @@ void loop() {
 
         // WS just connected — happy face + connected clip (throttled) + send device info
         if (appState.wsConnected && !prevWs) {
-            if (audioAllowed) {
+            if (!s_silentReconnect && audioAllowed) {
                 ui_audio::play(ui_audio::Clip::SERVER_CONNECTED);
                 lastConnAudioMs = now;
             }
@@ -2182,8 +2307,10 @@ void loop() {
             static bool wasEverConnected = false;  // Distinguish boot vs reconnect
 
             appState.botState = BotState::IDLE;
-            face::setExpression(face::Expression::HAPPY, 200);
-            scheduleFaceRevert(2000);
+            if (!s_silentReconnect) {
+                face::setExpression(face::Expression::HAPPY, 200);
+                scheduleFaceRevert(2000);
+            }
 
             // Report device diagnostics to backend on every connect.
             // Backend logs these for device health monitoring.
@@ -2210,10 +2337,16 @@ void loop() {
             );
             ws_client::sendEvent("device:info", infoPayload);
 
-            // Tell backend this was a reconnect (not first boot)
-            // so it can roast the bad connection instead of a normal greeting
+            // Tell backend this was a reconnect (not first boot).
+            // Silent reconnects (e.g. image download) skip the LLM roast —
+            // user shouldn't see a reaction to an internal housekeeping disconnect.
             if (wasEverConnected) {
-                ws_client::sendEvent("reconnect:back");
+                if (s_silentReconnect) {
+                    ws_client::sendEvent("reconnect:back", "{\"silent\":true}");
+                    s_silentReconnect = false;
+                } else {
+                    ws_client::sendEvent("reconnect:back");
+                }
             }
             wasEverConnected = true;
         }
@@ -2287,7 +2420,8 @@ void loop() {
         static bool     reconnectShowingText   = false;
         static uint8_t  lastQuipIdx            = 255;  // sentinel — no last quip
 
-        const bool reconnecting = !appState.wsConnected && appState.wifiConnected &&
+        const bool reconnecting = !s_silentReconnect &&
+                                  !appState.wsConnected && appState.wifiConnected &&
                                   (appState.botState == BotState::IDLE ||
                                    appState.botState == BotState::OFFLINE);
 

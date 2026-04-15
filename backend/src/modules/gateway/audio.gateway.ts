@@ -1044,9 +1044,17 @@ export class AudioGateway
           );
           break;
         case 'reconnect:back':
-          this.onReconnectBack(deviceId).catch((err) =>
-            this.logger.error(`onReconnectBack error: ${err.message}`),
-          );
+          // Silent reconnects (e.g. image download freeing TLS) skip the LLM
+          // roast — user shouldn't see a reaction to an internal disconnect.
+          if (msg.data?.silent) {
+            this.logger.debug(
+              `Device ${deviceId} reconnect:back (silent — skipping LLM)`,
+            );
+          } else {
+            this.onReconnectBack(deviceId).catch((err) =>
+              this.logger.error(`onReconnectBack error: ${err.message}`),
+            );
+          }
           break;
         case 'intercom:reply:start':
           this.onIntercomReplyStart(deviceId);

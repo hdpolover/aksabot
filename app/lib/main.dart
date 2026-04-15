@@ -38,8 +38,35 @@ void main() async {
   runApp(const AksabotApp());
 }
 
-class AksabotApp extends StatelessWidget {
+class AksabotApp extends StatefulWidget {
   const AksabotApp({super.key});
+
+  @override
+  State<AksabotApp> createState() => _AksabotAppState();
+}
+
+class _AksabotAppState extends State<AksabotApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Dart timers freeze when iOS suspends the app, so the retry loop inside
+  /// BlePresenceService can silently die.  Every time the user foregrounds the
+  /// app we kick `resumeIfNeeded()` — it's a no-op when already connected.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      sl<BlePresenceService>().resumeIfNeeded();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

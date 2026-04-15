@@ -6,6 +6,9 @@
 /// and resilience_audio. Keeps the Ogg page parser in one place.
 namespace ogg_player {
 
+/// Allocate the 64KB page buffer from PSRAM. Call once during setup().
+void init();
+
 /// Open an Ogg Opus file from SD and stream it page-by-page, decoding audio
 /// without loading the whole file into heap. No size cap — works for ambient
 /// loops, long clips, and music tracks. Returns false if SD not mounted,
