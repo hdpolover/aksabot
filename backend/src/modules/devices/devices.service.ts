@@ -130,6 +130,8 @@ export class DevicesService {
       totalMemories,
       poolSize: poolCount,
       batteryPercent: this.sessionManager.get(id)?.batteryPercent ?? null,
+      batteryMv: this.sessionManager.get(id)?.batteryMv ?? null,
+      batteryCharging: this.sessionManager.get(id)?.batteryCharging ?? null,
     };
   }
 

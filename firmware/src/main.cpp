@@ -136,11 +136,42 @@ static void syncFaceToState() {
             break;
     }
     // Low-battery overrides normal state LED — wins over BotState color
-    if (battery::isLow() && !battery::isUsbPowered()) {
+    if (battery::isLow() && !battery::isCharging()) {
         status_led::showLowBattery();
     } else {
         status_led::syncToState();
     }
+}
+
+// Send device diagnostics (battery, WiFi, heap, etc.) to backend via WS.
+// Called on connect and periodically every 60s for live monitoring.
+static void sendDeviceInfo() {
+    char infoPayload[320];
+    snprintf(infoPayload, sizeof(infoPayload),
+        "{"
+        "\"firmwareVersion\":\"%s\","
+        "\"wifiSsid\":\"%s\","
+        "\"wifiRssi\":%d,"
+        "\"ip\":\"%s\","
+        "\"uptimeSec\":%lu,"
+        "\"freeHeap\":%lu,"
+        "\"sdMounted\":%s,"
+        "\"batteryPercent\":%d,"
+        "\"batteryMv\":%u,"
+        "\"batteryCharging\":%s"
+        "}",
+        FIRMWARE_VERSION,
+        WiFi.SSID().c_str(),
+        WiFi.RSSI(),
+        WiFi.localIP().toString().c_str(),
+        millis() / 1000,
+        (unsigned long)ESP.getFreeHeap(),
+        sd_storage::isMounted() ? "true" : "false",
+        (int)battery::readPercent(),
+        (unsigned)battery::lastVoltageMillivolts(),
+        battery::isCharging() ? "true" : "false"
+    );
+    ws_client::sendEvent("device:info", infoPayload);
 }
 
 static void updateStatusBar() {
@@ -2192,7 +2223,7 @@ void loop() {
             resilience_audio::playClip(resilience_audio::Clip::LOW_BATTERY);
             Serial.println("[Battery] Low battery alert fired");
         }
-        if (battery::isUsbPowered()) {
+        if (battery::isCharging()) {
             lowBatAlertFired = false;  // reset when plugged in
         }
     }
@@ -2201,7 +2232,7 @@ void loop() {
     {
         static bool criticalDimApplied = false;
 
-        if (!battery::isUsbPowered()) {
+        if (!battery::isCharging()) {
             // Power saving: dim display aggressively when critical
             if (battery::isCritical() && !criticalDimApplied) {
                 criticalDimApplied = true;
@@ -2221,6 +2252,17 @@ void loop() {
                 power_manager::updateConfig(power_manager::Config{});
                 Serial.println("[Battery] Charging — power saving restored");
             }
+        }
+    }
+
+    // Periodic device:info push — sends battery mV, percent, charging state
+    // to backend every 60s for live diagnostics (even when unplugged from USB).
+    {
+        static uint32_t lastInfoPushMs = 0;
+        if (appState.wsConnected &&
+            (millis() - lastInfoPushMs > 60000 || lastInfoPushMs == 0)) {
+            lastInfoPushMs = millis();
+            sendDeviceInfo();
         }
     }
 
@@ -2326,30 +2368,8 @@ void loop() {
                 scheduleFaceRevert(2000);
             }
 
-            // Report device diagnostics to backend on every connect.
-            // Backend logs these for device health monitoring.
-            char infoPayload[256];
-            snprintf(infoPayload, sizeof(infoPayload),
-                "{"
-                "\"firmwareVersion\":\"%s\","
-                "\"wifiSsid\":\"%s\","
-                "\"wifiRssi\":%d,"
-                "\"ip\":\"%s\","
-                "\"uptimeSec\":%lu,"
-                "\"freeHeap\":%lu,"
-                "\"sdMounted\":%s,"
-                "\"batteryPercent\":%d"
-                "}",
-                FIRMWARE_VERSION,
-                WiFi.SSID().c_str(),
-                WiFi.RSSI(),
-                WiFi.localIP().toString().c_str(),
-                millis() / 1000,
-                (unsigned long)ESP.getFreeHeap(),
-                sd_storage::isMounted() ? "true" : "false",
-                (int)battery::readPercent()
-            );
-            ws_client::sendEvent("device:info", infoPayload);
+            // Report device diagnostics to backend on connect.
+            sendDeviceInfo();
 
             // Tell backend this was a reconnect (not first boot).
             // Silent reconnects (e.g. image download) skip the LLM roast —

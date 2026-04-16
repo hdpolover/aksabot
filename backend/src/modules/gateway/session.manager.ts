@@ -19,8 +19,12 @@ export interface DeviceSession {
   intercomReply: boolean;
   /** Accumulated raw Opus frames from the device during an intercom reply. */
   intercomFrames: Buffer[];
-  /** Battery level reported by the device. 0-100 = percentage, 255 = USB powered, undefined = unknown. */
+  /** Battery level reported by the device. 0-100 = percentage, 255 = USB powered/charging, undefined = unknown. */
   batteryPercent?: number;
+  /** Raw battery voltage in millivolts (after divider compensation). */
+  batteryMv?: number;
+  /** Whether the device is currently charging (USB or voltage-trend based). */
+  batteryCharging?: boolean;
   /** Current display mode reported by the device. 'clock' suppresses proactive events and audio. */
   displayMode?: string;
   /** Set by silent reconnect:back — suppresses the connection greeting. */

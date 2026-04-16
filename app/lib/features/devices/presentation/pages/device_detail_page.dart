@@ -623,7 +623,7 @@ class _StatusCardState extends State<_StatusCard> {
                   ),
                 ],
                 const Spacer(),
-                _buildBatteryIndicator(_stats?.batteryPercent, cs),
+                _buildBatteryIndicator(_stats, cs),
                 if (device.lastSeenAt != null) ...[
                   if (_stats?.batteryPercent != null)
                     const SizedBox(width: AppConstants.spacingSm),
@@ -665,14 +665,21 @@ class _StatusCardState extends State<_StatusCard> {
     );
   }
 
-  Widget _buildBatteryIndicator(int? pct, ColorScheme cs) {
+  Widget _buildBatteryIndicator(DeviceStats? stats, ColorScheme cs) {
+    if (stats == null) return const SizedBox.shrink();
+    final pct = stats.batteryPercent;
     if (pct == null) return const SizedBox.shrink();
-    if (pct == 255) {
+
+    // Use the explicit charging flag from firmware (trend + threshold based).
+    // Fall back to pct == 255 for backwards compat with older firmware.
+    final isCharging = stats.batteryCharging == true || pct == 255;
+
+    if (isCharging) {
       return Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.usb, size: 14, color: cs.onSurfaceVariant),
+        Icon(Icons.battery_charging_full, size: 14, color: Colors.green),
         const SizedBox(width: 4),
         Text('Charging',
-            style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+            style: TextStyle(fontSize: 12, color: Colors.green)),
       ]);
     }
     final icon = pct > 60

@@ -610,11 +610,16 @@ export class AudioGateway
         this.logger.warn(`Failed to save device info: ${err.message}`),
       );
     const session = this.sessions.get(deviceId);
-    if (session && data.batteryPercent !== undefined) {
-      session.batteryPercent = data.batteryPercent as number;
+    if (session) {
+      if (data.batteryPercent !== undefined)
+        session.batteryPercent = data.batteryPercent as number;
+      if (data.batteryMv !== undefined)
+        session.batteryMv = data.batteryMv as number;
+      if (data.batteryCharging !== undefined)
+        session.batteryCharging = data.batteryCharging as boolean;
     }
     this.logger.log(
-      `Device ${deviceId} info: fw=${data.firmwareVersion} wifi=${data.wifiSsid} rssi=${data.wifiRssi} ip=${data.ip ?? '-'} uptime=${data.uptimeSec ?? '-'}s heap=${data.freeHeap ?? '-'} sd=${data.sdMounted ?? '-'} battery=${data.batteryPercent ?? '-'}`,
+      `Device ${deviceId} info: fw=${data.firmwareVersion} wifi=${data.wifiSsid} rssi=${data.wifiRssi} ip=${data.ip ?? '-'} uptime=${data.uptimeSec ?? '-'}s heap=${data.freeHeap ?? '-'} sd=${data.sdMounted ?? '-'} battery=${data.batteryPercent ?? '-'}% ${data.batteryMv ?? '-'}mV charging=${data.batteryCharging ?? '-'}`,
     );
   }
 

@@ -11,9 +11,10 @@ namespace battery {
 // the real battery voltage. Adjust this value if readings drift vs a multimeter.
 static constexpr float BATTERY_SCALE    = 2.0f;
 
-static constexpr float  ADC_REF_VOLTS   = 3.3f;
-static constexpr int    ADC_MAX         = 4095;
-static constexpr float  USB_VOLTAGE_MIN = 4300.0f;  // mV — safely above 4.2V LiPo max
+// USB/charging detection: LiPo maxes at ~4.20V. Anything above indicates
+// external power (USB). Lowered from 4300 to 4200 — charging IC on the
+// ES3C28P board may not push much past saturation voltage.
+static constexpr float  USB_VOLTAGE_MIN = 4200.0f;  // mV
 
 // ── Piecewise LiPo discharge curve ────────────────────────────────────────────
 struct CurvePoint { uint16_t mv; uint8_t pct; };
@@ -28,11 +29,18 @@ static constexpr CurvePoint kCurve[] = {
 };
 static constexpr int kCurveLen = sizeof(kCurve) / sizeof(kCurve[0]);
 
+// Charging trend detection: if voltage rises by ≥ this amount between two
+// consecutive 30-second reads, the battery is likely charging (even if the
+// absolute voltage hasn't crossed USB_VOLTAGE_MIN yet).
+static constexpr int16_t CHARGING_RISE_THRESHOLD = 15;  // mV between reads
+
 // ── Module state ──────────────────────────────────────────────────────────────
 
 static uint8_t  lastPercent = 255;  // 255 = unknown until first read
 static uint16_t lastMv      = 0;
+static uint16_t prevMv      = 0;    // previous reading for trend detection
 static bool     usbPowered  = false;
+static bool     charging    = false; // true if voltage is rising (trend-based)
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
@@ -64,25 +72,41 @@ void init() {
 }
 
 uint8_t readPercent() {
-    // Average 16 samples with 100µs gap to reduce ADC noise
-    uint32_t sum = 0;
+    // Average 16 samples using the ESP32-S3's calibrated millivolt API.
+    // analogReadMilliVolts() uses factory-burned eFuse calibration data
+    // and handles the non-linear ADC transfer curve internally — much more
+    // accurate than manual (raw/4095)*3.3V math.
+    uint32_t sumMv = 0;
+    uint32_t sumRaw = 0;
     for (int i = 0; i < 16; i++) {
-        sum += analogRead(BATTERY_ADC);
+        sumRaw += analogRead(BATTERY_ADC);
+        sumMv  += analogReadMilliVolts(BATTERY_ADC);
         delayMicroseconds(100);
     }
-    uint16_t raw = static_cast<uint16_t>(sum / 16);
+    uint16_t rawAvg  = static_cast<uint16_t>(sumRaw / 16);
+    uint16_t pinMv   = static_cast<uint16_t>(sumMv / 16);   // calibrated pin voltage
+    uint16_t mv      = static_cast<uint16_t>(pinMv * BATTERY_SCALE + 0.5f);  // after divider
 
-    // Convert ADC value → millivolts (after divider scale-up)
-    float adcVoltage = (raw / static_cast<float>(ADC_MAX)) * ADC_REF_VOLTS;
-    uint16_t mv = static_cast<uint16_t>(adcVoltage * BATTERY_SCALE * 1000.0f + 0.5f);
+    // Trend detection: is voltage rising since last read?
+    int16_t delta = static_cast<int16_t>(mv) - static_cast<int16_t>(prevMv);
+    bool voltageRising = (prevMv > 0) && (delta >= CHARGING_RISE_THRESHOLD);
+    prevMv = mv;
+
+    // USB/charging: either voltage above threshold OR voltage is rising
+    usbPowered = (mv >= static_cast<uint16_t>(USB_VOLTAGE_MIN));
+    charging   = usbPowered || voltageRising;
 
     // Update shared state
-    lastMv     = mv;
-    usbPowered = (mv >= static_cast<uint16_t>(USB_VOLTAGE_MIN));
+    lastMv = mv;
 
-    if (usbPowered) {
+    // Diagnostic log — raw ADC, pin mV, battery mV, delta, USB, charging
+    Serial.printf("[Battery] raw=%u pinMv=%u batMv=%u delta=%+dmV usb=%s charging=%s\n",
+                  rawAvg, pinMv, mv, delta,
+                  usbPowered ? "Y" : "N",
+                  charging   ? "Y" : "N");
+
+    if (charging) {
         lastPercent = 255;
-        Serial.printf("[Battery] USB powered (%u mV)\n", mv);
         return 255;
     }
 
@@ -95,12 +119,16 @@ bool isUsbPowered() {
     return usbPowered;
 }
 
+bool isCharging() {
+    return charging;
+}
+
 bool isLow() {
-    return !usbPowered && lastPercent != 255 && lastPercent <= LOW_THRESHOLD;
+    return !charging && lastPercent != 255 && lastPercent <= LOW_THRESHOLD;
 }
 
 bool isCritical() {
-    return !usbPowered && lastPercent != 255 && lastPercent <= CRITICAL_THRESHOLD;
+    return !charging && lastPercent != 255 && lastPercent <= CRITICAL_THRESHOLD;
 }
 
 uint16_t lastVoltageMillivolts() {
