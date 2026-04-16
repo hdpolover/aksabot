@@ -1,6 +1,8 @@
 #include "power_manager.h"
 #include "display.h"
 #include <Arduino.h>
+#include "config.h"
+#include <esp_sleep.h>
 
 // ── Internal state ─────────────────────────────────────
 static power_manager::Config cfg;
@@ -109,4 +111,20 @@ void power_manager::updateConfig(const Config& config) {
 
 uint32_t power_manager::getIdleSeconds() {
     return (millis() - lastInteractionMs) / 1000;
+}
+
+void power_manager::enterDeepSleep() {
+    Serial.println("[Power] Entering DEEP SLEEP — wake on touch (GPIO17)");
+    Serial.flush();
+
+    // Turn off display
+    display::sleep();
+    delay(300);  // let fade-out complete
+
+    // Configure touch INT (GPIO17) as ext0 wake source — wakes on LOW
+    esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(TOUCH_INT), 0);
+
+    // Enter deep sleep — CPU resets on wake, setup() runs again
+    esp_deep_sleep_start();
+    // Never reaches here
 }

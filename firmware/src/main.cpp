@@ -146,7 +146,7 @@ static void syncFaceToState() {
 // Send device diagnostics (battery, WiFi, heap, etc.) to backend via WS.
 // Called on connect and periodically every 60s for live monitoring.
 static void sendDeviceInfo() {
-    char infoPayload[320];
+    char infoPayload[384];
     snprintf(infoPayload, sizeof(infoPayload),
         "{"
         "\"firmwareVersion\":\"%s\","
@@ -158,7 +158,8 @@ static void sendDeviceInfo() {
         "\"sdMounted\":%s,"
         "\"batteryPercent\":%d,"
         "\"batteryMv\":%u,"
-        "\"batteryCharging\":%s"
+        "\"batteryCharging\":%s,"
+        "\"batteryMinutesRemaining\":%d"
         "}",
         FIRMWARE_VERSION,
         WiFi.SSID().c_str(),
@@ -169,7 +170,8 @@ static void sendDeviceInfo() {
         sd_storage::isMounted() ? "true" : "false",
         (int)battery::readPercent(),
         (unsigned)battery::lastVoltageMillivolts(),
-        battery::isCharging() ? "true" : "false"
+        battery::isCharging() ? "true" : "false",
+        (int)battery::minutesRemaining()
     );
     ws_client::sendEvent("device:info", infoPayload);
 }
@@ -187,6 +189,7 @@ static void updateStatusBar() {
             lastBatReadMs = millis();
         }
         sb.batteryPercent = cachedBatPct;
+        sb.batteryMv = battery::lastVoltageMillivolts();
     }
     sb.focusModeActive = false;
     sb.pomodoroActive = false;
@@ -2252,6 +2255,48 @@ void loop() {
                 power_manager::updateConfig(power_manager::Config{});
                 Serial.println("[Battery] Charging — power saving restored");
             }
+        }
+    }
+
+    // Deep sleep on critical battery — last resort power preservation
+    {
+        static bool deepSleepTriggered = false;
+        static uint32_t deepSleepWaitStart = 0;
+
+        if (battery::isCritical() && !battery::isCharging() && !deepSleepTriggered) {
+            deepSleepTriggered = true;
+
+            if (appState.botState == BotState::IDLE) {
+                // IDLE — play goodnight clip then sleep
+                Serial.println("[Battery] Critical + IDLE — goodnight then deep sleep");
+                resilience_audio::playClip(resilience_audio::Clip::CRITICAL_SHUTDOWN);
+                delay(500);  // let audio finish
+                power_manager::enterDeepSleep();
+            } else {
+                // Not IDLE — wait for idle state (max 30s)
+                Serial.println("[Battery] Critical + busy — waiting for IDLE to deep sleep");
+                deepSleepWaitStart = millis();
+            }
+        }
+
+        // Waiting for IDLE to deep sleep (timeout after 30s)
+        if (deepSleepTriggered && deepSleepWaitStart > 0) {
+            if (appState.botState == BotState::IDLE) {
+                Serial.println("[Battery] Now IDLE — goodnight then deep sleep");
+                resilience_audio::playClip(resilience_audio::Clip::CRITICAL_SHUTDOWN);
+                delay(500);
+                power_manager::enterDeepSleep();
+            } else if (millis() - deepSleepWaitStart > 30000) {
+                // Timeout — silent deep sleep to preserve battery
+                Serial.println("[Battery] Critical timeout — silent deep sleep");
+                power_manager::enterDeepSleep();
+            }
+        }
+
+        // Reset if charging resumes
+        if (battery::isCharging()) {
+            deepSleepTriggered = false;
+            deepSleepWaitStart = 0;
         }
     }
 

@@ -132,6 +132,8 @@ export class DevicesService {
       batteryPercent: this.sessionManager.get(id)?.batteryPercent ?? null,
       batteryMv: this.sessionManager.get(id)?.batteryMv ?? null,
       batteryCharging: this.sessionManager.get(id)?.batteryCharging ?? null,
+      batteryMinutesRemaining: this.sessionManager.get(id)?.batteryMinutesRemaining ?? null,
+      batteryHistory: this.sessionManager.get(id)?.batteryHistory ?? [],
     };
   }
 

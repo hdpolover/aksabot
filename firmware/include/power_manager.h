@@ -55,4 +55,9 @@ void updateConfig(const Config& config);
 /// Get seconds since last interaction.
 uint32_t getIdleSeconds();
 
+/// Enter ESP32-S3 hardware deep sleep.
+/// Wakes on touch (GPIO17 ext0 LOW). This is a full reset on wake —
+/// WiFi, FreeRTOS tasks, and all state are lost. Only use for critical battery.
+void enterDeepSleep();
+
 }  // namespace power_manager

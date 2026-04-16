@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
@@ -580,7 +581,9 @@ class _StatusCardState extends State<_StatusCard> {
         ),
     ];
 
-    return BlocListener<DevicesBloc, DevicesState>(
+    return Column(
+      children: [
+    BlocListener<DevicesBloc, DevicesState>(
       listener: (context, state) {
         if (state is DeviceDetailLoaded && state.device.id == widget.device.id) {
           _fetchStats();
@@ -662,6 +665,122 @@ class _StatusCardState extends State<_StatusCard> {
         ),
       ),
     ),
+    ),
+    if (_stats != null && _stats!.batteryHistory.length >= 2)
+      _buildBatteryChart(_stats!, cs),
+    ],
+    );
+  }
+
+  Widget _buildBatteryChart(DeviceStats stats, ColorScheme cs) {
+    final history = stats.batteryHistory
+        .where((e) => !e.charging && e.percent <= 100)
+        .toList();
+    if (history.length < 2) return const SizedBox.shrink();
+
+    final earliest = history.first.timestamp;
+    final spots = history.map((e) {
+      final mins = e.timestamp.difference(earliest).inMinutes.toDouble();
+      return FlSpot(mins, e.percent.toDouble());
+    }).toList();
+
+    final maxX = spots.last.x;
+    if (maxX <= 0) return const SizedBox.shrink();
+
+    return Card(
+      margin: const EdgeInsets.only(top: AppConstants.spacingSm),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 16, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Battery',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurface)),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 100,
+              child: LineChart(
+                LineChartData(
+                  minY: 0,
+                  maxY: 100,
+                  minX: 0,
+                  maxX: maxX,
+                  gridData: FlGridData(
+                    show: true,
+                    horizontalInterval: 25,
+                    getDrawingHorizontalLine: (value) => FlLine(
+                      color: cs.outlineVariant.withValues(alpha: 0.3),
+                      strokeWidth: 0.5,
+                    ),
+                    drawVerticalLine: false,
+                  ),
+                  titlesData: FlTitlesData(
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 28,
+                        interval: 25,
+                        getTitlesWidget: (value, meta) => Text(
+                          '${value.toInt()}',
+                          style: TextStyle(
+                              fontSize: 10, color: cs.onSurfaceVariant),
+                        ),
+                      ),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 20,
+                        interval: maxX > 120 ? 60 : 30,
+                        getTitlesWidget: (value, meta) {
+                          final h = (value / 60).floor();
+                          return Text(
+                            h > 0 ? '${h}h' : '${value.toInt()}m',
+                            style: TextStyle(
+                                fontSize: 10, color: cs.onSurfaceVariant),
+                          );
+                        },
+                      ),
+                    ),
+                    topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false)),
+                  ),
+                  borderData: FlBorderData(show: false),
+                  lineBarsData: [
+                    LineChartBarData(
+                      spots: spots,
+                      isCurved: true,
+                      preventCurveOverShooting: true,
+                      color: spots.last.y <= 20
+                          ? Colors.red
+                          : spots.last.y <= 40
+                              ? Colors.orange
+                              : Colors.green,
+                      barWidth: 2,
+                      dotData: const FlDotData(show: false),
+                      belowBarData: BarAreaData(
+                        show: true,
+                        color: (spots.last.y <= 20
+                                ? Colors.red
+                                : spots.last.y <= 40
+                                    ? Colors.orange
+                                    : Colors.green)
+                            .withValues(alpha: 0.1),
+                      ),
+                    ),
+                  ],
+                  lineTouchData: const LineTouchData(enabled: false),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -688,10 +807,22 @@ class _StatusCardState extends State<_StatusCard> {
             ? Icons.battery_3_bar
             : Icons.battery_alert;
     final color = pct <= 20 ? Colors.red : cs.onSurfaceVariant;
+
+    // Time remaining suffix
+    final mins = stats.batteryMinutesRemaining;
+    String label = '$pct%';
+    if (mins != null && mins >= 0) {
+      if (mins >= 60) {
+        label += ' (~${mins ~/ 60}h ${mins % 60}m)';
+      } else {
+        label += ' (~${mins}m)';
+      }
+    }
+
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, size: 14, color: color),
       const SizedBox(width: 4),
-      Text('$pct%', style: TextStyle(fontSize: 12, color: color)),
+      Text(label, style: TextStyle(fontSize: 12, color: color)),
     ]);
   }
 

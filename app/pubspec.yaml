@@ -38,6 +38,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   google_fonts: ^6.2.1
   shimmer: ^3.0.0
+  fl_chart: ^0.70.2
 
   # BLE (provisioning + presence)
   flutter_blue_plus: ^1.35.0

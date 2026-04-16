@@ -16,7 +16,7 @@ struct ClipData {
     bool loaded;
 };
 
-static const uint8_t CLIP_COUNT = 8;
+static const uint8_t CLIP_COUNT = 9;
 static ClipData clips[CLIP_COUNT] = {};
 
 // Map Clip enum to filename
@@ -28,7 +28,8 @@ static const char* CLIP_FILES[] = {
     "thinking.opus",    // THINKING
     "sleep.opus",       // SLEEP
     "wake.opus",        // WAKE
-    "low_battery.opus", // LOW_BATTERY
+    "low_battery.opus",        // LOW_BATTERY
+    "critical_shutdown.opus",  // CRITICAL_SHUTDOWN
 };
 
 static uint8_t clipIndex(resilience_audio::Clip clip) {

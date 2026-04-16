@@ -617,9 +617,26 @@ export class AudioGateway
         session.batteryMv = data.batteryMv as number;
       if (data.batteryCharging !== undefined)
         session.batteryCharging = data.batteryCharging as boolean;
+
+      if (data.batteryMinutesRemaining !== undefined)
+        session.batteryMinutesRemaining = data.batteryMinutesRemaining as number;
+
+      // Append to battery history (max 1440 entries = 24h at 1/min)
+      if (data.batteryPercent !== undefined && data.batteryMv !== undefined) {
+        session.batteryHistory.push({
+          timestamp: Date.now(),
+          percent: data.batteryPercent as number,
+          mv: data.batteryMv as number,
+          charging: (data.batteryCharging as boolean) ?? false,
+        });
+        // Keep last 24h (1440 entries at ~1 entry/min)
+        if (session.batteryHistory.length > 1440) {
+          session.batteryHistory = session.batteryHistory.slice(-1440);
+        }
+      }
     }
     this.logger.log(
-      `Device ${deviceId} info: fw=${data.firmwareVersion} wifi=${data.wifiSsid} rssi=${data.wifiRssi} ip=${data.ip ?? '-'} uptime=${data.uptimeSec ?? '-'}s heap=${data.freeHeap ?? '-'} sd=${data.sdMounted ?? '-'} battery=${data.batteryPercent ?? '-'}% ${data.batteryMv ?? '-'}mV charging=${data.batteryCharging ?? '-'}`,
+      `Device ${deviceId} info: fw=${data.firmwareVersion} wifi=${data.wifiSsid} rssi=${data.wifiRssi} ip=${data.ip ?? '-'} uptime=${data.uptimeSec ?? '-'}s heap=${data.freeHeap ?? '-'} sd=${data.sdMounted ?? '-'} battery=${data.batteryPercent ?? '-'}% ${data.batteryMv ?? '-'}mV charging=${data.batteryCharging ?? '-'} remaining=${data.batteryMinutesRemaining ?? '-'}min`,
     );
   }
 

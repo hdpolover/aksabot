@@ -1,6 +1,7 @@
 #include "battery.h"
 #include "config.h"
 #include <Arduino.h>
+#include "soc/usb_serial_jtag_reg.h"
 
 namespace battery {
 
@@ -42,6 +43,12 @@ static uint16_t prevMv      = 0;    // previous reading for trend detection
 static bool     usbPowered  = false;
 static bool     charging    = false; // true if voltage is rising (trend-based)
 
+// ── Discharge rate tracking ──────────────────────────────────────────────────
+static constexpr int RATE_WINDOW = 10;           // samples (5 min at 30s intervals)
+static uint16_t rateBuffer[RATE_WINDOW] = {};    // circular buffer of mV readings
+static int rateIndex = 0;
+static int rateSamples = 0;                       // how many samples we've collected
+
 // ── Private helpers ───────────────────────────────────────────────────────────
 
 static uint8_t voltageToPercent(uint16_t mv) {
@@ -71,6 +78,19 @@ void init() {
     Serial.println("[Battery] Init");
 }
 
+// Detect USB host connection via USB Serial/JTAG SOF (Start-of-Frame) bits.
+// A USB host sends SOF packets every 1ms. If we clear the SOF status bit and
+// it reappears within a few ms, a host is physically connected. This works
+// even when the battery is fully charged and voltage alone can't distinguish
+// USB-powered from battery-full.
+static bool detectUsbConnected() {
+    // Clear the SOF interrupt raw status bit
+    REG_SET_BIT(USB_SERIAL_JTAG_INT_CLR_REG, USB_SERIAL_JTAG_SOF_INT_CLR);
+    delayMicroseconds(1500);  // SOF fires every 1ms — wait 1.5ms
+    // If the bit came back, a USB host is sending frames
+    return (REG_READ(USB_SERIAL_JTAG_INT_RAW_REG) & USB_SERIAL_JTAG_SOF_INT_RAW) != 0;
+}
+
 uint8_t readPercent() {
     // Average 16 samples using the ESP32-S3's calibrated millivolt API.
     // analogReadMilliVolts() uses factory-burned eFuse calibration data
@@ -92,26 +112,44 @@ uint8_t readPercent() {
     bool voltageRising = (prevMv > 0) && (delta >= CHARGING_RISE_THRESHOLD);
     prevMv = mv;
 
-    // USB/charging: either voltage above threshold OR voltage is rising
-    usbPowered = (mv >= static_cast<uint16_t>(USB_VOLTAGE_MIN));
+    // Primary USB detection: SOF frame check (hardware-level, works regardless
+    // of battery voltage). Fallback: high voltage threshold for edge cases.
+    bool usbDetected = detectUsbConnected();
+    usbPowered = usbDetected || (mv >= static_cast<uint16_t>(USB_VOLTAGE_MIN));
     charging   = usbPowered || voltageRising;
 
     // Update shared state
     lastMv = mv;
 
-    // Diagnostic log — raw ADC, pin mV, battery mV, delta, USB, charging
-    Serial.printf("[Battery] raw=%u pinMv=%u batMv=%u delta=%+dmV usb=%s charging=%s\n",
+    // Diagnostic log
+    Serial.printf("[Battery] raw=%u pinMv=%u batMv=%u delta=%+dmV usb=%s(sof=%s) charging=%s\n",
                   rawAvg, pinMv, mv, delta,
                   usbPowered ? "Y" : "N",
+                  usbDetected ? "Y" : "N",
                   charging   ? "Y" : "N");
 
     if (charging) {
+        // Reset rate tracking when charging
+        rateSamples = 0;
+        rateIndex = 0;
         lastPercent = 255;
         return 255;
     }
 
     lastPercent = voltageToPercent(mv);
     Serial.printf("[Battery] %u mV → %u%%\n", mv, lastPercent);
+
+    // Record voltage for discharge rate tracking (only when not charging)
+    if (!charging) {
+        rateBuffer[rateIndex] = mv;
+        rateIndex = (rateIndex + 1) % RATE_WINDOW;
+        if (rateSamples < RATE_WINDOW) rateSamples++;
+    } else {
+        // Reset rate tracking when charging
+        rateSamples = 0;
+        rateIndex = 0;
+    }
+
     return lastPercent;
 }
 
@@ -129,6 +167,39 @@ bool isLow() {
 
 bool isCritical() {
     return !charging && lastPercent != 255 && lastPercent <= CRITICAL_THRESHOLD;
+}
+
+int16_t minutesRemaining() {
+    if (charging || rateSamples < 3) return -1;  // need at least 3 samples
+
+    // Oldest sample in the ring buffer
+    int oldestIdx = (rateSamples < RATE_WINDOW)
+        ? 0
+        : rateIndex;  // rateIndex points to the next write = oldest
+    uint16_t oldestMv = rateBuffer[oldestIdx];
+
+    // Newest sample
+    int newestIdx = (rateIndex - 1 + RATE_WINDOW) % RATE_WINDOW;
+    uint16_t newestMv = rateBuffer[newestIdx];
+
+    // Time span of the window in minutes (samples * 30s interval)
+    float spanMinutes = rateSamples * 0.5f;  // 30s = 0.5 min
+
+    // Drain rate in mV per minute
+    float drainMvPerMin = (float)(oldestMv - newestMv) / spanMinutes;
+
+    // Not draining (stable or rising without being flagged as charging)
+    if (drainMvPerMin <= 0.5f) return -1;
+
+    // mV remaining until empty (3400mV = 0%)
+    float mvRemaining = (float)newestMv - 3400.0f;
+    if (mvRemaining <= 0) return 0;
+
+    int16_t minutes = (int16_t)(mvRemaining / drainMvPerMin);
+    // Cap at 24 hours to avoid absurd estimates
+    if (minutes > 1440) minutes = 1440;
+
+    return minutes;
 }
 
 uint16_t lastVoltageMillivolts() {

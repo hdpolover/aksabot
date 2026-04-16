@@ -3,9 +3,11 @@ class DeviceStats {
   final int totalConversations;
   final int totalMemories;
   final int poolSize;
-  final int? batteryPercent; // 0–100 = percent, 255 = charging, null = unknown
-  final int? batteryMv; // raw millivolts for diagnostics
-  final bool? batteryCharging; // true if USB or voltage trending up
+  final int? batteryPercent;
+  final int? batteryMv;
+  final bool? batteryCharging;
+  final int? batteryMinutesRemaining;
+  final List<BatteryHistoryEntry> batteryHistory;
 
   const DeviceStats({
     required this.conversationsToday,
@@ -15,6 +17,8 @@ class DeviceStats {
     this.batteryPercent,
     this.batteryMv,
     this.batteryCharging,
+    this.batteryMinutesRemaining,
+    this.batteryHistory = const [],
   });
 
   factory DeviceStats.fromJson(Map<String, dynamic> json) {
@@ -26,6 +30,12 @@ class DeviceStats {
       batteryPercent: json['batteryPercent'] as int?,
       batteryMv: json['batteryMv'] as int?,
       batteryCharging: json['batteryCharging'] as bool?,
+      batteryMinutesRemaining: json['batteryMinutesRemaining'] as int?,
+      batteryHistory: (json['batteryHistory'] as List<dynamic>?)
+              ?.map((e) =>
+                  BatteryHistoryEntry.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          [],
     );
   }
 
@@ -39,6 +49,8 @@ class DeviceStats {
     Object? batteryPercent = _unset,
     Object? batteryMv = _unset,
     Object? batteryCharging = _unset,
+    Object? batteryMinutesRemaining = _unset,
+    List<BatteryHistoryEntry>? batteryHistory,
   }) {
     return DeviceStats(
       conversationsToday: conversationsToday ?? this.conversationsToday,
@@ -48,12 +60,38 @@ class DeviceStats {
       batteryPercent: identical(batteryPercent, _unset)
           ? this.batteryPercent
           : batteryPercent as int?,
-      batteryMv: identical(batteryMv, _unset)
-          ? this.batteryMv
-          : batteryMv as int?,
+      batteryMv:
+          identical(batteryMv, _unset) ? this.batteryMv : batteryMv as int?,
       batteryCharging: identical(batteryCharging, _unset)
           ? this.batteryCharging
           : batteryCharging as bool?,
+      batteryMinutesRemaining: identical(batteryMinutesRemaining, _unset)
+          ? this.batteryMinutesRemaining
+          : batteryMinutesRemaining as int?,
+      batteryHistory: batteryHistory ?? this.batteryHistory,
+    );
+  }
+}
+
+class BatteryHistoryEntry {
+  final DateTime timestamp;
+  final int percent;
+  final int mv;
+  final bool charging;
+
+  const BatteryHistoryEntry({
+    required this.timestamp,
+    required this.percent,
+    required this.mv,
+    required this.charging,
+  });
+
+  factory BatteryHistoryEntry.fromJson(Map<String, dynamic> json) {
+    return BatteryHistoryEntry(
+      timestamp: DateTime.fromMillisecondsSinceEpoch(json['timestamp'] as int),
+      percent: json['percent'] as int? ?? 0,
+      mv: json['mv'] as int? ?? 0,
+      charging: json['charging'] as bool? ?? false,
     );
   }
 }

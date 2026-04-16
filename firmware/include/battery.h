@@ -14,4 +14,8 @@ bool     isLow();         // last reading ≤ LOW_THRESHOLD and not charging
 bool     isCritical();    // last reading ≤ CRITICAL_THRESHOLD and not charging
 uint16_t lastVoltageMillivolts();
 
+/// Estimated minutes of battery remaining based on discharge rate.
+/// Returns -1 if charging, unknown, or insufficient data.
+int16_t minutesRemaining();
+
 }  // namespace battery

@@ -22,6 +22,7 @@ enum class Clip {
     SLEEP,          // Going to sleep sound
     WAKE,           // Waking up sound
     LOW_BATTERY,    // "Hey, I'm running low — plug me in"
+    CRITICAL_SHUTDOWN, // "Going to sleep now, plug me in to wake up"
 };
 
 /// Load all resilience audio from SD into PSRAM.

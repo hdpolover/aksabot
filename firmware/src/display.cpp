@@ -1595,6 +1595,82 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
         }
     }
 
+    // ── Battery indicator (top-right corner) ───────────────────
+    // Tiny battery icon with status symbol to the left:
+    //   ✓ checkmark = fully charged, ⚡ plug = charging, nothing = on battery.
+    // Color: green=full/charging, white=mid, yellow=low, red=critical (blinks).
+    {
+        const int bx = LCD_WIDTH - 18;  // shifted right to leave room for symbol
+        const int by = 4;
+        const int bw = 14, bh = 9;
+        const int nubW = 2, nubH = 5;
+        uint8_t pct = status.batteryPercent;
+        bool isCharging = (pct == 255);
+        bool isFullyCharged = isCharging && (status.batteryMv >= 4050);
+
+        // Determine fill color based on level
+        uint16_t fillCol, outCol;
+        if (isFullyCharged || isCharging) {
+            fillCol = rgb(0, 200, 80);    // green
+            outCol  = rgb(0, 120, 50);
+        } else if (pct > 80) {
+            fillCol = rgb(0, 200, 80);
+            outCol  = rgb(0, 120, 50);
+        } else if (pct > 40) {
+            fillCol = rgb(255, 255, 255);
+            outCol  = blendRGB565(pal.accent, pal.bg, 80);
+        } else if (pct > 20) {
+            fillCol = rgb(220, 180, 0);
+            outCol  = rgb(130, 110, 0);
+        } else {
+            fillCol = rgb(220, 50, 40);
+            outCol  = rgb(140, 30, 25);
+        }
+
+        // Low battery blink: <=20% slow (1s), <=10% fast (500ms)
+        bool blinkOff = false;
+        if (!isCharging && pct <= 20) {
+            uint32_t period = (pct <= 10) ? 500 : 1000;
+            blinkOff = ((millis() / period) % 2 != 0);
+        }
+
+        // Draw outline + nub
+        s.drawRect(bx, by, bw, bh, outCol);
+        s.fillRect(bx + bw, by + (bh - nubH) / 2, nubW, nubH, outCol);
+
+        // Draw fill
+        int fillMax = bw - 2;
+        if (!blinkOff) {
+            if (isFullyCharged) {
+                s.fillRect(bx + 1, by + 1, fillMax, bh - 2, fillCol);
+            } else if (isCharging) {
+                float pulse = sinf(millis() / 600.0f) * 0.3f + 0.7f;
+                int fw = (int)(fillMax * pulse);
+                s.fillRect(bx + 1, by + 1, fw, bh - 2, fillCol);
+            } else {
+                int fw = (pct > 100) ? fillMax : (fillMax * pct / 100);
+                if (fw < 1 && pct > 0) fw = 1;
+                s.fillRect(bx + 1, by + 1, fw, bh - 2, fillCol);
+            }
+        }
+
+        // Status symbol to the left of battery icon
+        uint16_t symCol = rgb(0, 200, 80);  // green for both symbols
+        int sx = bx - 9;                     // symbol center x
+        int sy = by + bh / 2;                // vertically centered with battery
+
+        if (isFullyCharged) {
+            // ✓ Checkmark: two lines forming a tick
+            s.drawLine(sx - 3, sy,     sx - 1, sy + 2, symCol);
+            s.drawLine(sx - 1, sy + 2, sx + 3, sy - 2, symCol);
+        } else if (isCharging) {
+            // ⚡ Lightning bolt: small 5px tall bolt shape
+            s.drawLine(sx + 1, sy - 3, sx - 1, sy,     symCol);
+            s.drawLine(sx - 1, sy,     sx + 1, sy,      symCol);
+            s.drawLine(sx + 1, sy,     sx - 1, sy + 3,  symCol);
+        }
+    }
+
     // ── Status icon (bottom) — small icon instead of text label ──
     {
         int iconY = LCD_HEIGHT - 24;

@@ -1,6 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import type { SttStream } from '../ai/interfaces';
 
+export interface BatteryHistoryEntry {
+  timestamp: number; // Unix ms
+  percent: number;   // 0-100 or 255
+  mv: number;
+  charging: boolean;
+}
+
 export interface DeviceSession {
   deviceId: string;
   userId: string;
@@ -25,6 +32,10 @@ export interface DeviceSession {
   batteryMv?: number;
   /** Whether the device is currently charging (USB or voltage-trend based). */
   batteryCharging?: boolean;
+  /** Rolling battery history — last 24h of readings, one per minute. */
+  batteryHistory: BatteryHistoryEntry[];
+  /** Estimated minutes remaining from firmware discharge rate. */
+  batteryMinutesRemaining?: number;
   /** Current display mode reported by the device. 'clock' suppresses proactive events and audio. */
   displayMode?: string;
   /** Set by silent reconnect:back — suppresses the connection greeting. */
@@ -56,6 +67,7 @@ export class SessionManager {
       language,
       intercomReply: false,
       intercomFrames: [],
+      batteryHistory: [],
     };
     this.sessions.set(deviceId, session);
     return session;
