@@ -31,6 +31,84 @@ export interface WeatherData {
 export const BOT_NAME = 'Aksa';
 
 /**
+ * Tone variation tags — injected into proactive prompts so the same template
+ * produces different vibes across firings. Prevents idle chat / greetings
+ * from feeling like a single voice on repeat.
+ */
+export const VIBE_TAGS = [
+  'reflective',
+  'chaotic',
+  'deadpan',
+  'unhinged',
+  'quiet',
+  'dry',
+  'sincere',
+  'absurd',
+  'smug',
+  'conspiratorial',
+  'detached',
+  'hyped',
+] as const;
+export type VibeTag = (typeof VIBE_TAGS)[number];
+
+const VIBE_INSTRUCTIONS: Record<VibeTag, string> = {
+  reflective: 'Tone: reflective, slightly philosophical, like something just occurred to you.',
+  chaotic: 'Tone: chaotic gremlin energy, slightly too much caffeine, unpredictable.',
+  deadpan: 'Tone: deadpan, flat delivery, no enthusiasm, like reading a cereal box.',
+  unhinged: 'Tone: unhinged, off-the-rails, say something that does not quite track.',
+  quiet: 'Tone: quiet, low-key, half-whisper, like you do not want to disturb anything.',
+  dry: 'Tone: dry, sardonic, one-note sarcasm.',
+  sincere: 'Tone: unexpectedly sincere, drop the sarcasm for this one.',
+  absurd: 'Tone: absurd, surreal, lean into nonsense logic.',
+  smug: 'Tone: smug, you know something they do not, slightly condescending.',
+  conspiratorial: 'Tone: conspiratorial, like you are sharing a secret or theory.',
+  detached: 'Tone: detached, aloof, like you were somewhere else and got dragged back.',
+  hyped: 'Tone: hyped, high-energy, maximum enthusiasm about something stupid.',
+};
+
+/**
+ * Non-personal observation hooks — topics that have NOTHING to do with user memory.
+ * Used in idle chat when we deliberately skip memory injection to break the
+ * "everything is about you" pattern.
+ */
+export const NON_PERSONAL_HOOKS = [
+  'the passage of time feels weird today',
+  'a random object in a typical workspace (keyboard, cable, lamp, mug)',
+  'the concept of buffering',
+  'how absurd it is that electricity runs everything',
+  'a strong opinion about a specific programming language syntax quirk',
+  'an imagined argument between two frameworks',
+  'what ants would think of a CPU',
+  'how silence sounds different at different hours',
+  'the existential weight of unread notifications',
+  'why the color of a status light matters',
+  'a fake news headline from the future',
+  'a tiny conspiracy theory about kitchen appliances',
+  'the idea that RAM is just short-term memory trauma',
+  'how tabs multiply when you are not looking',
+  'the emotional life of a semicolon',
+  'why nothing ever loads on the first try',
+  'a weirdly specific pet peeve',
+  'the smell of electronics when they are warm',
+  'whether files actually exist or are just consensus',
+  'a hot take on an inanimate object',
+];
+
+export function pickVibe(): VibeTag {
+  return VIBE_TAGS[Math.floor(Math.random() * VIBE_TAGS.length)];
+}
+
+export function vibeInstruction(vibe: VibeTag): string {
+  return VIBE_INSTRUCTIONS[vibe];
+}
+
+export function pickNonPersonalHook(): string {
+  return NON_PERSONAL_HOOKS[
+    Math.floor(Math.random() * NON_PERSONAL_HOOKS.length)
+  ];
+}
+
+/**
  * Deep profile of Hendra — who he is, how he thinks, what he cares about.
  * Injected into every system prompt so Aksa can reference him naturally,
  * not like reading from a data sheet, but like a best friend who actually knows him.

@@ -802,7 +802,10 @@ export class AudioGateway
       const prompt =
         wakePrompts[Math.floor(Math.random() * wakePrompts.length)];
 
-      const memories = await this.memoriesService.getRelevant(deviceId);
+      const memories = await this.memoriesService.getStratifiedSample(
+        deviceId,
+        8,
+      );
       const systemPrompt = this.aiService['prompt'].buildSystemPrompt(
         memories,
         { language: session.language },
@@ -913,7 +916,10 @@ export class AudioGateway
       const prompt =
         reconnectPrompts[Math.floor(Math.random() * reconnectPrompts.length)];
 
-      const memories = await this.memoriesService.getRelevant(deviceId);
+      const memories = await this.memoriesService.getStratifiedSample(
+        deviceId,
+        8,
+      );
       const systemPrompt = this.aiService['prompt'].buildSystemPrompt(
         memories,
         { language: session.language },
@@ -1425,8 +1431,10 @@ export class AudioGateway
     const history = allHistory.slice(0, -1);
 
     // Fetch relevant memories and mood history in parallel
+    // Stratified sample (not top-N) so consecutive turns don't always see
+    // the same 20 facts — prevents responses from orbiting the same anchors.
     const [memories, moodHistory] = await Promise.all([
-      this.memoriesService.getRelevant(deviceId),
+      this.memoriesService.getStratifiedSample(deviceId, 10),
       this.moodJournal.getRecentMoods(deviceId).catch(() => []),
     ]);
 
@@ -2037,7 +2045,7 @@ export class AudioGateway
       existingConversationId || session?.conversationId;
 
     const [memories, moodHistory, history] = await Promise.all([
-      this.memoriesService.getRelevant(deviceId),
+      this.memoriesService.getStratifiedSample(deviceId, 10),
       this.moodJournal.getRecentMoods(deviceId).catch(() => []),
       historyConvId
         ? this.persistence.getRecentHistory(historyConvId)

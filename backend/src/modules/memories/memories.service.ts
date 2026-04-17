@@ -37,6 +37,105 @@ export class MemoriesService {
     }));
   }
 
+  /**
+   * Stratified sample — picks a varied mix instead of always top-N by confidence.
+   * Rotates through: fresh (recently accessed), anchor (highest confidence),
+   * and wildcards (random from the rest). Keeps responses from feeling like
+   * they always orbit the same 5 facts.
+   */
+  async getStratifiedSample(
+    deviceId: string,
+    limit = 8,
+  ): Promise<{ id: string; fact: string; category: string }[]> {
+    const pool = await this.memoriesRepo.find({
+      where: { deviceId, confidence: MoreThan(0.1) },
+      order: { confidence: 'DESC', lastAccessedAt: 'DESC' },
+      take: 60,
+    });
+
+    if (pool.length <= limit) {
+      return pool.map((m) => ({ id: m.id, fact: m.fact, category: m.category }));
+    }
+
+    // Split into strata
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60_000;
+    const fresh = pool.filter(
+      (m) => m.lastAccessedAt && m.lastAccessedAt.getTime() > sevenDaysAgo,
+    );
+    const anchor = pool.filter((m) => m.confidence >= 0.9);
+    const rest = pool.filter(
+      (m) => !fresh.includes(m) && !anchor.includes(m),
+    );
+
+    // Target ratios — roughly 40% anchor, 30% fresh, 30% wildcard
+    const anchorCount = Math.max(1, Math.floor(limit * 0.4));
+    const freshCount = Math.max(1, Math.floor(limit * 0.3));
+    const wildcardCount = limit - anchorCount - freshCount;
+
+    const pick = <T>(arr: T[], n: number): T[] => {
+      const copy = [...arr];
+      const out: T[] = [];
+      for (let i = 0; i < n && copy.length > 0; i++) {
+        const idx = Math.floor(Math.random() * copy.length);
+        out.push(copy.splice(idx, 1)[0]);
+      }
+      return out;
+    };
+
+    const picked = new Set<string>();
+    const result: Memory[] = [];
+    for (const m of [
+      ...pick(anchor, anchorCount),
+      ...pick(fresh, freshCount),
+      ...pick(rest, wildcardCount),
+    ]) {
+      if (picked.has(m.id)) continue;
+      picked.add(m.id);
+      result.push(m);
+    }
+
+    // Top-up from pool if strata were thin
+    if (result.length < limit) {
+      for (const m of pool) {
+        if (result.length >= limit) break;
+        if (!picked.has(m.id)) {
+          picked.add(m.id);
+          result.push(m);
+        }
+      }
+    }
+
+    return result.map((m) => ({
+      id: m.id,
+      fact: m.fact,
+      category: m.category,
+    }));
+  }
+
+  /**
+   * Fetch the most recent user/assistant exchanges across the device's latest
+   * conversations. Used as "recency context" for idle chat so quips can riff
+   * on actual recent events, not just static memories.
+   */
+  async getRecentExchanges(
+    deviceId: string,
+    limit = 4,
+  ): Promise<{ role: string; content: string }[]> {
+    const latestConv = await this.conversationsRepo.findOne({
+      where: { deviceId },
+      order: { startedAt: 'DESC' },
+    });
+    if (!latestConv) return [];
+
+    const messages = await this.messagesRepo.find({
+      where: { conversationId: latestConv.id },
+      order: { createdAt: 'DESC' },
+      take: limit,
+    });
+
+    return messages.reverse().map((m) => ({ role: m.role, content: m.content }));
+  }
+
   // ── Confidence boost ──────────────────────────────────
 
   async bumpAccessed(memoryIds: string[]): Promise<void> {

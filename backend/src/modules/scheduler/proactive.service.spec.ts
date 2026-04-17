@@ -34,21 +34,29 @@ describe('ProactiveService', () => {
 
     mockMemories = {
       getRelevant: jest.fn().mockResolvedValue([]),
+      getStratifiedSample: jest.fn().mockResolvedValue([]),
+      getRecentExchanges: jest.fn().mockResolvedValue([]),
     };
 
     mockSessions = {
       get: jest.fn().mockReturnValue({ state: 'idle' }),
+      isClockMode: jest.fn().mockReturnValue(false),
     };
 
     sendToDevice = jest.fn();
 
     const mockMoodJournal = { getRecentMoods: jest.fn().mockResolvedValue([]) };
+    const mockAi = {
+      getWeatherData: jest.fn().mockReturnValue(null),
+      refreshWeather: jest.fn().mockResolvedValue(undefined),
+    };
     service = new ProactiveService(
       devicesRepo as any,
       mockLlm as any,
       mockMemories as any,
       mockSessions as any,
       mockMoodJournal as any,
+      mockAi as any,
     );
     service.setSendToDevice(sendToDevice);
   });
@@ -73,8 +81,10 @@ describe('ProactiveService', () => {
       expect(mockLlm.generate).toHaveBeenCalledTimes(2);
     });
 
-    it('passes memory context to LLM when memories exist', async () => {
-      mockMemories.getRelevant.mockResolvedValue(
+    it('passes memory context to LLM when memories exist (and coin flip opts in)', async () => {
+      // Memory injection is now probabilistic (~50%) — force inclusion for determinism.
+      const rng = jest.spyOn(Math, 'random').mockReturnValue(0.1);
+      mockMemories.getStratifiedSample.mockResolvedValue(
         makeMemories(['user prefers dark mode', 'working on Aksabot']),
       );
 
@@ -83,6 +93,7 @@ describe('ProactiveService', () => {
       const userContent: string = mockLlm.generate.mock.calls[0][1][0].content;
       expect(userContent).toContain('user prefers dark mode');
       expect(userContent).toContain('working on Aksabot');
+      rng.mockRestore();
     });
 
     it('uses hardcoded bot name "Aksa" in the prompt', async () => {
@@ -226,8 +237,10 @@ describe('ProactiveService', () => {
       );
     });
 
-    it('includes memory context in the LLM prompt', async () => {
-      mockMemories.getRelevant.mockResolvedValue(
+    it('includes memory context in the LLM prompt (when coin flip opts in)', async () => {
+      // Memory injection is probabilistic (~50%) — force inclusion for determinism.
+      const rng = jest.spyOn(Math, 'random').mockReturnValue(0.1);
+      mockMemories.getStratifiedSample.mockResolvedValue(
         makeMemories(['working on NestJS backend', 'debugging WebSocket']),
       );
 
@@ -235,6 +248,7 @@ describe('ProactiveService', () => {
 
       const userContent: string = mockLlm.generate.mock.calls[0][1][0].content;
       expect(userContent).toContain('working on NestJS backend');
+      rng.mockRestore();
     });
 
     it('uses hardcoded bot name "Aksa" in the prompt', async () => {

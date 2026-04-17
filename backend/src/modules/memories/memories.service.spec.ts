@@ -48,7 +48,10 @@ describe('MemoriesService', () => {
       extractFromTranscript: jest.fn().mockResolvedValue([]),
     };
 
-    const conversationsRepo = { find: jest.fn().mockResolvedValue([]) };
+    const conversationsRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+    };
     service = new MemoriesService(
       memoriesRepo as any,
       messagesRepo as any,
@@ -77,6 +80,75 @@ describe('MemoriesService', () => {
       expect(memoriesRepo.find).toHaveBeenCalledWith(
         expect.objectContaining({ take: 5 }),
       );
+    });
+  });
+
+  describe('getStratifiedSample', () => {
+    it('returns all memories when pool is smaller than limit', async () => {
+      memoriesRepo.find.mockResolvedValue([mockMemory]);
+      const result = await service.getStratifiedSample('device-1', 8);
+      expect(result).toEqual([
+        { id: 'mem-1', fact: 'User is a developer', category: 'work' },
+      ]);
+    });
+
+    it('mixes fresh, anchor, and wildcard strata when pool is large', async () => {
+      const now = Date.now();
+      const recent = new Date(now - 24 * 60 * 60_000); // yesterday
+      const old = new Date(now - 60 * 24 * 60 * 60_000); // 60 days ago
+      const pool = [
+        // High-confidence anchors (old, so not fresh)
+        { id: 'a1', fact: 'anchor 1', category: 'c', confidence: 1.0, lastAccessedAt: old },
+        { id: 'a2', fact: 'anchor 2', category: 'c', confidence: 0.95, lastAccessedAt: old },
+        // Fresh (recent, mid-confidence)
+        { id: 'f1', fact: 'fresh 1', category: 'c', confidence: 0.5, lastAccessedAt: recent },
+        { id: 'f2', fact: 'fresh 2', category: 'c', confidence: 0.5, lastAccessedAt: recent },
+        // Wildcards (old, mid-confidence)
+        { id: 'w1', fact: 'wild 1', category: 'c', confidence: 0.5, lastAccessedAt: old },
+        { id: 'w2', fact: 'wild 2', category: 'c', confidence: 0.5, lastAccessedAt: old },
+        { id: 'w3', fact: 'wild 3', category: 'c', confidence: 0.5, lastAccessedAt: old },
+        { id: 'w4', fact: 'wild 4', category: 'c', confidence: 0.5, lastAccessedAt: old },
+        { id: 'w5', fact: 'wild 5', category: 'c', confidence: 0.5, lastAccessedAt: old },
+      ];
+      memoriesRepo.find.mockResolvedValue(pool);
+
+      const result = await service.getStratifiedSample('device-1', 6);
+      expect(result).toHaveLength(6);
+      const ids = result.map((r) => r.id);
+      expect(new Set(ids).size).toBe(6); // no duplicates
+    });
+
+    it('filters out low-confidence memories via query', async () => {
+      await service.getStratifiedSample('device-1');
+      expect(memoriesRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ deviceId: 'device-1' }),
+        }),
+      );
+    });
+  });
+
+  describe('getRecentExchanges', () => {
+    it('returns empty when no conversations exist', async () => {
+      const result = await service.getRecentExchanges('device-1');
+      expect(result).toEqual([]);
+    });
+
+    it('returns recent messages in chronological order', async () => {
+      const conversationsRepo = (service as any).conversationsRepo;
+      conversationsRepo.findOne.mockResolvedValue({ id: 'conv-1' });
+
+      const now = new Date();
+      messagesRepo.find.mockResolvedValue([
+        { role: 'assistant', content: 'B', createdAt: new Date(now.getTime() - 1000) },
+        { role: 'user', content: 'A', createdAt: new Date(now.getTime() - 2000) },
+      ]);
+
+      const result = await service.getRecentExchanges('device-1', 2);
+      expect(result).toEqual([
+        { role: 'user', content: 'A' },
+        { role: 'assistant', content: 'B' },
+      ]);
     });
   });
 

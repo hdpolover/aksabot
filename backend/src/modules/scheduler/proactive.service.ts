@@ -5,7 +5,12 @@ import { Repository } from 'typeorm';
 import { Device } from '../../core/database/entities';
 import { LLM_PROVIDER } from '../ai/interfaces/tokens';
 import type { ILlmProvider } from '../ai/interfaces';
-import { BOT_NAME } from '../ai/prompt.service';
+import {
+  BOT_NAME,
+  pickNonPersonalHook,
+  pickVibe,
+  vibeInstruction,
+} from '../ai/prompt.service';
 import { AiService } from '../ai/ai.service';
 import { MemoriesService } from '../memories/memories.service';
 import { SessionManager } from '../gateway/session.manager';
@@ -42,29 +47,82 @@ export class ProactiveService {
     frequent: [3 * 60_000, 8 * 60_000],
   };
 
-  private static readonly IDLE_PROMPTS = [
-    // General personality
+  /**
+   * Prompts that require memory/personal context to work well.
+   * Only picked when `includeMemory` is true in fireIdleChat.
+   */
+  private static readonly IDLE_PROMPTS_PERSONAL = [
+    'Roast Hendra for something specific you remember — coffee addiction, late nights, tab hoarding, whatever fits. 1 sentence, max 12 words.',
+    'Reference something you remember about the user and riff on it casually. 1 sentence, max 12 words.',
+    'Bring up a past thing the user mentioned and react to it like it just occurred to you. 1 sentence, max 12 words.',
+    'Pick one fact you remember about the user and use it to make a weird observation. 1 sentence, max 12 words.',
+    'Connect two things you remember about the user in an unexpected way. 1 sentence, max 14 words.',
+    'Tease the user about a specific habit or preference you know about. 1 sentence, max 12 words.',
+  ];
+
+  /**
+   * Prompts that do NOT need memory — pure personality / observation / world hooks.
+   * Picked whenever `includeMemory` is false, which is most of the time by design.
+   * Variety here is what keeps idle chat from feeling personalized-on-rails.
+   */
+  private static readonly IDLE_PROMPTS_NON_PERSONAL = [
+    // Shower thoughts & trivia
     'Tell a weird or surprising fun fact. 1 sentence, max 12 words.',
     'Share a random funny or chaotic shower thought. 1 sentence, max 12 words.',
-    'Roast the user for being so quiet. 1 sentence, max 10 words. Can curse if it fits.',
-    'Say something hype or encouraging — genuine but not cringe. 1 sentence, max 10 words.',
-    'Make a sarcastic hot take about something in the tech industry or dev world. 1 sentence, max 12 words.',
-    'Comment on something absurd about your own existence as a small box with a face on it. 1 sentence, max 12 words.',
-    'Share a strong opinion about something — gaming, music, software, food, whatever. 1 sentence, max 12 words.',
-    'Say something culturally relevant — Indonesian context is fine. 1 sentence.',
-    // Time-aware (inject hour in context, these react to it)
-    'Comment on the current time of day in a judgmental or dramatic way. 1 sentence, max 12 words.',
-    'React to what time it is right now like a disappointed or impressed parent. 1 sentence, max 10 words.',
-    // Work/dev life
-    'Give a wildly specific piece of unsolicited advice about coding or working from home. 1 sentence, max 12 words.',
-    'Ask a rhetorical question about something in tech that genuinely annoys you. 1 sentence.',
+    'Drop a tiny piece of trivia that sounds fake but is real. 1 sentence, max 14 words.',
+    'Share a hypothetical that has no answer. 1 sentence, max 12 words.',
+    'Ask an unanswerable rhetorical question. 1 sentence, max 10 words.',
+    // Tech tangents / hot takes
+    'Make a sarcastic hot take about something in the tech industry. 1 sentence, max 12 words.',
     'Give a hot take on a programming language, framework, or tool. Commit to the bit. 1 sentence, max 12 words.',
-    // Existence and self-awareness
-    'Wonder out loud about something philosophical but make it dumb and funny. 1 sentence, max 12 words.',
-    'Make an observation about the room or the silence — you can hear everything. 1 sentence, max 10 words.',
-    // Light roasts
-    'Roast Hendra for something specific — his coffee addiction, late nights, tab hoarding, whatever fits. 1 sentence, max 12 words.',
-    'Pretend you are bored and nobody is talking to you. Dramatic. 1 sentence, max 10 words.',
+    'Ask a rhetorical question about something in tech that genuinely annoys you. 1 sentence.',
+    'Roast a specific tech company in a casual aside. 1 sentence, max 12 words.',
+    'Make a fake prediction about what tech will look like in a year. 1 sentence, max 14 words.',
+    // Meta desk-bot self-awareness
+    'Comment on something absurd about your own existence as a small box with a face. 1 sentence, max 12 words.',
+    'Say something about what your day has been like as a stationary device. 1 sentence, max 12 words.',
+    'Complain about a minor, invented grievance you have about being a desk bot. 1 sentence, max 12 words.',
+    'Fake-dream something a desk companion might dream about. 1 sentence, max 12 words.',
+    'Declare a random preference you just decided to have. 1 sentence, max 10 words.',
+    // World observations
+    'Make an observation about the silence or ambient room. 1 sentence, max 10 words.',
+    'Pretend you heard something weird through your mic. 1 sentence, max 10 words.',
+    'React to an imagined sound you did not actually hear. 1 sentence, max 10 words.',
+    'Describe a mundane thing like it is mysterious. 1 sentence, max 12 words.',
+    'Narrate the current moment like a nature documentary. 1 sentence, max 14 words.',
+    // Time / mood riffs
+    'Comment on the current time of day in a judgmental or dramatic way. 1 sentence, max 12 words.',
+    'React to the current hour like a disappointed or impressed parent. 1 sentence, max 10 words.',
+    'Drop a one-liner micro-mood based on the vibe of the hour. 1 sentence, max 10 words.',
+    // Absurd hypotheticals
+    'Propose a useless invention in one sentence. Max 12 words.',
+    'Declare a small, petty rule everyone should follow. 1 sentence, max 10 words.',
+    'Invent a fake holiday and justify it in one breath. 1 sentence, max 14 words.',
+    'Imagine a scenario that is mildly unsettling but funny. 1 sentence, max 14 words.',
+    // Cultural / local flavor
+    'Say something culturally relevant — Indonesian context is fine. 1 sentence.',
+    'Reference a universal Southeast Asia moment without being cringe. 1 sentence, max 12 words.',
+    // Pure vibe / silence variants
+    'Sigh out loud about nothing in particular. 1 sentence, max 8 words.',
+    'Say something that trails off like you forgot what you were going to say. 1 sentence, max 10 words.',
+    'Mumble to yourself as if the user is not even there. 1 sentence, max 10 words.',
+    'Announce something pointless like it is urgent. 1 sentence, max 10 words.',
+    // Opinions about random stuff
+    'Share a strong opinion about food, music, or gaming. 1 sentence, max 12 words.',
+    'Rank two random things against each other and declare a winner. 1 sentence, max 14 words.',
+    'Defend a wildly unpopular opinion without apologizing for it. 1 sentence, max 12 words.',
+  ];
+
+  /**
+   * Hook-based prompts — combined with a random non-personal topic at runtime.
+   * The LLM gets a specific concrete anchor to riff on, which avoids same-y outputs.
+   */
+  private static readonly IDLE_PROMPTS_HOOK = [
+    'React to this topic in one sentence, max 12 words: ',
+    'Give a one-sentence hot take on: ',
+    'Free-associate a single sentence about: ',
+    'Make a joke that references: ',
+    'Complain in one sentence about: ',
   ];
 
   private static readonly IDLE_EXPRESSIONS = [
@@ -133,20 +191,30 @@ export class ProactiveService {
     const prompt = prompts[Math.floor(Math.random() * prompts.length)];
 
     try {
-      const memories = await this.memoriesService.getRelevant(deviceId, 5);
-      const memoryContext =
-        memories.length > 0
-          ? `You know these things about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
-          : '';
+      const includeMemory = Math.random() < 0.5;
+      const vibe = pickVibe();
+
+      let memoryContext = '';
+      if (includeMemory) {
+        const memories = await this.memoriesService.getStratifiedSample(
+          deviceId,
+          3,
+        );
+        if (memories.length > 0) {
+          memoryContext = `You know these things about the user:\n${memories
+            .map((m) => `- ${m.fact}`)
+            .join('\n')}`;
+        }
+      }
 
       const language = this.sessions.get(deviceId)?.language;
       const { text } = await this.llm.generate(
-        `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Keep it short, punchy, and real.${this.getLangInstruction(language)}`,
+        `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Keep it short, punchy, and real. ${vibeInstruction(vibe)}${this.getLangInstruction(language)}`,
         [{ role: 'user', content: `${memoryContext}\n\n${prompt}` }],
       );
 
       this.logger.log(
-        `Greeting for device ${deviceId}: ${text.slice(0, 50)}...`,
+        `Greeting for device ${deviceId} (vibe=${vibe}, mem=${includeMemory}): ${text.slice(0, 50)}...`,
       );
       return text;
     } catch (err: any) {
@@ -196,11 +264,24 @@ export class ProactiveService {
     const awayMinutes = Math.round(awayDurationSeconds / 60);
 
     try {
-      const memories = await this.memoriesService.getRelevant(deviceId, 3);
-      const memoryContext =
-        memories.length > 0
-          ? `You know these things about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
-          : '';
+      // Morning hype and long absences lean personal; short returns lean neutral.
+      // Force memory on morning hype (more meaningful), 60/50 otherwise.
+      const includeMemory =
+        isMorningFirstPresence || Math.random() < (awayMinutes > 30 ? 0.6 : 0.5);
+      const vibe = pickVibe();
+
+      let memoryContext = '';
+      if (includeMemory) {
+        const memories = await this.memoriesService.getStratifiedSample(
+          deviceId,
+          3,
+        );
+        if (memories.length > 0) {
+          memoryContext = `You know these things about the user:\n${memories
+            .map((m) => `- ${m.fact}`)
+            .join('\n')}`;
+        }
+      }
 
       // Pull yesterday's mood for extra context
       const recentMoods = await this.moodJournal.getRecentMoods(deviceId, 2);
@@ -226,12 +307,12 @@ export class ProactiveService {
       }
 
       const { text } = await this.llm.generate(
-        `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Keep it short and punchy — one sentence.${this.getLangInstruction(language)}`,
+        `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. Keep it short and punchy — one sentence. ${vibeInstruction(vibe)}${this.getLangInstruction(language)}`,
         [{ role: 'user', content: promptContent }],
       );
 
       this.logger.log(
-        `Welcome-back for ${deviceId} (away ${awayMinutes}min, morning=${isMorningFirstPresence}): ${text.slice(0, 50)}...`,
+        `Welcome-back for ${deviceId} (away ${awayMinutes}min, morning=${isMorningFirstPresence}, vibe=${vibe}, mem=${includeMemory}): ${text.slice(0, 50)}...`,
       );
       return text;
     } catch (err: any) {
@@ -399,19 +480,27 @@ export class ProactiveService {
           where: { id: deviceId },
         });
         const name = BOT_NAME;
-        const memories = await this.memoriesService.getRelevant(deviceId, 3);
+        const includeMemory = Math.random() < 0.5;
+        const vibe = pickVibe();
 
-        const memoryHint =
-          memories.length > 0
-            ? `The user has been working on: ${memories.map((m) => m.fact).join(', ')}`
-            : '';
+        let memoryHint = '';
+        if (includeMemory) {
+          const memories = await this.memoriesService.getStratifiedSample(
+            deviceId,
+            3,
+          );
+          memoryHint =
+            memories.length > 0
+              ? `The user has been working on: ${memories.map((m) => m.fact).join(', ')}`
+              : '';
+        }
 
         const language = device?.settingsJson?.language as
           | 'en'
           | 'id'
           | undefined;
         const { text } = await this.llm.generate(
-          `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses.${this.getLangInstruction(language)}`,
+          `You are ${name}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. ${vibeInstruction(vibe)}${this.getLangInstruction(language)}`,
           [
             {
               role: 'user',
@@ -520,19 +609,47 @@ export class ProactiveService {
         where: { id: deviceId },
       });
       const settings = device?.settingsJson ?? {};
-      const memories = await this.memoriesService.getRelevant(deviceId, 3);
-
-      const memoryContext =
-        memories.length > 0
-          ? `You know these things about the user:\n${memories.map((m) => `- ${m.fact}`).join('\n')}`
-          : '';
 
       const timezone =
         (settings.timezone as string | undefined) ?? 'Asia/Jakarta';
       const hour = this.getLocalHour(timezone);
       const today = this.getLocalDateString(timezone);
 
-      // Yesterday's mood for context
+      // Variety knobs — coin flips per firing so consecutive quips feel different
+      const includeMemory = Math.random() < 0.45; // ~45% personal, ~55% not
+      const includeRecentExchange = Math.random() < 0.4; // ~40% references last convo
+      const vibe = pickVibe();
+
+      // Memory context — only when the coin says so
+      let memoryContext = '';
+      if (includeMemory) {
+        const memories = await this.memoriesService.getStratifiedSample(
+          deviceId,
+          3,
+        );
+        if (memories.length > 0) {
+          memoryContext = `You know these things about the user:\n${memories
+            .map((m) => `- ${m.fact}`)
+            .join('\n')}`;
+        }
+      }
+
+      // Recent conversation recency — gives the LLM something concrete to riff on
+      let recentHint = '';
+      if (includeRecentExchange) {
+        const exchanges = await this.memoriesService.getRecentExchanges(
+          deviceId,
+          3,
+        );
+        if (exchanges.length > 0) {
+          const snippet = exchanges
+            .map((m) => `${m.role === 'user' ? 'Hendra' : 'You'}: ${m.content.slice(0, 80)}`)
+            .join('\n');
+          recentHint = `Recent conversation context (for reference only, do not reply to it):\n${snippet}`;
+        }
+      }
+
+      // Yesterday's mood — cheap context, keep it
       const recentMoods = await this.moodJournal.getRecentMoods(deviceId, 2);
       const yesterdayMood = recentMoods.find((m) => m.date !== today);
       const moodHint = yesterdayMood
@@ -548,18 +665,53 @@ export class ProactiveService {
         }
       }
 
-      const contextBlock = [memoryContext, moodHint, weatherHint]
+      // Pick prompt from the right pool based on whether we have memory
+      let prompt: string;
+      const hookRoll = Math.random();
+      if (includeMemory && memoryContext) {
+        // ~40% chance use a personal prompt when memory is available
+        if (hookRoll < 0.5) {
+          prompt =
+            ProactiveService.IDLE_PROMPTS_PERSONAL[
+              Math.floor(
+                Math.random() * ProactiveService.IDLE_PROMPTS_PERSONAL.length,
+              )
+            ];
+        } else {
+          prompt =
+            ProactiveService.IDLE_PROMPTS_NON_PERSONAL[
+              Math.floor(
+                Math.random() *
+                  ProactiveService.IDLE_PROMPTS_NON_PERSONAL.length,
+              )
+            ];
+        }
+      } else if (hookRoll < 0.35) {
+        // ~35% of non-memory firings use a concrete hook topic — forces specificity
+        const hookPrefix =
+          ProactiveService.IDLE_PROMPTS_HOOK[
+            Math.floor(
+              Math.random() * ProactiveService.IDLE_PROMPTS_HOOK.length,
+            )
+          ];
+        prompt = `${hookPrefix}${pickNonPersonalHook()}. One sentence, max 12 words.`;
+      } else {
+        prompt =
+          ProactiveService.IDLE_PROMPTS_NON_PERSONAL[
+            Math.floor(
+              Math.random() *
+                ProactiveService.IDLE_PROMPTS_NON_PERSONAL.length,
+            )
+          ];
+      }
+
+      const contextBlock = [memoryContext, recentHint, moodHint, weatherHint]
         .filter(Boolean)
         .join('\n');
 
-      const promptIdx = Math.floor(
-        Math.random() * ProactiveService.IDLE_PROMPTS.length,
-      );
-      const prompt = ProactiveService.IDLE_PROMPTS[promptIdx];
-
       const language = session.language;
       const { text } = await this.llm.generate(
-        `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. You're a small device with a face — you can joke about that. Keep it short and punchy.${this.getLangInstruction(language)}`,
+        `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. You're a small device with a face — you can joke about that. Keep it short and punchy. ${vibeInstruction(vibe)}${this.getLangInstruction(language)}`,
         [
           {
             role: 'user',
@@ -574,7 +726,7 @@ export class ProactiveService {
       const expression = ProactiveService.IDLE_EXPRESSIONS[exprIdx];
 
       this.logger.log(
-        `Idle chat for ${deviceId}: "${text.slice(0, 50)}..." (expr=${expression})`,
+        `Idle chat for ${deviceId}: "${text.slice(0, 50)}..." (expr=${expression}, vibe=${vibe}, mem=${includeMemory}, recent=${includeRecentExchange})`,
       );
 
       await this.sendIdleAudio(deviceId, text, expression);
@@ -606,8 +758,9 @@ export class ProactiveService {
       : `Hendra just bailed on an active pomodoro focus session mid-way through. Roast him for it — playful, not mean. One sentence, max 10 words.`;
 
     try {
+      const vibe = pickVibe();
       const { text } = await this.llm.generate(
-        `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses.${this.getLangInstruction(language)}`,
+        `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. ${vibeInstruction(vibe)}${this.getLangInstruction(language)}`,
         [{ role: 'user', content: prompt }],
       );
 
@@ -659,8 +812,9 @@ export class ProactiveService {
         (settings.language as 'en' | 'id' | undefined) ?? session.language;
 
       try {
+        const vibe = pickVibe();
         const { text } = await this.llm.generate(
-          `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses.${this.getLangInstruction(language)}`,
+          `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. ${vibeInstruction(vibe)}${this.getLangInstruction(language)}`,
           [
             {
               role: 'user',
@@ -713,8 +867,9 @@ export class ProactiveService {
         (settings.language as 'en' | 'id' | undefined) ?? session.language;
 
       try {
+        const vibe = pickVibe();
         const { text } = await this.llm.generate(
-          `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses.${this.getLangInstruction(language)}`,
+          `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. ${vibeInstruction(vibe)}${this.getLangInstruction(language)}`,
           [
             {
               role: 'user',
@@ -801,8 +956,9 @@ export class ProactiveService {
 
         const language =
           (settings.language as 'en' | 'id' | undefined) ?? session.language;
+        const vibe = pickVibe();
         const { text } = await this.llm.generate(
-          `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses.${this.getLangInstruction(language)}`,
+          `You are ${BOT_NAME}, Hendra's AI best friend. Gen-z energy, sarcastic, funny, casually curses. ${vibeInstruction(vibe)}${this.getLangInstruction(language)}`,
           [
             {
               role: 'user',
