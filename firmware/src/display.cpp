@@ -1605,10 +1605,13 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
         const int bw = 14, bh = 9;
         const int nubW = 2, nubH = 5;
         uint8_t pct = status.batteryPercent;
-        bool isCharging = (pct == 255);
+        // Charging comes straight from the battery module — do NOT derive it
+        // from pct==255 because the percent snapshot in StatusBar can be up
+        // to 30s stale, causing the charging icon to lag the real state.
+        bool isCharging = status.batteryCharging;
         bool isFullyCharged = isCharging && (status.batteryMv >= 4050);
 
-        // Debug: log once per second what the display sees
+        // Debug: log once every 5s what the display sees
         {
             static uint32_t lastDbg = 0;
             if (millis() - lastDbg > 5000) {

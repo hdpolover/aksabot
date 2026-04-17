@@ -1,4 +1,5 @@
 #include "audio_io.h"
+#include "battery.h"
 #include "config.h"
 #include "nvs_store.h"
 #include "es8311.h"
@@ -119,7 +120,13 @@ static int16_t speakerStereoBuf[320 * 2];  // max OPUS_FRAME_SAMPLES * 2 channel
 size_t audio_io::writeSpeaker(const int16_t* buffer, size_t numSamples) {
     if (numSamples > 320) numSamples = 320;  // safety clamp
 
+    // Diagnostic: track per-write peak amplitude so we can tell if silence is
+    // coming from a zero PCM buffer vs. a real signal not reaching the amp.
+    int16_t peakIn = 0;
     for (size_t i = 0; i < numSamples; i++) {
+        int16_t a = buffer[i];
+        int16_t ap = (a < 0) ? (int16_t)(-a) : a;
+        if (ap > peakIn) peakIn = ap;
         // Apply software volume so all audio sources (TTS, SFX, resilience)
         // are scaled uniformly. Clamp to prevent int16 overflow.
         int32_t scaled = (int32_t)((float)buffer[i] * s_volumeScale);
@@ -136,6 +143,42 @@ size_t audio_io::writeSpeaker(const int16_t* buffer, size_t numSamples) {
         numSamples * 2 * sizeof(int16_t),
         &bytesWritten, portMAX_DELAY
     );
+
+    // Throttled diagnostic — logs once per second during active playback so
+    // we can confirm (a) PCM signal is non-zero, (b) I2S accepted the write,
+    // (c) battery voltage under load. Helps diagnose battery-vs-USB silence.
+    {
+        static uint32_t lastLogMs = 0;
+        static uint32_t writesSinceLog = 0;
+        static uint32_t samplesSinceLog = 0;
+        static int16_t  peakSinceLog = 0;
+        static int      lastErrSinceLog = 0;
+        uint32_t now = millis();
+
+        writesSinceLog++;
+        samplesSinceLog += numSamples;
+        if (peakIn > peakSinceLog) peakSinceLog = peakIn;
+        if (err != ESP_OK) lastErrSinceLog = (int)err;
+
+        if (now - lastLogMs >= 1000) {
+            Serial.printf(
+                "[Audio:Write] writes=%u samples=%u peak=%d vol=%.2f err=%d | bat=%umV charging=%s usb=%s\n",
+                (unsigned)writesSinceLog,
+                (unsigned)samplesSinceLog,
+                (int)peakSinceLog,
+                s_volumeScale,
+                lastErrSinceLog,
+                (unsigned)battery::lastVoltageMillivolts(),
+                battery::isCharging() ? "Y" : "N",
+                battery::isUsbPowered() ? "Y" : "N"
+            );
+            lastLogMs = now;
+            writesSinceLog = 0;
+            samplesSinceLog = 0;
+            peakSinceLog = 0;
+            lastErrSinceLog = 0;
+        }
+    }
 
     if (err != ESP_OK) return 0;
     return bytesWritten / (2 * sizeof(int16_t));

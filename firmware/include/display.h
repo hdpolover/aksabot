@@ -30,8 +30,9 @@ struct StatusBar {
     bool wifiConnected;
     bool wsConnected;
     bool connectionStalled;     // Data flow stalled during active state
-    uint8_t batteryPercent;     // 0-100 or 255 = USB-powered/charging
+    uint8_t batteryPercent;     // 0-100 or 255 = unknown/charging
     uint16_t batteryMv;         // raw millivolts (used to detect full charge while on USB)
+    bool batteryCharging;       // live charging state — independent of cached percent
     bool focusModeActive;
     bool pomodoroActive;
     uint8_t pomodoroCycle;      // 1-4

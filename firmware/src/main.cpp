@@ -184,12 +184,20 @@ static void updateStatusBar() {
     {
         static uint32_t lastBatReadMs = 0;
         static uint8_t  cachedBatPct  = 255;
-        if (millis() - lastBatReadMs > 30000 || lastBatReadMs == 0) {
-            cachedBatPct  = battery::readPercent();
-            lastBatReadMs = millis();
+        static bool     cachedCharging = false;
+        // Refresh on schedule OR whenever charging state flips, so the status
+        // icon updates immediately on plug/unplug instead of waiting 30s.
+        bool chargingNow = battery::isCharging();
+        if (millis() - lastBatReadMs > 30000 ||
+            lastBatReadMs == 0 ||
+            chargingNow != cachedCharging) {
+            cachedBatPct   = battery::readPercent();
+            cachedCharging = battery::isCharging();
+            lastBatReadMs  = millis();
         }
-        sb.batteryPercent = cachedBatPct;
-        sb.batteryMv = battery::lastVoltageMillivolts();
+        sb.batteryPercent  = cachedBatPct;
+        sb.batteryMv       = battery::lastVoltageMillivolts();
+        sb.batteryCharging = cachedCharging;
     }
     sb.focusModeActive = false;
     sb.pomodoroActive = false;
