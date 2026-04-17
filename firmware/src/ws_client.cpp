@@ -301,7 +301,7 @@ void ws_client::sendEvent(const char* event, const char* jsonData) {
         doc["data"] = dataDoc.as<JsonVariant>();
     }
 
-    char buf[256];
+    char buf[512];
     size_t len = serializeJson(doc, buf, sizeof(buf));
 
     if (xSemaphoreTake(wsMutex, pdMS_TO_TICKS(500))) {

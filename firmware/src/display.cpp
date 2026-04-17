@@ -1608,6 +1608,16 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
         bool isCharging = (pct == 255);
         bool isFullyCharged = isCharging && (status.batteryMv >= 4050);
 
+        // Debug: log once per second what the display sees
+        {
+            static uint32_t lastDbg = 0;
+            if (millis() - lastDbg > 5000) {
+                lastDbg = millis();
+                Serial.printf("[Display:Bat] pct=%u mv=%u charging=%d full=%d\n",
+                    pct, status.batteryMv, isCharging, isFullyCharged);
+            }
+        }
+
         // Determine fill color based on level
         uint16_t fillCol, outCol;
         if (isFullyCharged || isCharging) {

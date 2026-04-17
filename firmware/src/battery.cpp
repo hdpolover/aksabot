@@ -41,7 +41,8 @@ static uint8_t  lastPercent = 255;  // 255 = unknown until first read
 static uint16_t lastMv      = 0;
 static uint16_t prevMv      = 0;    // previous reading for trend detection
 static bool     usbPowered  = false;
-static bool     charging    = false; // true if voltage is rising (trend-based)
+static bool     charging    = false; // true if USB detected or voltage rising
+static uint8_t  chargingHold = 0;   // sticky counter — keeps charging=true for N reads after SOF loss
 
 // ── Discharge rate tracking ──────────────────────────────────────────────────
 static constexpr int RATE_WINDOW = 10;           // samples (5 min at 30s intervals)
@@ -84,10 +85,12 @@ void init() {
 // even when the battery is fully charged and voltage alone can't distinguish
 // USB-powered from battery-full.
 static bool detectUsbConnected() {
-    // Clear the SOF interrupt raw status bit
+    // Clear the SOF interrupt raw status bit, wait for one SOF period.
+    // Note: ESP32-S3 shares the USB JTAG peripheral with Serial, so SOF
+    // detection can be intermittent. The caller uses a sticky hold counter
+    // to debounce false negatives.
     REG_SET_BIT(USB_SERIAL_JTAG_INT_CLR_REG, USB_SERIAL_JTAG_SOF_INT_CLR);
-    delayMicroseconds(1500);  // SOF fires every 1ms — wait 1.5ms
-    // If the bit came back, a USB host is sending frames
+    delayMicroseconds(1500);
     return (REG_READ(USB_SERIAL_JTAG_INT_RAW_REG) & USB_SERIAL_JTAG_SOF_INT_RAW) != 0;
 }
 
@@ -112,9 +115,19 @@ uint8_t readPercent() {
     bool voltageRising = (prevMv > 0) && (delta >= CHARGING_RISE_THRESHOLD);
     prevMv = mv;
 
-    // Primary USB detection: SOF frame check (hardware-level, works regardless
-    // of battery voltage). Fallback: high voltage threshold for edge cases.
+    // Primary USB detection: SOF frame check. The ESP32-S3 shares the USB
+    // JTAG peripheral with Serial, so SOF can flicker between reads. Use a
+    // sticky hold: when SOF is detected, set a counter. Each read where SOF
+    // is absent decrements it. Charging stays true until the counter hits 0.
+    // This gives 3 consecutive "no SOF" reads (~90s) before we declare unplugged.
     bool usbDetected = detectUsbConnected();
+    if (usbDetected) {
+        chargingHold = 3;  // hold for 3 reads (90s at 30s intervals)
+    } else if (chargingHold > 0) {
+        chargingHold--;
+        usbDetected = true;  // still treat as USB during hold period
+    }
+
     usbPowered = usbDetected || (mv >= static_cast<uint16_t>(USB_VOLTAGE_MIN));
     charging   = usbPowered || voltageRising;
 
@@ -122,10 +135,11 @@ uint8_t readPercent() {
     lastMv = mv;
 
     // Diagnostic log
-    Serial.printf("[Battery] raw=%u pinMv=%u batMv=%u delta=%+dmV usb=%s(sof=%s) charging=%s\n",
+    Serial.printf("[Battery] raw=%u pinMv=%u batMv=%u delta=%+dmV usb=%s(sof=%s hold=%u) charging=%s\n",
                   rawAvg, pinMv, mv, delta,
                   usbPowered ? "Y" : "N",
                   usbDetected ? "Y" : "N",
+                  chargingHold,
                   charging   ? "Y" : "N");
 
     if (charging) {
