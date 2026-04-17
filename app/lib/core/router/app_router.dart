@@ -10,6 +10,7 @@ import '../../features/activity/presentation/pages/activity_page.dart';
 import '../../features/settings/presentation/pages/settings_page.dart';
 import '../../features/devices/presentation/pages/add_device_page.dart';
 import '../../features/devices/presentation/pages/device_detail_page.dart';
+import '../../features/devices/presentation/pages/battery_page.dart';
 import '../../features/devices/presentation/pages/device_stats_page.dart';
 import '../../features/devices/presentation/pages/presence_settings_page.dart';
 import '../../features/devices/presentation/pages/display_face_page.dart';
@@ -156,6 +157,12 @@ List<RouteBase> _deviceSubRoutes() {
     GoRoute(
       path: 'stats',
       builder: (context, state) => DeviceStatsPage(
+        deviceId: state.pathParameters['deviceId']!,
+      ),
+    ),
+    GoRoute(
+      path: 'battery',
+      builder: (context, state) => BatteryPage(
         deviceId: state.pathParameters['deviceId']!,
       ),
     ),

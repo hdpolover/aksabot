@@ -239,6 +239,11 @@ class DeviceDashboardBody extends StatelessWidget {
               route: '/devices/$id/settings',
             ),
             _SettingsRowData(
+              icon: Icons.battery_charging_full_rounded,
+              label: 'Battery',
+              route: '/devices/$id/battery',
+            ),
+            _SettingsRowData(
               icon: Icons.bar_chart_rounded,
               label: 'Stats & Diagnostics',
               route: '/devices/$id/stats',
@@ -795,37 +800,48 @@ class _StatusCardState extends State<_StatusCard> {
     // Fall back to pct == 255 for backwards compat with older firmware.
     final isCharging = stats.batteryCharging == true || pct == 255;
 
+    final Widget content;
     if (isCharging) {
-      return Row(mainAxisSize: MainAxisSize.min, children: [
+      content = Row(mainAxisSize: MainAxisSize.min, children: const [
         Icon(Icons.battery_charging_full, size: 14, color: Colors.green),
-        const SizedBox(width: 4),
+        SizedBox(width: 4),
         Text('Charging',
             style: TextStyle(fontSize: 12, color: Colors.green)),
       ]);
-    }
-    final icon = pct > 60
-        ? Icons.battery_full
-        : pct > 30
-            ? Icons.battery_3_bar
-            : Icons.battery_alert;
-    final color = pct <= 20 ? Colors.red : cs.onSurfaceVariant;
+    } else {
+      final icon = pct > 60
+          ? Icons.battery_full
+          : pct > 30
+              ? Icons.battery_3_bar
+              : Icons.battery_alert;
+      final color = pct <= 20 ? Colors.red : cs.onSurfaceVariant;
 
-    // Time remaining suffix
-    final mins = stats.batteryMinutesRemaining;
-    String label = '$pct%';
-    if (mins != null && mins >= 0) {
-      if (mins >= 60) {
-        label += ' (~${mins ~/ 60}h ${mins % 60}m)';
-      } else {
-        label += ' (~${mins}m)';
+      // Time remaining suffix
+      final mins = stats.batteryMinutesRemaining;
+      String label = '$pct%';
+      if (mins != null && mins >= 0) {
+        if (mins >= 60) {
+          label += ' (~${mins ~/ 60}h ${mins % 60}m)';
+        } else {
+          label += ' (~${mins}m)';
+        }
       }
+      content = Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(fontSize: 12, color: color)),
+      ]);
     }
 
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, size: 14, color: color),
-      const SizedBox(width: 4),
-      Text(label, style: TextStyle(fontSize: 12, color: color)),
-    ]);
+    // Wrap in an InkWell so tapping the indicator drills into the battery page.
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppConstants.radiusSm),
+      onTap: () => context.push('/devices/${widget.device.id}/battery'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: content,
+      ),
+    );
   }
 
   static String _formatUptime(Duration d) {
