@@ -1929,20 +1929,19 @@ void setup() {
         // ble_manager::deinit() also resets bleInitialized so startPresenceAdvertising()
         // can re-init cleanly after WiFi is up (section 13).
         ble_manager::deinit();
-        delay(300);  // let radio settle
 
-        // If WiFi was already initialized early (isConfigured=true), use reconnect()
-        // to update credentials without re-registering the event handler.
-        // If this is a first-ever boot with no prior credentials, use init().
-        if (isConfigured) {
-            char provPass[128] = {};
-            nvs_store::getWifiPassword(provPass, sizeof(provPass));
-            wifi_manager::reconnect(ssidBuf, provPass);  // ssidBuf already loaded above
-        } else {
-            wifi_manager::init();
-        }
+        // Hard-reset the WiFi radio after BLE to clear coexistence state.
+        // wifi_manager::init() is called (not reconnect) so there is no
+        // internal WiFi.disconnect() call — that spurious disconnect event was
+        // setting retryPending=true and confusing the retry state machine.
+        // init() reads fresh NVS credentials (written by BLE provisioning)
+        // and calls WiFi.begin() cleanly on a fully-reset radio.
+        WiFi.mode(WIFI_OFF);
+        delay(700);
+        wifi_manager::init();
+
         Serial.println("[Main] Waiting for Wi-Fi...");
-        wifi_manager::waitForConnection(15000);
+        wifi_manager::waitForConnection(30000);
 
         if (wifi_manager::isConnected()) {
             boot_screen::showConnected(WiFi.localIP().toString().c_str());

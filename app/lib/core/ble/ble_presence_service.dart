@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -31,7 +32,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// When the app is **terminated** (swiped away), the OS closes the GATT
 /// connection.  On next launch `startScanning()` / `restoreState()` re-arms
 /// the direct-connect — usually completes in < 1 s if the device is in range.
-class BlePresenceService {
+class BlePresenceService extends ChangeNotifier {
   // ── Preference keys ────────────────────────────────────────────────────
   static const _prefEnabled        = 'presence_enabled';
   static const _prefRssiThreshold  = 'presence_rssi_threshold';
@@ -66,7 +67,12 @@ class BlePresenceService {
   Timer? _graceTimer;
   Timer? _fallbackTimer;  // direct-connect → scan fallback; scan → retry
 
-  String? lastError;
+  String? _lastError;
+  String? get lastError => _lastError;
+  set lastError(String? v) {
+    _lastError = v;
+    notifyListeners();
+  }
 
   // ── Callbacks ─────────────────────────────────────────────────────────
 
@@ -105,6 +111,7 @@ class BlePresenceService {
     }
 
     _scanActive = true;
+    notifyListeners();
 
     final storedBleId = await _loadBleDeviceId();
     if (storedBleId != null) {
@@ -136,6 +143,7 @@ class BlePresenceService {
   /// Stop presence detection and clean up all resources.
   Future<void> stopScanning() async {
     _scanActive = false;
+    notifyListeners();
 
     _graceTimer?.cancel();
     _graceTimer = null;
@@ -303,11 +311,13 @@ class BlePresenceService {
 
       if (!_connected) {
         _connected = true;
+        notifyListeners();
         _reportArrived();
       }
     } else if (state == BluetoothConnectionState.disconnected) {
       if (_connected) {
         _connected = false;
+        notifyListeners();
         _startGraceTimer();
       }
       // If we were in the middle of a direct-connect attempt (autoConnect),

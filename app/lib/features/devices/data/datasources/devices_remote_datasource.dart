@@ -246,7 +246,7 @@ class DevicesRemoteDatasource {
       final formData = FormData.fromMap({
         'audio': MultipartFile.fromBytes(audioBytes, filename: 'voice.wav'),
         'replyTarget': replyTarget,
-        if (conversationId != null) 'conversationId': conversationId,
+        'conversationId': conversationId,
       });
       final response = await _client.dio.post(
         '/devices/$id/voice-input',

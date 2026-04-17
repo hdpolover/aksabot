@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../../../../core/ble/ble_presence_service.dart';
@@ -23,7 +21,6 @@ class PresenceSettingsPage extends StatefulWidget {
 class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
   late final BlePresenceService _presence;
   late final DevicesRepository _devicesRepo;
-  Timer? _statusRefreshTimer;
 
   bool _enabled = false;
   bool _isLoading = true;
@@ -37,17 +34,10 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
     _presence = sl<BlePresenceService>();
     _devicesRepo = sl<DevicesRepository>();
     _loadSettings();
-    // Refresh the status card every 2s — BlePresenceService has no streams,
-    // so isPresent / isScanning won't update the UI otherwise.
-    _statusRefreshTimer = Timer.periodic(
-      const Duration(seconds: 2),
-      (_) { if (mounted) setState(() {}); },
-    );
   }
 
   @override
   void dispose() {
-    _statusRefreshTimer?.cancel();
     super.dispose();
   }
 
@@ -181,10 +171,15 @@ class _PresenceSettingsPageState extends State<PresenceSettingsPage> {
         padding: const EdgeInsets.all(16),
         children: [
           // ── Live status ──────────────────────────────────────────────────
-          _PresenceStatusCard(
-            enabled: _enabled,
-            isPresent: _presence.isPresent,
-            isScanning: _presence.isScanning,
+          ListenableBuilder(
+            listenable: _presence,
+            builder: (context, child) => _PresenceStatusCard(
+              enabled: _enabled,
+              isPresent: _presence.isPresent,
+              isScanning: _presence.isScanning,
+              lastError: _presence.lastError,
+              onRetry: () => _togglePresence(true),
+            ),
           ),
           const SizedBox(height: 16),
 
@@ -358,11 +353,15 @@ class _PresenceStatusCard extends StatelessWidget {
   final bool enabled;
   final bool isPresent;
   final bool isScanning;
+  final String? lastError;
+  final VoidCallback onRetry;
 
   const _PresenceStatusCard({
     required this.enabled,
     required this.isPresent,
     required this.isScanning,
+    required this.lastError,
+    required this.onRetry,
   });
 
   @override
@@ -403,39 +402,59 @@ class _PresenceStatusCard extends StatelessWidget {
       subtitle = 'Scanning will resume when the app is active.';
     }
 
+    final hasError = enabled && !isPresent && lastError != null;
+
     return Card(
-      color: bgColor,
+      color: hasError ? cs.errorContainer : bgColor,
       child: Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: AppConstants.spacingLg,
           vertical: AppConstants.spacingMd,
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: iconColor, size: AppConstants.iconLg),
-            const SizedBox(width: AppConstants.spacingMd),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: enabled ? iconColor : cs.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    ),
+            Row(
+              children: [
+                Icon(
+                  hasError ? Icons.bluetooth_disabled_rounded : icon,
+                  color: hasError ? cs.onErrorContainer : iconColor,
+                  size: AppConstants.iconLg,
+                ),
+                const SizedBox(width: AppConstants.spacingMd),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        hasError ? 'Bluetooth error' : title,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: hasError
+                              ? cs.onErrorContainer
+                              : (enabled ? iconColor : cs.onSurfaceVariant),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        hasError ? lastError! : subtitle,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: hasError
+                              ? cs.onErrorContainer
+                              : (enabled
+                                  ? (isPresent ? ac.success : cs.onSurfaceVariant)
+                                  : cs.onSurfaceVariant),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: enabled
-                          ? (isPresent ? ac.success : cs.onSurfaceVariant)
-                          : cs.onSurfaceVariant,
-                    ),
+                ),
+                if (hasError)
+                  TextButton(
+                    onPressed: onRetry,
+                    child: const Text('Retry'),
                   ),
-                ],
-              ),
+              ],
             ),
           ],
         ),

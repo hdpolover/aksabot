@@ -61,6 +61,7 @@ static SemaphoreHandle_t provisionedSem = nullptr;
 static volatile bool clientConnected = false;
 static volatile bool provisioned = false;
 static bool bleInitialized = false;
+static bool s_presenceGattReady = false;
 
 // Pending credentials (written by BLE callbacks)
 static char pendingSsid[64] = {};
@@ -416,21 +417,35 @@ void ble_manager::initScanOnly() {
 }
 
 void ble_manager::startPresenceAdvertising() {
-    // bleInitialized may be stale true if NimBLEDevice::deinit() was called
-    // (e.g., post-provisioning WiFi startup). Always re-init here to ensure
-    // a clean advertising state after WiFi is up.
     if (!bleInitialized) {
         NimBLEDevice::init("Aksabot");
         NimBLEDevice::setPower(6);
         bleInitialized = true;
     }
 
+    if (!s_presenceGattReady) {
+        // Create a minimal GATT server exposing the 0xFFE0 service.
+        // The app filters scans on this UUID (required for iOS background scanning)
+        // and holds a persistent GATT connection to track presence state
+        // (connected = present, disconnected = away).
+        NimBLEServer* pPresenceSrv = NimBLEDevice::createServer();
+        pPresenceSrv->createService((uint16_t)0xFFE0);
+        s_presenceGattReady = true;
+    }
+
     NimBLEAdvertising* pAdv = NimBLEDevice::getAdvertising();
     pAdv->setName("Aksabot");
+    // Short UUID form (4 bytes) fits the 31-byte adv packet alongside the name.
+    // Full 128-bit form overflows into scan response, which iOS ignores for
+    // service UUID filtering.
+    pAdv->addServiceUUID(NimBLEUUID((uint16_t)0xFFE0));
+    // 100–200ms intervals reduce WiFi/BLE radio coexistence conflicts.
+    pAdv->setMinInterval(160);
+    pAdv->setMaxInterval(320);
     pAdv->enableScanResponse(false);
     pAdv->start();
 
-    Serial.println("[BLE] Presence advertising started — phone can now detect 'Aksabot'");
+    Serial.println("[BLE] Presence advertising started (0xFFE0, 100-200ms interval)");
 }
 
 bool ble_manager::isInitialized() {
@@ -458,6 +473,7 @@ bool ble_manager::isProvisioned() {
 void ble_manager::deinit() {
     NimBLEDevice::deinit(true);
     bleInitialized = false;
+    s_presenceGattReady = false;
     Serial.println("[BLE] NimBLE deinitialized");
 }
 

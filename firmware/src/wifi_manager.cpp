@@ -84,11 +84,13 @@ void wifi_manager::init() {
     if (nvs_store::hasWifiCredentials() &&
         nvs_store::getWifiSsid(ssidBuf, sizeof(ssidBuf)) &&
         nvs_store::getWifiPassword(passBuf, sizeof(passBuf))) {
-        Serial.printf("[WiFi] Using provisioned credentials for '%s'\n", ssidBuf);
+        Serial.printf("[WiFi] Using provisioned credentials — SSID='%s' pass_len=%d\n",
+                      ssidBuf, (int)strlen(passBuf));
     } else {
         strncpy(ssidBuf, WIFI_SSID, sizeof(ssidBuf) - 1);
         strncpy(passBuf, WIFI_PASS, sizeof(passBuf) - 1);
-        Serial.printf("[WiFi] Using compile-time credentials for '%s'\n", ssidBuf);
+        Serial.printf("[WiFi] Using compile-time credentials — SSID='%s' pass_len=%d\n",
+                      ssidBuf, (int)strlen(passBuf));
     }
 
     lastBeginMs = millis();

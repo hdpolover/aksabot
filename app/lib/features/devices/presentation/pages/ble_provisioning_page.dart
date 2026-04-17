@@ -600,6 +600,9 @@ class _BleProvisioningPageState extends State<BleProvisioningPage> {
                   controller: _passwordController,
                   obscureText: _obscurePassword,
                   autofocus: true,
+                  keyboardType: TextInputType.visiblePassword,
+                  autocorrect: false,
+                  enableSuggestions: false,
                   decoration: InputDecoration(
                     labelText: 'Password',
                     prefixIcon: const Icon(Icons.lock_outlined),
