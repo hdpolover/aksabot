@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -16,6 +14,8 @@ import '../../../devices/presentation/pages/device_detail_page.dart';
 ///
 /// - Loading: shows a loading indicator.
 /// - One device registered: shows the device dashboard inline (no extra tap).
+/// - Multiple devices: shows the dashboard for the selected device with a
+///   dropdown in the AppBar to switch between them.
 /// - No device: shows an "Add Aksa" empty state.
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -36,29 +36,37 @@ class _HomeView extends StatefulWidget {
   State<_HomeView> createState() => _HomeViewState();
 }
 
-class _HomeViewState extends State<_HomeView> {
-  // Cached so the UI doesn't flash to empty while refreshing or during
-  // a LoadDevice call triggered by DeviceDashboardBody's pull-to-refresh.
-  Device? _device;
-
-  Timer? _pollTimer;
+class _HomeViewState extends State<_HomeView> with WidgetsBindingObserver {
+  List<Device> _devices = [];
+  String? _selectedId;
 
   @override
   void initState() {
     super.initState();
-    // Poll every 30 s so online/offline status stays fresh without manual refresh.
-    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted) {
-        context.read<DevicesBloc>().add(const LoadDevices());
-      }
-    });
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
-    _pollTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
+
+  /// Refresh device list when the app comes back to the foreground.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<DevicesBloc>().add(const LoadDevices());
+    }
+  }
+
+  Device? get _selectedDevice {
+    if (_devices.isEmpty) return null;
+    return _devices.where((d) => d.id == _selectedId).firstOrNull ??
+        _devices.first;
+  }
+
+  void _selectDevice(String id) => setState(() => _selectedId = id);
 
   @override
   Widget build(BuildContext context) {
@@ -71,26 +79,34 @@ class _HomeViewState extends State<_HomeView> {
         }
       },
       builder: (context, state) {
-        // Update the device cache from any state that carries device data.
         if (state is DevicesLoaded) {
-          _device = state.devices.isNotEmpty ? state.devices.first : null;
+          _devices = state.devices;
+          // Keep the selected device valid; fall back to first on first load.
+          if (_selectedId == null ||
+              !_devices.any((d) => d.id == _selectedId)) {
+            _selectedId = _devices.isNotEmpty ? _devices.first.id : null;
+          }
         } else if (state is DeviceDetailLoaded) {
-          // DeviceDashboardBody's pull-to-refresh calls LoadDevice, which
-          // resolves to DeviceDetailLoaded — keep the cache in sync.
-          _device = state.device;
+          // Pull-to-refresh inside the dashboard resolves here — sync list entry.
+          final idx = _devices.indexWhere((d) => d.id == state.device.id);
+          if (idx != -1) {
+            _devices = List.of(_devices)..[idx] = state.device;
+          }
         }
 
-        // First load with no cached data — show a spinner.
-        if (state is DevicesLoading && _device == null) {
+        if (state is DevicesLoading && _devices.isEmpty) {
           return const Scaffold(body: AppLoadingIndicator());
         }
 
-        // Device present — show its dashboard directly in this tab.
-        if (_device != null) {
-          return _DeviceHome(device: _device!);
+        final device = _selectedDevice;
+        if (device != null) {
+          return _DeviceHome(
+            devices: _devices,
+            device: device,
+            onDeviceChanged: _selectDevice,
+          );
         }
 
-        // No device registered yet.
         return Scaffold(
           body: EmptyState(
             icon: Icons.smart_toy_rounded,
@@ -114,14 +130,27 @@ class _HomeViewState extends State<_HomeView> {
 // ---------------------------------------------------------------------------
 
 class _DeviceHome extends StatelessWidget {
+  final List<Device> devices;
   final Device device;
-  const _DeviceHome({required this.device});
+  final ValueChanged<String> onDeviceChanged;
+
+  const _DeviceHome({
+    required this.devices,
+    required this.device,
+    required this.onDeviceChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(device.name),
+        title: devices.length > 1
+            ? _DeviceDropdown(
+                devices: devices,
+                selected: device,
+                onChanged: onDeviceChanged,
+              )
+            : Text(device.name),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
@@ -151,5 +180,61 @@ class _DeviceHome extends StatelessWidget {
     if (confirmed == true && context.mounted) {
       context.read<DevicesBloc>().add(DeleteDevice(device.id));
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Device dropdown — shown in AppBar when 2+ devices are registered
+// ---------------------------------------------------------------------------
+
+class _DeviceDropdown extends StatelessWidget {
+  final List<Device> devices;
+  final Device selected;
+  final ValueChanged<String> onChanged;
+
+  const _DeviceDropdown({
+    required this.devices,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
+
+    return DropdownButtonHideUnderline(
+      child: DropdownButton<String>(
+        value: selected.id,
+        icon: Icon(Icons.expand_more_rounded, color: cs.onSurface, size: 20),
+        isDense: true,
+        style: tt.titleLarge?.copyWith(color: cs.onSurface),
+        borderRadius: BorderRadius.circular(12),
+        items: devices.map((d) {
+          final online = d.isOnline;
+          return DropdownMenuItem<String>(
+            value: d.id,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: online ? Colors.green : cs.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(d.name),
+              ],
+            ),
+          );
+        }).toList(),
+        onChanged: (id) {
+          if (id != null) onChanged(id);
+        },
+      ),
+    );
   }
 }

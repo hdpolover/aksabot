@@ -149,6 +149,15 @@ export class ProactiveService {
     this.sendToDevice = fn;
   }
 
+  /**
+   * True when the device is in guest mode — memory retrieval must be skipped
+   * so the bot can't reference or riff on the owner's facts while talking to
+   * a visitor (and vice versa, so visitor noise can't bleed into prompts).
+   */
+  private isGuestMode(device?: Device | null): boolean {
+    return device?.settingsJson?.guest_mode === true;
+  }
+
   private getLangInstruction(language?: 'en' | 'id'): string {
     return language === 'id'
       ? ' Respond in Bahasa Indonesia. All sentences must be in Indonesian — do NOT switch to full English sentences. English is only allowed for tech/code nouns (framework names, error messages, etc.) embedded inside Indonesian sentences. Use lo/gue pronouns and casual gen-z Indonesian slang. Never use written shorthand like gk, bgt, wkwk — spell everything out, this is voice output.'
@@ -191,7 +200,10 @@ export class ProactiveService {
     const prompt = prompts[Math.floor(Math.random() * prompts.length)];
 
     try {
-      const includeMemory = Math.random() < 0.5;
+      // Fetch device once so we can check guest mode before touching memories.
+      const device = await this.devicesRepo.findOne({ where: { id: deviceId } });
+      const guest = this.isGuestMode(device);
+      const includeMemory = !guest && Math.random() < 0.5;
       const vibe = pickVibe();
 
       let memoryContext = '';
@@ -264,10 +276,15 @@ export class ProactiveService {
     const awayMinutes = Math.round(awayDurationSeconds / 60);
 
     try {
+      const guest = this.isGuestMode(device);
+
       // Morning hype and long absences lean personal; short returns lean neutral.
-      // Force memory on morning hype (more meaningful), 60/50 otherwise.
+      // Force memory on morning hype (more meaningful), 60/50 otherwise. In
+      // guest mode, memory retrieval is off regardless.
       const includeMemory =
-        isMorningFirstPresence || Math.random() < (awayMinutes > 30 ? 0.6 : 0.5);
+        !guest &&
+        (isMorningFirstPresence ||
+          Math.random() < (awayMinutes > 30 ? 0.6 : 0.5));
       const vibe = pickVibe();
 
       let memoryContext = '';
@@ -283,8 +300,10 @@ export class ProactiveService {
         }
       }
 
-      // Pull yesterday's mood for extra context
-      const recentMoods = await this.moodJournal.getRecentMoods(deviceId, 2);
+      // Pull yesterday's mood for extra context — also skipped in guest mode
+      const recentMoods = guest
+        ? []
+        : await this.moodJournal.getRecentMoods(deviceId, 2);
       const yesterdayMood = recentMoods.find((m) => m.date !== today);
       const moodHint = yesterdayMood
         ? `Yesterday Hendra was feeling ${yesterdayMood.mood}${yesterdayMood.note ? ` (${yesterdayMood.note})` : ''}.`
@@ -480,7 +499,8 @@ export class ProactiveService {
           where: { id: deviceId },
         });
         const name = BOT_NAME;
-        const includeMemory = Math.random() < 0.5;
+        const guest = this.isGuestMode(device);
+        const includeMemory = !guest && Math.random() < 0.5;
         const vibe = pickVibe();
 
         let memoryHint = '';
@@ -615,9 +635,13 @@ export class ProactiveService {
       const hour = this.getLocalHour(timezone);
       const today = this.getLocalDateString(timezone);
 
+      // Guest mode: force all personal context off so idle chat falls through
+      // to the non-personal hook pool — Aksa still riffs, just not about Hendra.
+      const guest = this.isGuestMode(device);
+
       // Variety knobs — coin flips per firing so consecutive quips feel different
-      const includeMemory = Math.random() < 0.45; // ~45% personal, ~55% not
-      const includeRecentExchange = Math.random() < 0.4; // ~40% references last convo
+      const includeMemory = !guest && Math.random() < 0.45; // ~45% personal, ~55% not
+      const includeRecentExchange = !guest && Math.random() < 0.4; // ~40% references last convo
       const vibe = pickVibe();
 
       // Memory context — only when the coin says so
@@ -649,8 +673,10 @@ export class ProactiveService {
         }
       }
 
-      // Yesterday's mood — cheap context, keep it
-      const recentMoods = await this.moodJournal.getRecentMoods(deviceId, 2);
+      // Yesterday's mood — cheap context, keep it (but skip in guest mode)
+      const recentMoods = guest
+        ? []
+        : await this.moodJournal.getRecentMoods(deviceId, 2);
       const yesterdayMood = recentMoods.find((m) => m.date !== today);
       const moodHint = yesterdayMood
         ? `Yesterday Hendra was feeling ${yesterdayMood.mood}.`

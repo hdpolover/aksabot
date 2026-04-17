@@ -142,6 +142,8 @@ class DeviceDashboardBody extends StatelessWidget {
         ),
       children: [
         _StatusCard(device: device),
+        const SizedBox(height: AppConstants.spacingLg),
+        _GuestModeBanner(device: device),
         const SizedBox(height: AppConstants.spacingXxl),
 
         // ── Right now ──────────────────────────────────────────────────────
@@ -1021,6 +1023,135 @@ class _DisplayModeGridCard extends StatelessWidget {
         device.id,
         isClockMode ? 'face' : 'clock',
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Guest mode banner — prominent one-tap toggle above the "Right now" grid.
+// Designed for the "friend walks up to your desk" moment where flipping the
+// switch needs to be instant and visible, not buried in a settings page.
+// ---------------------------------------------------------------------------
+
+class _GuestModeBanner extends StatefulWidget {
+  final Device device;
+  const _GuestModeBanner({required this.device});
+
+  @override
+  State<_GuestModeBanner> createState() => _GuestModeBannerState();
+}
+
+class _GuestModeBannerState extends State<_GuestModeBanner> {
+  bool _pending = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final ac = theme.extension<AppColors>()!;
+    final enabled = widget.device.settingsJson['guest_mode'] as bool? ?? false;
+
+    final Color bg = enabled ? ac.warningContainer : cs.surfaceContainerHighest;
+    final Color fg = enabled ? ac.warning : cs.onSurfaceVariant;
+
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _pending ? null : () => _toggle(context, enabled),
+        child: Padding(
+          padding: const EdgeInsets.all(AppConstants.spacingLg),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: fg.withValues(alpha: 0.15),
+                  borderRadius:
+                      BorderRadius.circular(AppConstants.radiusMd),
+                ),
+                child: Icon(
+                  enabled
+                      ? Icons.person_off_rounded
+                      : Icons.shield_outlined,
+                  color: fg,
+                  size: AppConstants.iconMd,
+                ),
+              ),
+              const SizedBox(width: AppConstants.spacingMd),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      enabled ? 'Guest mode is on' : 'Guest mode',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: enabled ? fg : null,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      enabled
+                          ? 'Memory paused — Aksa stays herself but forgets this chat.'
+                          : 'Pause memory for visitors. Tap to enable.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: enabled ? fg : cs.onSurfaceVariant,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppConstants.spacingSm),
+              _pending
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Switch(
+                      value: enabled,
+                      onChanged:
+                          _pending ? null : (v) => _toggle(context, enabled),
+                    ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _toggle(BuildContext context, bool current) async {
+    if (_pending) return;
+    setState(() => _pending = true);
+    final repo = sl<DevicesRepository>();
+    final result = await repo.updateSettings(
+      widget.device.id,
+      {'guest_mode': !current},
+    );
+    if (!context.mounted) return;
+    result.fold(
+      (failure) {
+        setState(() => _pending = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: ${failure.message}')),
+        );
+      },
+      (_) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              !current ? 'Guest mode on — memory paused' : 'Guest mode off',
+            ),
+          ),
+        );
+        context.read<DevicesBloc>().add(LoadDevice(widget.device.id));
+        setState(() => _pending = false);
+      },
     );
   }
 }

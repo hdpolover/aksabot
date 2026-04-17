@@ -16,7 +16,10 @@ export class ConversationPersistence {
     private readonly devicesRepo: Repository<Device>,
   ) {}
 
-  async createConversation(deviceId: string): Promise<Conversation> {
+  async createConversation(
+    deviceId: string,
+    guestMode = false,
+  ): Promise<Conversation> {
     // Find stale open conversations so we can return their IDs for memory extraction
     const staleConversations = await this.conversationsRepo.find({
       where: { deviceId, endedAt: IsNull() },
@@ -33,7 +36,7 @@ export class ConversationPersistence {
       );
     }
 
-    const conversation = this.conversationsRepo.create({ deviceId });
+    const conversation = this.conversationsRepo.create({ deviceId, guestMode });
     const saved = await this.conversationsRepo.save(conversation);
     // Attach closed conversation IDs for callers that need them (e.g. memory extraction)
     (saved as any).closedConversationIds = staleConversations.map((c) => c.id);

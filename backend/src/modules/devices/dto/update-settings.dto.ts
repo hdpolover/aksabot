@@ -148,6 +148,10 @@ export class UpdateSettingsDto {
   @IsOptional()
   integrations_weather?: boolean;
 
+  @IsBoolean()
+  @IsOptional()
+  guest_mode?: boolean;
+
   @IsString()
   @IsOptional()
   timezone?: string;

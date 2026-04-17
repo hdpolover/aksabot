@@ -10,6 +10,7 @@ import '../../../memories/domain/entities/memory_entity.dart';
 import '../../../memories/presentation/bloc/memories_bloc.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_dialog.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../../../core/widgets/empty_state.dart';
@@ -332,6 +333,7 @@ class _ConversationCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final ac = theme.extension<AppColors>()!;
     final isOngoing = conversation.endedAt == null;
     final duration = conversation.duration;
 
@@ -375,6 +377,27 @@ class _ConversationCard extends StatelessWidget {
                             style: theme.textTheme.titleSmall,
                           ),
                         ),
+                        if (conversation.guestMode) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppConstants.spacingXs,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: ac.warningContainer,
+                              borderRadius: BorderRadius.circular(
+                                  AppConstants.radiusSm),
+                            ),
+                            child: Text(
+                              'Guest',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: ac.warning,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: AppConstants.spacingXs),
+                        ],
                         if (isOngoing)
                           Container(
                             padding: const EdgeInsets.symmetric(

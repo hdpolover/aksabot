@@ -8,6 +8,7 @@ class ConversationModel extends Conversation {
     super.endedAt,
     super.preview,
     super.messageCount,
+    super.guestMode,
   });
 
   factory ConversationModel.fromJson(Map<String, dynamic> json) {
@@ -20,6 +21,7 @@ class ConversationModel extends Conversation {
           : null,
       preview: json['preview'] as String?,
       messageCount: (json['messageCount'] as int?) ?? 0,
+      guestMode: (json['guestMode'] as bool?) ?? false,
     );
   }
 }

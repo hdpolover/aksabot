@@ -7,6 +7,7 @@ class Conversation extends Equatable {
   final DateTime? endedAt;
   final String? preview;
   final int messageCount;
+  final bool guestMode;
 
   const Conversation({
     required this.id,
@@ -15,6 +16,7 @@ class Conversation extends Equatable {
     this.endedAt,
     this.preview,
     this.messageCount = 0,
+    this.guestMode = false,
   });
 
   Duration? get duration {
@@ -23,5 +25,13 @@ class Conversation extends Equatable {
   }
 
   @override
-  List<Object?> get props => [id, deviceId, startedAt, endedAt, preview, messageCount];
+  List<Object?> get props => [
+        id,
+        deviceId,
+        startedAt,
+        endedAt,
+        preview,
+        messageCount,
+        guestMode,
+      ];
 }

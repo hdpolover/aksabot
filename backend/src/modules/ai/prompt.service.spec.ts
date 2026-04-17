@@ -39,6 +39,32 @@ describe('PromptService', () => {
       const result = service.buildSystemPrompt([]);
       expect(result).not.toContain('You know this about the user');
     });
+
+    describe('guest mode', () => {
+      it('includes the guest block when guestMode is true', () => {
+        const result = service.buildSystemPrompt([], { guestMode: true });
+        expect(result).toContain('GUEST MODE IS ON');
+        expect(result).toContain('NOT Hendra');
+        expect(result).toContain('memory is paused');
+      });
+
+      it('omits the guest block by default', () => {
+        const result = service.buildSystemPrompt([]);
+        expect(result).not.toContain('GUEST MODE IS ON');
+      });
+
+      it('omits the guest block when guestMode is false', () => {
+        const result = service.buildSystemPrompt([], { guestMode: false });
+        expect(result).not.toContain('GUEST MODE IS ON');
+      });
+
+      it('keeps the USER_PROFILE block alongside the guest block so Aksa still knows her owner', () => {
+        const result = service.buildSystemPrompt([], { guestMode: true });
+        // USER_PROFILE contains this line — Aksa should still know Hendra
+        // is her creator even while talking to a guest.
+        expect(result).toContain('Who Hendra actually is');
+      });
+    });
   });
 
   describe('buildMessages', () => {

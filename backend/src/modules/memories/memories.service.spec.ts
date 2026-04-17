@@ -175,6 +175,55 @@ describe('MemoriesService', () => {
       expect(result).toEqual([]);
     });
 
+    it('bails early on guest-tagged conversations without calling the extractor', async () => {
+      const conversationsRepo = (service as any).conversationsRepo;
+      conversationsRepo.findOne.mockResolvedValue({
+        id: 'conv-1',
+        guestMode: true,
+      });
+      // Even if messages exist, guest-tagged conversations must not extract.
+      messagesRepo.find.mockResolvedValue([
+        {
+          id: 'msg-1',
+          role: 'user',
+          content: 'Hi my name is Ryan',
+          createdAt: new Date(),
+        },
+      ]);
+
+      const result = await service.extractFromConversation(
+        'conv-1',
+        'device-1',
+      );
+
+      expect(result).toEqual([]);
+      expect(extractor.extractFromTranscript).not.toHaveBeenCalled();
+      expect(memoriesRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('still extracts when the conversation is not guest-tagged', async () => {
+      const conversationsRepo = (service as any).conversationsRepo;
+      conversationsRepo.findOne.mockResolvedValue({
+        id: 'conv-1',
+        guestMode: false,
+      });
+      messagesRepo.find.mockResolvedValue([
+        {
+          id: 'msg-1',
+          role: 'user',
+          content: 'I love coffee',
+          createdAt: new Date(),
+        },
+      ]);
+      memoriesRepo.find.mockResolvedValue([]);
+      extractor.extractFromTranscript.mockResolvedValue([
+        { fact: 'User loves coffee', category: 'preference' },
+      ]);
+
+      await service.extractFromConversation('conv-1', 'device-1');
+      expect(extractor.extractFromTranscript).toHaveBeenCalled();
+    });
+
     it('extracts and saves memories', async () => {
       messagesRepo.find.mockResolvedValue([
         {

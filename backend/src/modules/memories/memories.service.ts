@@ -158,6 +158,21 @@ export class MemoriesService {
     conversationId: string,
     deviceId: string,
   ): Promise<Memory[]> {
+    // Defense-in-depth guest-mode guard. Any conversation row that was created
+    // while the device was in guest mode is permanently tagged, so even if a
+    // call site forgets to check the flag, we bail here before extracting any
+    // facts. This keeps a visitor's info from polluting the owner's memories.
+    const conversation = await this.conversationsRepo.findOne({
+      where: { id: conversationId },
+      select: ['id', 'guestMode'],
+    });
+    if (conversation?.guestMode) {
+      this.logger.log(
+        `Conversation ${conversationId} is guest-tagged — skipping extraction`,
+      );
+      return [];
+    }
+
     // Get conversation messages
     const messages = await this.messagesRepo.find({
       where: { conversationId },
@@ -231,8 +246,9 @@ export class MemoriesService {
     deviceId: string,
     limit = 20,
   ): Promise<{ scanned: number; extracted: number }> {
+    // Skip guest-tagged conversations — they must never contribute memories.
     const conversations = await this.conversationsRepo.find({
-      where: { deviceId },
+      where: { deviceId, guestMode: false },
       order: { startedAt: 'DESC' },
       take: limit,
     });

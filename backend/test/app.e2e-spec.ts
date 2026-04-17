@@ -656,6 +656,22 @@ describe('Aksabot API (E2E)', () => {
           .send({ volume: 50 })
           .expect(404);
       });
+
+      it('should accept and persist guest_mode flag (200)', async () => {
+        const res = await request(app.getHttpServer())
+          .patch(`/devices/${deviceId}/settings`)
+          .set('Authorization', bearer(accessToken))
+          .send({ guest_mode: true })
+          .expect(200);
+        expect(res.body.data.settingsJson).toMatchObject({ guest_mode: true });
+
+        const off = await request(app.getHttpServer())
+          .patch(`/devices/${deviceId}/settings`)
+          .set('Authorization', bearer(accessToken))
+          .send({ guest_mode: false })
+          .expect(200);
+        expect(off.body.data.settingsJson).toMatchObject({ guest_mode: false });
+      });
     });
 
     describe('GET /devices/:id/personality', () => {

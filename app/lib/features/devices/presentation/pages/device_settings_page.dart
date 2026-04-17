@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_loading_indicator.dart';
 import '../../domain/repositories/devices_repository.dart';
 import 'ble_provisioning_page.dart';
@@ -28,6 +29,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
   bool _showTranscript = false;
   bool _ttsEnabled = true;
   bool _sfxEnabled = true;
+  bool _guestMode = false;
   String _idleTimeout = '30';
 
 
@@ -57,6 +59,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
         final tr = s['display_transcript'] as bool?;
         final tts = s['tts_enabled'] as bool?;
         final sfx = s['sfx_enabled'] as bool?;
+        final guest = s['guest_mode'] as bool?;
         final minutes = timeoutSec != null ? (timeoutSec ~/ 60) : 30;
         setState(() {
           _volume = vol ?? 50;
@@ -64,6 +67,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
           _showTranscript = tr ?? false;
           _ttsEnabled = tts ?? true;
           _sfxEnabled = sfx ?? true;
+          _guestMode = guest ?? false;
           _idleTimeout =
               const ['1', '5', '10', '30'].contains(minutes.toString())
                   ? minutes.toString()
@@ -86,6 +90,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
       'display_transcript': _showTranscript,
       'tts_enabled': _ttsEnabled,
       'sfx_enabled': _sfxEnabled,
+      'guest_mode': _guestMode,
       'idle_timeout_seconds': int.parse(_idleTimeout) * 60,
     });
     if (!mounted) return;
@@ -160,6 +165,16 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // Privacy section — guest mode lives above everything else because
+          // it's the most load-bearing privacy knob and must be reachable fast.
+          Text('Privacy', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          _GuestModeCard(
+            enabled: _guestMode,
+            onChanged: (v) => setState(() => _guestMode = v),
+          ),
+          const SizedBox(height: AppConstants.spacingXxl),
+
           // General section
           Text('General', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
@@ -306,6 +321,63 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Privacy-accented card for the guest mode toggle. Styled distinctly from
+/// other switches so it reads as a privacy state, not just another setting.
+class _GuestModeCard extends StatelessWidget {
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  const _GuestModeCard({required this.enabled, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final ac = theme.extension<AppColors>()!;
+    final cs = theme.colorScheme;
+
+    return Card(
+      color: enabled ? ac.warningContainer : null,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              enabled ? Icons.person_off_rounded : Icons.shield_outlined,
+              color: enabled ? ac.warning : cs.onSurfaceVariant,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Guest mode',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    enabled
+                        ? "Memory is paused — Aksa won't recall or save anything this session."
+                        : "Pause memory when a guest talks to Aksa. She stays herself, just forgets for the session.",
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Switch(value: enabled, onChanged: onChanged),
+          ],
+        ),
       ),
     );
   }

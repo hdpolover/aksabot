@@ -206,12 +206,20 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
       return;
     }
     final bytes = await file.readAsBytes();
-    final target = _replyTarget == _ReplyTarget.app ? 'app' : 'device';
+    await _sendVoiceBytes(
+      bytes,
+      replyTarget: _replyTarget == _ReplyTarget.app ? 'app' : 'device',
+    );
+  }
 
+  Future<void> _sendVoiceBytes(
+    Uint8List bytes, {
+    required String replyTarget,
+  }) async {
     final result = await _repo.sendVoiceInput(
       widget.deviceId,
       bytes,
-      replyTarget: target,
+      replyTarget: replyTarget,
       conversationId: _conversationId,
     );
     if (!mounted) return;
@@ -230,52 +238,56 @@ class _VoiceIntercomPageState extends State<VoiceIntercomPage>
           return;
         }
 
-        // Track conversation for continuity
         if (data.conversationId != null) {
           _conversationId = data.conversationId;
         }
 
-        // App reply mode — show response text and play audio
-        if (_replyTarget == _ReplyTarget.app) {
-          if (data.hasAppReply) {
-            setState(() {
-              _aiState = _AiInputState.done;
-              _aiTranscript = data.transcript;
-              _aiResponse = _stripTags(data.response!);
-            });
-            // Play MP3 audio if available
-            if (data.audio != null && data.audio!.isNotEmpty) {
-              final audioBytes = base64Decode(data.audio!);
-              _appReplyPlayer.play(BytesSource(
-                Uint8List.fromList(audioBytes),
-                mimeType: data.mimeType ?? 'audio/mpeg',
-              ));
-            }
-          } else {
-            setState(() {
-              _aiState = _AiInputState.error;
-              _aiTranscript = data.transcript;
-              _aiError = 'Aksa could not generate a response.';
-            });
-          }
+        if (replyTarget == 'app') {
+          _handleAppReply(data);
           return;
         }
 
-        // Device reply mode — current behavior
+        // Device reply mode: if the device has no active WS session, fall back
+        // to app mode automatically so the user still gets an audio response.
         if (!data.dispatched) {
+          _showSnack('Device offline — getting response on your phone');
           setState(() {
-            _aiState = _AiInputState.error;
-            _aiTranscript = data.transcript;
-            _aiError = 'Device is offline — Aksa could not respond.';
-          });
-        } else {
-          setState(() {
-            _aiState = _AiInputState.done;
+            _aiState = _AiInputState.processing;
             _aiTranscript = data.transcript;
           });
+          _sendVoiceBytes(bytes, replyTarget: 'app');
+          return;
         }
+
+        setState(() {
+          _aiState = _AiInputState.done;
+          _aiTranscript = data.transcript;
+        });
       },
     );
+  }
+
+  void _handleAppReply(VoiceInputResult data) {
+    if (!data.hasAppReply) {
+      setState(() {
+        _aiState = _AiInputState.error;
+        _aiTranscript = data.transcript;
+        _aiError = 'Aksa could not generate a response.';
+      });
+      return;
+    }
+    setState(() {
+      _aiState = _AiInputState.done;
+      _aiTranscript = data.transcript;
+      _aiResponse = _stripTags(data.response!);
+    });
+    if (data.audio != null && data.audio!.isNotEmpty) {
+      final audioBytes = base64Decode(data.audio!);
+      _appReplyPlayer.play(BytesSource(
+        Uint8List.fromList(audioBytes),
+        mimeType: data.mimeType ?? 'audio/mpeg',
+      ));
+    }
   }
 
   // ── Voice Message ─────────────────────────────────────────────

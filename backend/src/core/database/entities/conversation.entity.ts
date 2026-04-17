@@ -30,6 +30,9 @@ export class Conversation {
   @Column({ name: 'ended_at', nullable: true })
   endedAt: Date;
 
+  @Column({ name: 'guest_mode', type: 'boolean', default: false })
+  guestMode: boolean;
+
   @OneToMany(() => Message, (message) => message.conversation)
   messages: Message[];
 }

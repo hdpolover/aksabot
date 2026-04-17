@@ -13,6 +13,12 @@ static unsigned long lastReconnectAttempt = 0;
 // Set to true by the DISCONNECTED event. Cleared when we call begin().
 static volatile bool retryPending = false;
 
+// Guard: WiFi.onEvent() accumulates handlers on repeated calls — registering
+// the same handler twice causes every event to fire it twice, producing double
+// "[WiFi] Disconnected" logs and corrupting the retry state machine.
+// Only register once, even if init() is called multiple times.
+static bool eventRegistered = false;
+
 // Timestamp of the most recent WiFi.begin() call (from any code path).
 // Guards against double-begin: WiFi.disconnect() inside reconnect() fires
 // ARDUINO_EVENT_WIFI_STA_DISCONNECTED asynchronously via the ESP-IDF event
@@ -33,7 +39,7 @@ static WebServer* apServer = nullptr;
 static volatile bool apProvisioned = false;
 static bool apActive = false;
 
-static void onWiFiEvent(WiFiEvent_t event) {
+static void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
     switch (event) {
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
             Serial.printf("[WiFi] Connected — IP: %s\n", WiFi.localIP().toString().c_str());
@@ -50,7 +56,8 @@ static void onWiFiEvent(WiFiEvent_t event) {
             break;
 
         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-            Serial.println("[WiFi] Disconnected");
+            Serial.printf("[WiFi] Disconnected — reason: %u\n",
+                          info.wifi_sta_disconnected.reason);
             appState.wifiConnected = false;
             // Record when the disconnect occurred so backoff starts from here.
             // We mark retry pending here (inside the driver event) rather than
@@ -67,7 +74,10 @@ static void onWiFiEvent(WiFiEvent_t event) {
 
 void wifi_manager::init() {
     WiFi.mode(WIFI_STA);
-    WiFi.onEvent(onWiFiEvent);
+    if (!eventRegistered) {
+        WiFi.onEvent(onWiFiEvent);
+        eventRegistered = true;
+    }
     WiFi.setAutoReconnect(false);  // we drive all reconnection via tick() / waitForConnection()
 
     // Try NVS credentials first, fall back to compile-time constants
@@ -123,13 +133,15 @@ void wifi_manager::reconnect(const char* ssid, const char* password) {
 
     Serial.printf("[WiFi] Reconnecting with new credentials for '%s'\n", ssidBuf);
     WiFi.disconnect();
+    // Give the driver 200ms to fully process the disconnect before calling begin().
+    // Without this gap, the DISCONNECTED event fires with reason 2 (AUTH_EXPIRE)
+    // from the driver's internal cleanup WHILE begin() is already in flight,
+    // producing an immediate spurious failure on the very first connection attempt.
+    delay(200);
     reconnectDelay = WIFI_RECONNECT_BASE_MS;
-    lastBeginMs = millis();  // set BEFORE begin() so MIN_BEGIN_GAP_MS guard is in place
+    retryPending = false;   // clear any pending retry — we're starting fresh
+    lastBeginMs = millis();
     WiFi.begin(ssidBuf, passBuf);
-    // Note: WiFi.disconnect() queues ARDUINO_EVENT_WIFI_STA_DISCONNECTED which
-    // fires asynchronously and sets retryPending=true — AFTER this function
-    // returns.  The lastBeginMs guard in waitForConnection()/tick() prevents a
-    // second begin() from being called within MIN_BEGIN_GAP_MS regardless.
 }
 
 // ── SoftAP provisioning ───────────────────────────────────────

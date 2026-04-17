@@ -1430,16 +1430,24 @@ export class AudioGateway
     // Exclude the current user message (last in history) from context
     const history = allHistory.slice(0, -1);
 
+    // Guest mode: skip memory + mood retrieval so Aksa can't conflate a visitor
+    // with Hendra. Read the flag up front so the Promise.all branches cleanly.
+    const guestMode = device?.settingsJson?.guest_mode === true;
+
     // Fetch relevant memories and mood history in parallel
     // Stratified sample (not top-N) so consecutive turns don't always see
     // the same 20 facts — prevents responses from orbiting the same anchors.
     const [memories, moodHistory] = await Promise.all([
-      this.memoriesService.getStratifiedSample(deviceId, 10),
-      this.moodJournal.getRecentMoods(deviceId).catch(() => []),
+      guestMode
+        ? Promise.resolve([])
+        : this.memoriesService.getStratifiedSample(deviceId, 10),
+      guestMode
+        ? Promise.resolve([])
+        : this.moodJournal.getRecentMoods(deviceId).catch(() => []),
     ]);
 
     this.logger.debug(
-      `[${deviceId}] Context ready — history=${history.length}, memories=${memories.length}`,
+      `[${deviceId}] Context ready — history=${history.length}, memories=${memories.length}${guestMode ? ' (guest mode)' : ''}`,
     );
 
     // Bump access on used memories
@@ -1465,6 +1473,7 @@ export class AudioGateway
       latitude: settings.latitude as number | undefined,
       longitude: settings.longitude as number | undefined,
       language: (settings.language as 'en' | 'id' | undefined) ?? 'en',
+      guestMode,
     };
 
     // Map mood entries for prompt
@@ -1587,6 +1596,15 @@ export class AudioGateway
       }
 
       case 'memories:list': {
+        const device = await this.persistence
+          .getDevice(deviceId)
+          .catch(() => null);
+        if (device?.settingsJson?.guest_mode === true) {
+          responseText =
+            "Can't pull that up — I'm in guest mode, memory is paused.";
+          expression = 'shrug';
+          break;
+        }
         const memories = await this.memoriesService.getRelevant(deviceId, 10);
         if (memories.length === 0) {
           responseText =
@@ -1870,7 +1888,15 @@ export class AudioGateway
     if (!session) throw new Error(`No session for device ${deviceId}`);
 
     if (!session.conversationId) {
-      const conversation = await this.persistence.createConversation(deviceId);
+      // Tag the conversation row with the device's current guest_mode state at
+      // creation time. This is frozen for the conversation's lifetime — mid-
+      // session flips of the setting don't retroactively reclassify the row.
+      const device = await this.persistence.getDevice(deviceId).catch(() => null);
+      const guestMode = device?.settingsJson?.guest_mode === true;
+      const conversation = await this.persistence.createConversation(
+        deviceId,
+        guestMode,
+      );
       session.conversationId = conversation.id;
       this.logger.log(`[${deviceId}] Conversation created: ${conversation.id}`);
       this.sendToDevice(deviceId, 'session:start', {
@@ -1893,6 +1919,17 @@ export class AudioGateway
       sessionId: conversationId,
       reason: 'timeout',
     });
+
+    // Guest mode: don't extract memories from a session where the speaker
+    // may not even be the device owner — avoids contaminating the owner's
+    // memory pool with a visitor's facts.
+    const device = await this.persistence.getDevice(deviceId).catch(() => null);
+    if (device?.settingsJson?.guest_mode === true) {
+      this.logger.log(
+        `[${deviceId}] Guest mode — skipping memory extraction for ${conversationId}`,
+      );
+      return;
+    }
 
     // Extract memories in background (don't block the session end)
     this.memoriesService
@@ -2029,12 +2066,14 @@ export class AudioGateway
       stability: settings.voice_stability as number | undefined,
       language: (settings.language as 'en' | 'id' | undefined) ?? 'en',
     };
+    const guestMode = settings.guest_mode === true;
     const context = {
       timezone: settings.timezone as string | undefined,
       weatherEnabled: settings.integrations_weather as boolean | undefined,
       latitude: settings.latitude as number | undefined,
       longitude: settings.longitude as number | undefined,
       language: (settings.language as 'en' | 'id' | undefined) ?? 'en',
+      guestMode,
     };
 
     // 3. Fetch memories, history, mood in parallel
@@ -2045,8 +2084,12 @@ export class AudioGateway
       existingConversationId || session?.conversationId;
 
     const [memories, moodHistory, history] = await Promise.all([
-      this.memoriesService.getStratifiedSample(deviceId, 10),
-      this.moodJournal.getRecentMoods(deviceId).catch(() => []),
+      guestMode
+        ? Promise.resolve([])
+        : this.memoriesService.getStratifiedSample(deviceId, 10),
+      guestMode
+        ? Promise.resolve([])
+        : this.moodJournal.getRecentMoods(deviceId).catch(() => []),
       historyConvId
         ? this.persistence.getRecentHistory(historyConvId)
         : Promise.resolve([]),
@@ -2075,19 +2118,27 @@ export class AudioGateway
     if (existingConversationId) {
       conversationId = existingConversationId;
     } else {
-      const conversation = await this.persistence.createConversation(deviceId);
+      const conversation = await this.persistence.createConversation(
+        deviceId,
+        guestMode,
+      );
       conversationId = conversation.id;
-      // Extract memories from any stale conversations that were just closed
-      const closedIds = (conversation as any).closedConversationIds as
-        | string[]
-        | undefined;
-      if (closedIds?.length) {
-        for (const closedId of closedIds) {
-          this.memoriesService
-            .extractFromConversation(closedId, deviceId)
-            .catch((err) =>
-              this.logger.warn(`Memory extraction failed: ${err.message}`),
-            );
+      // Extract memories from any stale conversations that were just closed —
+      // but only when guest mode is off. The defense-in-depth guard inside
+      // MemoriesService.extractFromConversation will also bail on guest-tagged
+      // conversations, so this is belt-and-braces.
+      if (!guestMode) {
+        const closedIds = (conversation as any).closedConversationIds as
+          | string[]
+          | undefined;
+        if (closedIds?.length) {
+          for (const closedId of closedIds) {
+            this.memoriesService
+              .extractFromConversation(closedId, deviceId)
+              .catch((err) =>
+                this.logger.warn(`Memory extraction failed: ${err.message}`),
+              );
+          }
         }
       }
     }

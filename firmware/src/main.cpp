@@ -1907,7 +1907,16 @@ void setup() {
         ble_manager::deinit();
         delay(300);  // let radio settle
 
-        wifi_manager::init();
+        // If WiFi was already initialized early (isConfigured=true), use reconnect()
+        // to update credentials without re-registering the event handler.
+        // If this is a first-ever boot with no prior credentials, use init().
+        if (isConfigured) {
+            char provPass[128] = {};
+            nvs_store::getWifiPassword(provPass, sizeof(provPass));
+            wifi_manager::reconnect(ssidBuf, provPass);  // ssidBuf already loaded above
+        } else {
+            wifi_manager::init();
+        }
         Serial.println("[Main] Waiting for Wi-Fi...");
         wifi_manager::waitForConnection(15000);
 

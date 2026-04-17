@@ -76,7 +76,28 @@ static uint8_t voltageToPercent(uint16_t mv) {
 
 void init() {
     analogSetPinAttenuation(BATTERY_ADC, ADC_11db);  // Arduino ESP32 name for 11/12 dB attenuation
-    Serial.println("[Battery] Init");
+
+    // Warmup: sample SOF for ~50ms during boot so the first readPercent()
+    // doesn't report "no USB" just because the USB host hadn't settled yet.
+    // If any SOF hits during warmup, prime the sticky hold so the first
+    // reading correctly reports charging.
+    bool sawSof = false;
+    for (int i = 0; i < 30; i++) {  // 30 * 1.5ms = 45ms
+        REG_SET_BIT(USB_SERIAL_JTAG_INT_CLR_REG, USB_SERIAL_JTAG_SOF_INT_CLR);
+        delayMicroseconds(1500);
+        if (REG_READ(USB_SERIAL_JTAG_INT_RAW_REG) & USB_SERIAL_JTAG_SOF_INT_RAW) {
+            sawSof = true;
+            break;
+        }
+    }
+    if (sawSof) {
+        chargingHold = 3;
+        usbPowered = true;
+        charging = true;
+    }
+
+    Serial.printf("[Battery] Init — USB %s at boot\n",
+        sawSof ? "detected" : "not detected");
 }
 
 // Detect USB host connection via USB Serial/JTAG SOF (Start-of-Frame) bits.
@@ -85,13 +106,19 @@ void init() {
 // even when the battery is fully charged and voltage alone can't distinguish
 // USB-powered from battery-full.
 static bool detectUsbConnected() {
-    // Clear the SOF interrupt raw status bit, wait for one SOF period.
-    // Note: ESP32-S3 shares the USB JTAG peripheral with Serial, so SOF
-    // detection can be intermittent. The caller uses a sticky hold counter
-    // to debounce false negatives.
-    REG_SET_BIT(USB_SERIAL_JTAG_INT_CLR_REG, USB_SERIAL_JTAG_SOF_INT_CLR);
-    delayMicroseconds(1500);
-    return (REG_READ(USB_SERIAL_JTAG_INT_RAW_REG) & USB_SERIAL_JTAG_SOF_INT_RAW) != 0;
+    // SOF frames fire every 1ms when a USB host is attached. A single-shot
+    // check (clear bit, wait 1.5ms, read) is flaky — especially at boot
+    // before the host side has fully settled, and because the ESP32-S3 USB
+    // JTAG peripheral is shared with Serial. Sample up to 6 times (~9ms
+    // total). Any hit = connected. Only declare absent after all misses.
+    for (int attempt = 0; attempt < 6; attempt++) {
+        REG_SET_BIT(USB_SERIAL_JTAG_INT_CLR_REG, USB_SERIAL_JTAG_SOF_INT_CLR);
+        delayMicroseconds(1500);
+        if (REG_READ(USB_SERIAL_JTAG_INT_RAW_REG) & USB_SERIAL_JTAG_SOF_INT_RAW) {
+            return true;
+        }
+    }
+    return false;
 }
 
 uint8_t readPercent() {
