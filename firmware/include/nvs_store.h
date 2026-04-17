@@ -63,6 +63,14 @@ bool setPresenceGracePeriodSec(uint8_t seconds);
 bool getDisplayTranscript();
 bool setDisplayTranscript(bool enabled);
 
+// ── Guest mode ────────────────────────────────────────
+
+/// Guest mode pauses memory retrieval + extraction on the backend. Persisted
+/// here so the face/LED indicators show the right state immediately on boot,
+/// before the first config:update arrives. Default: false.
+bool getGuestMode();
+bool setGuestMode(bool enabled);
+
 // ── Face style ────────────────────────────────────────
 
 /// Returns the stored face style ID (0=ORBIT, 1=NOVA). Default: 1 (NOVA).

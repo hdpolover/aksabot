@@ -1595,6 +1595,18 @@ void renderFace(const face::FaceState& fs, const display::StatusBar& status) {
         }
     }
 
+    // ── Guest mode indicator (amber "G" after presence dot) ──
+    // Persistent while guest_mode is on. Uses the same amber (#EA580C) as the
+    // Flutter app's warning color, so the two ends of the stack agree visually.
+    if (status.guestMode) {
+        s.fillSmoothCircle(32, 8, 4, rgb(234, 88, 12));  // amber
+        s.setTextColor(rgb(255, 255, 255));
+        s.setTextDatum(lgfx::middle_center);
+        s.setTextSize(1);
+        s.drawString("G", 32, 8);
+        s.setTextDatum(lgfx::top_left);
+    }
+
     // ── Battery indicator (top-right corner) ───────────────────
     // Tiny battery icon with status symbol to the left:
     //   ✓ checkmark = fully charged, ⚡ plug = charging, nothing = on battery.

@@ -173,6 +173,23 @@ void status_led::showFocusMode() {
     overrideActive = true;
 }
 
+void status_led::showGuestMode() {
+    // Amber matches the face "G" glyph and the Flutter warning color (#EA580C)
+    // — keeps the guest-mode signal visually consistent across the device, LED,
+    // and app.
+    targetR = 234;
+    targetG = 88;
+    targetB = 12;
+    currentPattern = Pattern::BREATHE;
+    animStartMs = millis();
+    overrideActive = true;
+}
+
+void status_led::hideGuestMode() {
+    overrideActive = false;
+    syncToState();
+}
+
 void status_led::off() {
     currentPattern = Pattern::OFF;
     overrideActive = false;

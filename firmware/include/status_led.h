@@ -53,6 +53,15 @@ void showOta();
 /// Override: focus mode.
 void showFocusMode();
 
+/// Override: guest mode — amber slow breathe, a persistent background signal
+/// that the owner's memory is paused. Intentionally subtle (state-level
+/// signals like LISTENING/THINKING still take over because they also acquire
+/// the override slot via their own set() / syncToState() calls).
+void showGuestMode();
+
+/// Clear the guest-mode override and immediately re-sync to the current state.
+void hideGuestMode();
+
 /// Turn LED off.
 void off();
 

@@ -20,6 +20,7 @@ static const char* K_PRES_PRESENT  = "pres_present";
 static const char* K_PRES_RSSI     = "pres_rssi";
 static const char* K_PRES_GRACE    = "pres_grace";
 static const char* K_DISP_TRANSCRIPT = "disp_transcript";
+static const char* K_GUEST_MODE    = "guest_md";
 static const char* K_FACE_STYLE    = "face_style";
 static const char* K_FACE_BG_COL    = "face_bg_col";    // 24-bit RGB as uint32
 static const char* K_FACE_EYE_COL  = "face_eye_col";   // 24-bit RGB as uint32
@@ -189,6 +190,18 @@ bool nvs_store::getDisplayTranscript() {
 bool nvs_store::setDisplayTranscript(bool enabled) {
     if (!initialized) return false;
     return prefs.putBool(K_DISP_TRANSCRIPT, enabled) > 0;
+}
+
+// ── Guest mode ─────────────────────────────────────────
+
+bool nvs_store::getGuestMode() {
+    if (!initialized) return false;
+    return prefs.getBool(K_GUEST_MODE, false);
+}
+
+bool nvs_store::setGuestMode(bool enabled) {
+    if (!initialized) return false;
+    return prefs.putBool(K_GUEST_MODE, enabled) > 0;
 }
 
 // ── Face style ─────────────────────────────────────────

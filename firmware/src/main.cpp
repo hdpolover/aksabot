@@ -97,6 +97,13 @@ static volatile int8_t pendingResponseEnds = 0;
 // response:text triggers the full-screen TEXT_RESPONSE display mode instead.
 static bool s_ttsEnabled = true;
 
+// ── Guest mode ────────────────────────────────────────
+// When true, the backend pauses memory retrieval + extraction for the device.
+// Locally we show an amber "G" on the face and an amber LED breathe so the
+// owner can tell at a glance that memory is paused — otherwise guest mode
+// would be invisible and easy to forget about.
+static bool s_guestMode = false;
+
 // ── Echo mode (hold-to-record, release-to-playback) ───
 // Records raw stereo I2S frames to PSRAM (same as audio-pipeline test firmware).
 // Plays back raw stereo directly — no mono conversion, no quality loss.
@@ -204,6 +211,7 @@ static void updateStatusBar() {
     sb.blePresent = (appState.presenceState == PresenceState::PRESENT ||
                      appState.presenceState == PresenceState::LEAVING);
     sb.blePresenceEnabled = nvs_store::getPresenceEnabled();
+    sb.guestMode = s_guestMode;
     // Stall detection: speaking/thinking but no data flowing for 20+ seconds
     // (inter-sentence TTS gaps are 5-10s, so 20s avoids false positives)
     sb.connectionStalled = false;
@@ -862,6 +870,20 @@ static void onWsJson(const char* event, const char* data) {
                 s_ttsEnabled = doc["tts_enabled"] | true;
                 if (!s_ttsEnabled) display::clearTextResponse();  // clear stale buffer on toggle
                 Serial.printf("[Main] Config: tts_enabled=%s\n", s_ttsEnabled ? "true" : "false");
+            }
+            // Guest mode — persisted to NVS so the indicators stay correct
+            // across reboots. Updates face + LED immediately.
+            if (!doc["guest_mode"].isNull()) {
+                bool enabled = doc["guest_mode"] | false;
+                s_guestMode = enabled;
+                nvs_store::setGuestMode(enabled);
+                if (enabled) {
+                    status_led::showGuestMode();
+                } else {
+                    status_led::hideGuestMode();
+                }
+                updateStatusBar();  // refresh face "G" indicator
+                Serial.printf("[Main] Config: guest_mode=%s\n", enabled ? "true" : "false");
             }
             // SFX enabled toggle — gates sfx_audio and ambient ui_audio clips
             if (!doc["sfx_enabled"].isNull()) {
@@ -1758,6 +1780,7 @@ void setup() {
         display::setHomeMode(idleDm);  // sets g_homeMode so wake() and dismissals respect it
     }
     display::setTranscriptOverlay(nvs_store::getDisplayTranscript());  // restore transcript pref
+    s_guestMode = nvs_store::getGuestMode();  // restore guest mode so the indicators match from boot
     boot_screen::init();
 
     // Show splash and poll BOOT button (GPIO 0) during the splash delay.
@@ -1814,6 +1837,7 @@ void setup() {
     vad::init();
     ota_update::init();
     status_led::init();
+    if (s_guestMode) status_led::showGuestMode();  // restore override if NVS said so
     battery::init();
 
     // Load brightness from NVS and pass to power manager

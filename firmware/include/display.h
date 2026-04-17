@@ -38,6 +38,7 @@ struct StatusBar {
     uint8_t pomodoroCycle;      // 1-4
     bool blePresent;            // Phone detected nearby via BLE presence
     bool blePresenceEnabled;    // Presence scanning is active (not disabled in settings)
+    bool guestMode;             // Backend memory paused — render amber "G" indicator when true
 };
 
 /// Pomodoro display data.
