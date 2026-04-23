@@ -22,17 +22,19 @@ class FaceProfileModel {
       );
 }
 
+// Unwrap {"data": ...} wrapper that the backend puts on all responses
+dynamic _unwrap(dynamic body) =>
+    (body is Map<String, dynamic> && body.containsKey('data')) ? body['data'] : body;
+
 class VisionRepository {
   final Dio dio;
 
   const VisionRepository({required this.dio});
 
   Future<List<FaceProfileModel>> getProfiles() async {
-    final response = await dio.get<List<dynamic>>('/vision/profiles');
-    return (response.data ?? [])
-        .cast<Map<String, dynamic>>()
-        .map(FaceProfileModel.fromJson)
-        .toList();
+    final response = await dio.get('/vision/profiles');
+    final list = _unwrap(response.data) as List<dynamic>;
+    return list.cast<Map<String, dynamic>>().map(FaceProfileModel.fromJson).toList();
   }
 
   Future<FaceProfileModel> enrollFromFile({required File photo, required String name}) =>
@@ -44,14 +46,11 @@ class VisionRepository {
           MultipartFile.fromFile(e.value.path, filename: 'photo${e.key}.jpg')),
     );
     final formData = FormData.fromMap({'photos': parts, 'name': name});
-    final response = await dio.post<Map<String, dynamic>>('/vision/enroll', data: formData);
-    return FaceProfileModel.fromJson(response.data!);
+    final response = await dio.post('/vision/enroll', data: formData);
+    return FaceProfileModel.fromJson(_unwrap(response.data) as Map<String, dynamic>);
   }
 
-  Future<void> triggerDeskCapture({
-    required String cameraDeviceId,
-    required String name,
-  }) async {
+  Future<void> triggerDeskCapture({required String cameraDeviceId, required String name}) async {
     await dio.post(
       '/vision/enroll/capture',
       queryParameters: {'deviceId': cameraDeviceId},
@@ -65,10 +64,8 @@ class VisionRepository {
 
   Future<void> setVisionMode({required String deviceId, required String mode}) async {
     await dio.patch(
-      '/devices/$deviceId',
-      data: {
-        'settingsJson': {'vision_mode': mode},
-      },
+      '/devices/$deviceId/settings',
+      data: {'vision_mode': mode},
     );
   }
 }

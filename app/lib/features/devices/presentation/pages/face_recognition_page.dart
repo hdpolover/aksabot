@@ -139,6 +139,15 @@ class _FaceRecognitionPageState extends State<FaceRecognitionPage> {
                 child: Center(child: Text('Enrolling…', style: TextStyle(color: Colors.grey))),
               ),
 
+            if (state is VisionError)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: SelectableText(
+                  'Error: ${state.message}',
+                  style: TextStyle(color: cs.error, fontSize: 13),
+                ),
+              ),
+
             if (state is VisionLoaded && state.profiles.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),

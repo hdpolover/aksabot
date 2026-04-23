@@ -144,13 +144,14 @@ class _DeviceHome extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        centerTitle: false,
         title: devices.length > 1
             ? _DeviceDropdown(
                 devices: devices,
                 selected: device,
                 onChanged: onDeviceChanged,
               )
-            : Text(device.name),
+            : Text(device.name, style: Theme.of(context).textTheme.titleMedium),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
@@ -208,7 +209,7 @@ class _DeviceDropdown extends StatelessWidget {
         value: selected.id,
         icon: Icon(Icons.expand_more_rounded, color: cs.onSurface, size: 20),
         isDense: true,
-        style: tt.titleLarge?.copyWith(color: cs.onSurface),
+        style: tt.titleMedium?.copyWith(color: cs.onSurface),
         borderRadius: BorderRadius.circular(12),
         items: devices.map((d) {
           final online = d.isOnline;

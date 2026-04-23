@@ -16,11 +16,11 @@ void main() {
 
   group('getProfiles', () {
     test('returns list of profiles on success', () async {
-      when(() => mockDio.get<List<dynamic>>('/vision/profiles')).thenAnswer(
+      when(() => mockDio.get<dynamic>('/vision/profiles')).thenAnswer(
         (_) async => Response(
-          data: [
+          data: {'data': [
             {'id': 'fp1', 'name': 'Hendra', 'thumbnailUrl': null, 'createdAt': '2026-01-01T00:00:00.000Z'}
-          ],
+          ]},
           statusCode: 200,
           requestOptions: RequestOptions(path: '/vision/profiles'),
         ),
