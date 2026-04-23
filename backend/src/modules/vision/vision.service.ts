@@ -10,8 +10,10 @@ export interface IdentityResult {
   unknown: boolean;
 }
 
-/** Distance threshold for cosine similarity — below this = confident match. */
-const MATCH_THRESHOLD = 0.4;
+// Threshold tuned for aligned ArcFace embeddings (5-point face alignment applied).
+// Aligned same-person: typically 0.05-0.20. Different person: typically 0.45-0.90.
+// 0.28 gives comfortable margin between the two distributions.
+const MATCH_THRESHOLD = 0.28;
 
 @Injectable()
 export class VisionService {
@@ -35,7 +37,7 @@ export class VisionService {
     for (const buf of jpegBuffers) {
       const detection = await this.inference.detect(buf);
       if (!detection) continue;
-      const embedding = await this.inference.embed(buf, detection.box);
+      const embedding = await this.inference.embed(buf, detection);
       if (embedding) embeddings.push(embedding);
     }
 
@@ -109,6 +111,6 @@ export class VisionService {
   async detectAndEmbed(jpegBuffer: Buffer): Promise<number[] | null> {
     const detection = await this.inference.detect(jpegBuffer);
     if (!detection) return null;
-    return this.inference.embed(jpegBuffer, detection.box);
+    return this.inference.embed(jpegBuffer, detection);
   }
 }

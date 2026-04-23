@@ -14,7 +14,7 @@ const mockGateway = {
   setPendingEnrollment: jest.fn(),
 };
 
-const mockUser = { id: 'user-uuid', email: 'test@test.com' };
+const mockUser = { userId: 'user-uuid', email: 'test@test.com' };
 
 describe('VisionController', () => {
   let controller: VisionController;

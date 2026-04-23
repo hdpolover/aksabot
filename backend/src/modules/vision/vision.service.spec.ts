@@ -41,7 +41,7 @@ describe('VisionService', () => {
   describe('enroll', () => {
     it('should detect faces, average embeddings, and save profile', async () => {
       const fakeEmbedding = new Array(512).fill(0.1);
-      mockInference.detect.mockResolvedValue({ box: [10, 10, 100, 100], score: 0.9 });
+      mockInference.detect.mockResolvedValue({ box: [10, 10, 100, 100], score: 0.9, keypoints: [] });
       mockInference.embed.mockResolvedValue(fakeEmbedding);
       mockRepo.create.mockReturnValue({ name: 'Hendra', userId: 'u1', embedding: fakeEmbedding });
       mockRepo.save.mockResolvedValue({ id: 'fp-uuid', name: 'Hendra' });
@@ -55,7 +55,7 @@ describe('VisionService', () => {
     });
 
     it('should throw if no face detected in any frame', async () => {
-      mockInference.detect.mockResolvedValue(null);
+      mockInference.detect.mockResolvedValue(null); // no face detected
       await expect(service.enroll('u1', 'Hendra', [Buffer.from('jpeg')])).rejects.toThrow(
         'No face detected',
       );
@@ -64,13 +64,13 @@ describe('VisionService', () => {
 
   describe('findBestMatch', () => {
     it('should return name when distance below threshold', async () => {
-      mockDataSource.query.mockResolvedValue([{ id: 'fp1', name: 'Hendra', distance: '0.3' }]);
+      mockDataSource.query.mockResolvedValue([{ id: 'fp1', name: 'Hendra', distance: '0.15' }]);
       const result = await service.findBestMatch('u1', new Array(512).fill(0.1));
       expect(result).toEqual({ name: 'Hendra', confidence: expect.any(Number), unknown: false });
     });
 
     it('should return unknown when distance above threshold', async () => {
-      mockDataSource.query.mockResolvedValue([{ id: 'fp1', name: 'Hendra', distance: '0.55' }]);
+      mockDataSource.query.mockResolvedValue([{ id: 'fp1', name: 'Hendra', distance: '0.40' }]);
       const result = await service.findBestMatch('u1', new Array(512).fill(0.1));
       expect(result).toEqual({ name: null, confidence: expect.any(Number), unknown: true });
     });
