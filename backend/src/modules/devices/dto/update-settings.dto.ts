@@ -167,4 +167,12 @@ export class UpdateSettingsDto {
   @Max(180)
   @IsOptional()
   longitude?: number;
+
+  @IsString()
+  @IsOptional()
+  vision_mode?: string; // 'always' | 'conversation'
+
+  @IsString()
+  @IsOptional()
+  pairedDeviceId?: string; // camera device: ID of paired aksabot main device
 }

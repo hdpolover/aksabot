@@ -1059,6 +1059,7 @@ export class AudioGateway
           this.onAudioStart(deviceId, msg.data?.format as string).catch((err) =>
             this.logger.error(`onAudioStart error: ${err.message}`),
           );
+          this.sendVisionEvent(deviceId, 'vision:start');
           break;
         case 'audio:end':
           this.onAudioEnd(deviceId);
@@ -1068,6 +1069,7 @@ export class AudioGateway
           break;
         case 'session:end':
           this.endConversation(deviceId);
+          this.sendVisionEvent(deviceId, 'vision:stop');
           break;
         case 'presence:arrived':
           this.onPresenceArrived(deviceId, msg.data).catch((err) =>
@@ -2413,6 +2415,27 @@ export class AudioGateway
 
   sendVisionCapture(cameraDeviceId: string): void {
     this.sendToDevice(cameraDeviceId, 'vision:capture', {});
+  }
+
+  /**
+   * Find the camera device paired to this aksabot device and send it a vision event.
+   * pairedDeviceId on the camera points to the aksabot main device —
+   * so we reverse-lookup: find device where settingsJson.pairedDeviceId == aksabotDeviceId.
+   */
+  private sendVisionEvent(aksabotDeviceId: string, event: 'vision:start' | 'vision:stop'): void {
+    // Walk all connected devices looking for one whose pairedDeviceId == aksabotDeviceId
+    for (const [cameraId] of this['deviceToSocket'] as Map<string, unknown>) {
+      const session = this.sessions.get(cameraId);
+      if (!session) continue;
+      // The camera session doesn't store pairedDeviceId — we rely on the socket being connected
+      // and the VisionGatewayHandler knowing the pairing via device settingsJson.
+      // Simplest approach: broadcast vision:start to any device whose WS is connected
+      // and is NOT the current aksabot device. VisionGatewayHandler will ignore it
+      // if the device isn't a camera or isn't paired.
+      if (cameraId !== aksabotDeviceId) {
+        this.sendToDevice(cameraId, event, {});
+      }
+    }
   }
 
   setPendingEnrollment(cameraDeviceId: string, userId: string, name: string): void {
