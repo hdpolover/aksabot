@@ -10,6 +10,13 @@ export interface IdentityResult {
   unknown: boolean;
 }
 
+export interface FaceResult {
+  box: [number, number, number, number]; // x1, y1, x2, y2 in original image coords
+  name: string | null;
+  confidence: number;
+  unknown: boolean;
+}
+
 // Threshold for aligned ArcFace embeddings.
 // Same-person (aligned): ~0.05-0.20. Different person: ~0.45-0.90.
 const MATCH_THRESHOLD = 0.28;
@@ -68,29 +75,34 @@ export class VisionService {
   }
 
   /**
-   * Detect ALL faces in the image, embed each, and return the best match
-   * across all faces × all enrolled profiles. Handles multi-person photos.
+   * Detect ALL faces, embed each, match against enrolled profiles.
+   * Returns the best named match + all face results with bounding boxes for overlay rendering.
    */
-  async recognizeAll(userId: string, jpegBuffer: Buffer): Promise<IdentityResult & { detected: boolean }> {
-    const faces = await this.inference.detectAll(jpegBuffer);
-    if (faces.length === 0) return { detected: false, name: null, confidence: 0, unknown: true };
+  async recognizeAll(
+    userId: string,
+    jpegBuffer: Buffer,
+  ): Promise<{ detected: boolean; name: string | null; confidence: number; unknown: boolean; faces: FaceResult[] }> {
+    const detections = await this.inference.detectAll(jpegBuffer);
+    if (detections.length === 0) {
+      return { detected: false, name: null, confidence: 0, unknown: true, faces: [] };
+    }
 
-    let bestMatch: (IdentityResult & { detected: true }) | null = null;
+    const faceResults: FaceResult[] = [];
+    let bestMatch: FaceResult | null = null;
 
-    for (const face of faces) {
-      const embedding = await this.inference.embed(jpegBuffer, face);
+    for (const det of detections) {
+      const embedding = await this.inference.embed(jpegBuffer, det);
       if (!embedding) continue;
-      const result = await this.findBestMatch(userId, embedding);
-      if (!result.unknown) {
-        if (!bestMatch || result.confidence > bestMatch.confidence) {
-          bestMatch = { detected: true, ...result };
-        }
+      const match = await this.findBestMatch(userId, embedding);
+      const fr: FaceResult = { box: det.box, ...match };
+      faceResults.push(fr);
+      if (!match.unknown && (!bestMatch || match.confidence > bestMatch.confidence)) {
+        bestMatch = fr;
       }
     }
 
-    if (bestMatch) return bestMatch;
-    // No face matched — return unknown with best confidence seen
-    return { detected: true, name: null, confidence: 0, unknown: true };
+    const top = bestMatch ?? faceResults[0] ?? { box: detections[0].box, name: null, confidence: 0, unknown: true };
+    return { detected: true, name: top.name, confidence: top.confidence, unknown: top.unknown, faces: faceResults };
   }
 
   /**

@@ -30,6 +30,10 @@
   .btn-sec:hover:not(:disabled) { background: #333; }
   .btn-green { background: #16a34a; color: #fff; }
   .btn-green:hover:not(:disabled) { background: #15803d; }
+  .btn-live { background: #7c3aed; color: #fff; }
+  .btn-live:hover:not(:disabled) { background: #6d28d9; }
+  .btn-live.active { background: #dc2626; }
+  .btn-live.active:hover:not(:disabled) { background: #b91c1c; }
   button:disabled { opacity: 0.4; cursor: not-allowed; }
   .mt { margin-top: 10px; }
   .row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
@@ -42,16 +46,28 @@
     max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;
   }
 
-  /* Live cam */
-  .cam-wrap { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 8px; overflow: hidden; }
-  .cam-wrap video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  /* Camera + canvas overlay */
+  .cam-wrap {
+    position: relative; width: 100%; aspect-ratio: 4/3;
+    background: #000; border-radius: 8px; overflow: hidden;
+  }
+  .cam-wrap video,
+  .cam-wrap canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  }
+  .cam-wrap canvas { pointer-events: none; }
   .cam-controls { display: flex; gap: 8px; margin-top: 8px; }
   .cam-controls button { flex: 1; }
 
-  /* Enrollment snap grid — 5 slots */
-  .snap-grid {
-    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 10px;
+  /* Live FPS counter */
+  .live-stats {
+    margin-top: 6px; font-size: 0.74rem; color: #666; font-family: monospace;
+    min-height: 1.2em;
   }
+  .live-stats span { color: #a78bfa; }
+
+  /* Enrollment snap grid */
+  .snap-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 10px; }
   .snap-slot {
     aspect-ratio: 1; border-radius: 6px; overflow: hidden; position: relative;
     background: #111; border: 2px dashed #333; cursor: pointer;
@@ -59,23 +75,14 @@
   }
   .snap-slot.filled { border-color: #16a34a; border-style: solid; }
   .snap-slot img { width: 100%; height: 100%; object-fit: cover; }
-  .snap-slot .slot-num {
-    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    font-size: 1.1rem; color: #444; font-weight: 700;
-  }
+  .snap-slot .slot-num { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; color: #444; font-weight: 700; }
   .snap-slot.filled .slot-num { display: none; }
-  .snap-slot .del-btn {
-    position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.7);
-    border: none; border-radius: 3px; color: #f87171; font-size: 0.65rem;
-    padding: 1px 4px; cursor: pointer; display: none;
-  }
+  .snap-slot .del-btn { position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.7); border: none; border-radius: 3px; color: #f87171; font-size: 0.65rem; padding: 1px 4px; cursor: pointer; display: none; }
   .snap-slot.filled .del-btn { display: block; }
-  .snap-progress {
-    margin-top: 8px; font-size: 0.78rem; color: #888; text-align: center;
-  }
+  .snap-progress { margin-top: 8px; font-size: 0.78rem; color: #888; text-align: center; }
   .snap-progress span { color: #4ade80; font-weight: 600; }
 
-  /* Recognize single snap */
+  /* Single-shot recognize preview */
   .recognize-preview {
     width: 100%; aspect-ratio: 4/3; border-radius: 8px; overflow: hidden;
     background: #111; border: 2px dashed #333; display: flex;
@@ -87,7 +94,6 @@
   .recognize-preview.has-image span { display: none; }
   .recognize-preview.has-image img { display: block; }
 
-  /* Result box */
   #result-box {
     margin-top: 10px; padding: 12px; background: #111; border-radius: 8px;
     font-size: 0.82rem; font-family: monospace; min-height: 60px;
@@ -97,21 +103,15 @@
   .no-match { color: #facc15; }
   .no-face  { color: #f87171; }
 
-  /* Profiles */
   #profiles-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
   .profile-row {
     display: flex; align-items: center; gap: 10px;
     background: #111; border: 1px solid #2a2a2a; border-radius: 8px; padding: 8px 12px;
   }
-  .avatar {
-    width: 34px; height: 34px; border-radius: 50%; background: #2563eb;
-    display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 0.9rem; flex-shrink: 0;
-  }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; background: #2563eb; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.9rem; flex-shrink: 0; }
   .profile-name { flex: 1; font-size: 0.88rem; font-weight: 500; }
   .profile-meta { font-size: 0.72rem; color: #555; }
 
-  /* drop zone for recognize */
   .drop-zone {
     border: 2px dashed #333; border-radius: 8px; padding: 14px;
     text-align: center; color: #555; font-size: 0.8rem; cursor: pointer;
@@ -144,22 +144,26 @@
     </div>
   </div>
 
-  <!-- 2. LIVE CAM -->
+  <!-- 2. CAMERA -->
   <div class="card">
     <h2>2. Camera</h2>
-    <div class="cam-wrap"><video id="video" autoplay playsinline muted></video></div>
-    <div class="cam-controls">
-      <button class="btn-sec" onclick="startCam()">Start cam</button>
-      <button class="btn-sec" id="snap-enroll-btn" onclick="snapForEnroll()" disabled>Snap (enroll)</button>
-      <button class="btn-sec" id="snap-recog-btn" onclick="snapForRecognize()" disabled>Snap (identify)</button>
+    <div class="cam-wrap">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
     </div>
+    <div class="cam-controls">
+      <button class="btn-sec" onclick="startCam()" id="start-cam-btn">Start cam</button>
+      <button class="btn-sec" onclick="snapForEnroll()" id="snap-enroll-btn" disabled>Snap (enroll)</button>
+      <button class="btn-sec" onclick="snapForRecognize()" id="snap-recog-btn" disabled>Snap (identify)</button>
+      <button class="btn-live" onclick="toggleLive()" id="live-btn" disabled>▶ Live</button>
+    </div>
+    <div class="live-stats" id="live-stats"></div>
   </div>
 
-  <!-- 3. ENROLL — 5 photos required -->
+  <!-- 3. ENROLL -->
   <div class="card">
     <h2>3. Enroll Face <span style="color:#555;font-weight:400;font-size:0.75rem">— 5 photos required</span></h2>
-    <p style="font-size:0.78rem;color:#666">Snap 5 times with slight expression/angle variation for better accuracy.</p>
-
+    <p style="font-size:0.78rem;color:#666">Snap 5 times with slight variation for better accuracy.</p>
     <div class="snap-grid" id="snap-grid">
       <div class="snap-slot" id="slot-0" onclick="slotClick(0)"><span class="slot-num">1</span><img><button class="del-btn" onclick="delSlot(event,0)">✕</button></div>
       <div class="snap-slot" id="slot-1" onclick="slotClick(1)"><span class="slot-num">2</span><img><button class="del-btn" onclick="delSlot(event,1)">✕</button></div>
@@ -168,7 +172,6 @@
       <div class="snap-slot" id="slot-4" onclick="slotClick(4)"><span class="slot-num">5</span><img><button class="del-btn" onclick="delSlot(event,4)">✕</button></div>
     </div>
     <div class="snap-progress"><span id="snap-count">0</span> / 5 photos captured</div>
-
     <div class="mt"><label>Name</label><input id="enroll-name" type="text" placeholder="e.g. Hendra"></div>
     <div class="row">
       <button class="btn-green" id="enroll-btn" onclick="enroll()" disabled>Enroll</button>
@@ -177,20 +180,17 @@
     <div id="enroll-status" class="status"></div>
   </div>
 
-  <!-- 4. RECOGNIZE -->
+  <!-- 4. SINGLE-SHOT RECOGNIZE -->
   <div class="card">
-    <h2>4. Recognize</h2>
-    <p style="font-size:0.78rem;color:#666">Snap (identify) or drop a photo to identify against enrolled profiles.</p>
-
+    <h2>4. Identify (single shot)</h2>
+    <p style="font-size:0.78rem;color:#666">Snap or upload a photo to identify against enrolled profiles.</p>
     <div class="recognize-preview" id="recog-preview" onclick="document.getElementById('recog-file').click()">
-      <span>Snap or click to upload</span>
-      <img id="recog-img">
+      <span>Snap or click to upload</span><img id="recog-img">
     </div>
     <div class="drop-zone" id="drop-zone">
       Or drag & drop an image here
       <input type="file" id="recog-file" accept="image/*" onchange="onRecogFile(event)">
     </div>
-
     <div class="row">
       <button class="btn-primary" onclick="recognize()" style="flex:1">Identify Face</button>
       <button class="btn-sec" onclick="clearRecog()">Clear</button>
@@ -211,31 +211,27 @@
 const MIN_SNAPS = 5;
 let token = '';
 let stream = null;
-let enrollBlobs = new Array(MIN_SNAPS).fill(null); // 5 slots
+let enrollBlobs = new Array(MIN_SNAPS).fill(null);
 let recognizeBlob = null;
+
+// Live mode
+let liveActive = false;
+let liveTimer = null;
+let liveFrameCount = 0;
+let liveLastTime = 0;
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function base() { return document.getElementById('baseUrl').value.replace(/\/$/, ''); }
-
-function setStatus(id, msg, type) {
-  const el = document.getElementById(id);
-  el.textContent = msg;
-  el.className = 'status ' + (type || '');
-}
-
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, c =>
-    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
+function setStatus(id, msg, type) { const el = document.getElementById(id); el.textContent = msg; el.className = 'status ' + (type || ''); }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 async function apiFetch(path, opts = {}) {
   const headers = { ...(opts.headers || {}) };
   if (token) headers['Authorization'] = 'Bearer ' + token;
   const res = await fetch(base() + path, { ...opts, headers });
   const text = await res.text();
-  let json;
-  try { json = JSON.parse(text); } catch { json = text; }
+  let json; try { json = JSON.parse(text); } catch { json = text; }
   if (!res.ok) throw new Error(json?.message || json?.data?.message || text || res.status);
   return json?.data !== undefined ? json.data : json;
 }
@@ -246,26 +242,19 @@ async function login() {
   setStatus('auth-status', 'Logging in…');
   try {
     const res = await apiFetch('/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: document.getElementById('email').value, password: document.getElementById('password').value }),
     });
-    token = res.accessToken;
-    showToken();
+    token = res.accessToken; showToken();
     setStatus('auth-status', 'Logged in ✓', 'ok');
     loadProfiles();
   } catch(e) { setStatus('auth-status', 'Error: ' + e.message, 'err'); }
 }
 
 function pasteToken() {
-  const t = prompt('Paste JWT access token:');
-  if (!t) return;
-  token = t.trim();
-  showToken();
-  setStatus('auth-status', 'Token set ✓', 'ok');
-  loadProfiles();
+  const t = prompt('Paste JWT access token:'); if (!t) return;
+  token = t.trim(); showToken(); setStatus('auth-status', 'Token set ✓', 'ok'); loadProfiles();
 }
-
 function showToken() {
   document.getElementById('token-display').style.display = '';
   document.getElementById('token-chip').textContent = token.slice(0, 44) + '…';
@@ -276,34 +265,129 @@ function showToken() {
 async function startCam() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } });
-    document.getElementById('video').srcObject = stream;
+    const video = document.getElementById('video');
+    video.srcObject = stream;
+    await new Promise(r => video.onloadedmetadata = r);
+    // Size overlay canvas to match video intrinsic size
+    const ov = document.getElementById('overlay');
+    ov.width = video.videoWidth; ov.height = video.videoHeight;
     document.getElementById('snap-enroll-btn').disabled = false;
     document.getElementById('snap-recog-btn').disabled = false;
+    document.getElementById('live-btn').disabled = false;
+    document.getElementById('start-cam-btn').disabled = true;
   } catch(e) { alert('Camera error: ' + e.message); }
 }
 
 function captureFrame() {
   const video = document.getElementById('video');
   const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth || 640;
-  canvas.height = video.videoHeight || 480;
+  canvas.width = video.videoWidth || 640; canvas.height = video.videoHeight || 480;
   canvas.getContext('2d').drawImage(video, 0, 0);
-  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.88));
+}
+
+// ── Live mode ─────────────────────────────────────────────────────────
+
+function toggleLive() {
+  if (!token) { alert('Login first'); return; }
+  liveActive = !liveActive;
+  const btn = document.getElementById('live-btn');
+  btn.textContent = liveActive ? '■ Stop' : '▶ Live';
+  btn.classList.toggle('active', liveActive);
+  if (liveActive) {
+    liveFrameCount = 0; liveLastTime = performance.now();
+    runLiveFrame();
+  } else {
+    clearTimeout(liveTimer);
+    clearOverlay();
+    document.getElementById('live-stats').innerHTML = '';
+  }
+}
+
+async function runLiveFrame() {
+  if (!liveActive) return;
+  const t0 = performance.now();
+
+  try {
+    const blob = await captureFrame();
+    const form = new FormData();
+    form.append('photo', blob, 'frame.jpg');
+    const res = await apiFetch('/vision/recognize', { method: 'POST', body: form });
+    drawOverlay(res, document.getElementById('video').videoWidth, document.getElementById('video').videoHeight);
+
+    liveFrameCount++;
+    const elapsed = (performance.now() - liveLastTime) / 1000;
+    if (elapsed >= 1) {
+      const fps = (liveFrameCount / elapsed).toFixed(1);
+      liveFrameCount = 0; liveLastTime = performance.now();
+      const ms = Math.round(performance.now() - t0);
+      document.getElementById('live-stats').innerHTML =
+        `<span>${fps} fps</span> · ${ms}ms/frame · ${res.faces?.length ?? 0} face(s) detected`;
+    }
+  } catch(e) {
+    if (liveActive) document.getElementById('live-stats').innerHTML = 'Error: ' + e.message;
+  }
+
+  if (liveActive) {
+    // Target ~1fps — wait remainder of 1000ms minus inference time
+    const took = performance.now() - t0;
+    liveTimer = setTimeout(runLiveFrame, Math.max(0, 800 - took));
+  }
+}
+
+// ── Overlay drawing ───────────────────────────────────────────────────
+
+function clearOverlay() {
+  const cv = document.getElementById('overlay');
+  cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+}
+
+function drawOverlay(res, vidW, vidH) {
+  const cv = document.getElementById('overlay');
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  if (!res.detected || !res.faces?.length) return;
+
+  // Scale from original image coords (matched to video dimensions)
+  const sx = cv.width / vidW, sy = cv.height / vidH;
+  // For webcam snaps: canvas and video are same size → sx=sy=1
+
+  for (const face of res.faces) {
+    const [x1, y1, x2, y2] = face.box;
+    const bx = x1 * sx, by = y1 * sy, bw = (x2 - x1) * sx, bh = (y2 - y1) * sy;
+
+    const named = !face.unknown;
+    const color = named ? '#4ade80' : '#facc15';
+
+    // Box
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx, by, bw, bh);
+
+    // Label background
+    const label = named
+      ? `${face.name}  ${(face.confidence * 100).toFixed(0)}%`
+      : `Unknown`;
+    ctx.font = 'bold 14px system-ui';
+    const tw = ctx.measureText(label).width;
+    const lh = 22, lpad = 6;
+    const lx = bx, ly = by > lh + 2 ? by - lh - 2 : by + bh + 2;
+    ctx.fillStyle = color;
+    ctx.fillRect(lx, ly, tw + lpad * 2, lh);
+    ctx.fillStyle = '#000';
+    ctx.fillText(label, lx + lpad, ly + 15);
+  }
 }
 
 // ── Enroll snaps ──────────────────────────────────────────────────────
 
-function nextEmptySlot() {
-  return enrollBlobs.findIndex(b => b === null);
-}
+function nextEmptySlot() { return enrollBlobs.findIndex(b => b === null); }
 
 async function snapForEnroll() {
   const idx = nextEmptySlot();
-  if (idx === -1) { setStatus('enroll-status', 'All 5 slots filled — clear one to re-snap', ''); return; }
-  const blob = await captureFrame();
-  setEnrollSlot(idx, blob);
+  if (idx === -1) { setStatus('enroll-status', 'All 5 slots filled', ''); return; }
+  setEnrollSlot(idx, await captureFrame());
 }
-
 function setEnrollSlot(idx, blob) {
   enrollBlobs[idx] = blob;
   const slot = document.getElementById('slot-' + idx);
@@ -311,99 +395,68 @@ function setEnrollSlot(idx, blob) {
   slot.querySelector('img').src = URL.createObjectURL(blob);
   updateSnapCount();
 }
-
 function delSlot(evt, idx) {
-  evt.stopPropagation();
-  enrollBlobs[idx] = null;
+  evt.stopPropagation(); enrollBlobs[idx] = null;
   const slot = document.getElementById('slot-' + idx);
   slot.classList.remove('filled');
-  const img = slot.querySelector('img');
-  URL.revokeObjectURL(img.src);
-  img.src = '';
+  URL.revokeObjectURL(slot.querySelector('img').src);
+  slot.querySelector('img').src = '';
   updateSnapCount();
 }
-
-function slotClick(idx) {
-  // clicking an empty slot auto-snaps if cam is running
-  if (!enrollBlobs[idx] && stream) snapForEnrollAt(idx);
-}
-
-async function snapForEnrollAt(idx) {
-  const blob = await captureFrame();
-  setEnrollSlot(idx, blob);
-}
-
-function clearEnrollSnaps() {
-  for (let i = 0; i < MIN_SNAPS; i++) {
-    if (enrollBlobs[i]) delSlot({ stopPropagation: ()=>{} }, i);
-  }
-}
-
+function slotClick(idx) { if (!enrollBlobs[idx] && stream) snapForEnrollAt(idx); }
+async function snapForEnrollAt(idx) { setEnrollSlot(idx, await captureFrame()); }
+function clearEnrollSnaps() { for (let i = 0; i < MIN_SNAPS; i++) if (enrollBlobs[i]) delSlot({ stopPropagation: ()=>{} }, i); }
 function updateSnapCount() {
   const count = enrollBlobs.filter(Boolean).length;
   document.getElementById('snap-count').textContent = count;
   document.getElementById('enroll-btn').disabled = count < MIN_SNAPS;
 }
 
-// ── Recognize snap ─────────────────────────────────────────────────────
+// ── Recognize snap ────────────────────────────────────────────────────
 
-async function snapForRecognize() {
-  const blob = await captureFrame();
-  setRecogBlob(blob);
-}
-
+async function snapForRecognize() { setRecogBlob(await captureFrame()); }
 function setRecogBlob(blob) {
   recognizeBlob = blob;
   const preview = document.getElementById('recog-preview');
-  const img = document.getElementById('recog-img');
   preview.classList.add('has-image');
-  img.src = URL.createObjectURL(blob);
+  document.getElementById('recog-img').src = URL.createObjectURL(blob);
 }
-
 function clearRecog() {
   recognizeBlob = null;
-  const preview = document.getElementById('recog-preview');
-  preview.classList.remove('has-image');
+  document.getElementById('recog-preview').classList.remove('has-image');
   document.getElementById('recog-img').src = '';
   document.getElementById('result-box').textContent = '— result will appear here —';
   document.getElementById('result-box').className = '';
 }
+function onRecogFile(evt) { const f = evt.target.files[0]; if (f) setRecogBlob(f); }
 
-function onRecogFile(evt) {
-  const file = evt.target.files[0];
-  if (file) setRecogBlob(file);
-}
-
-// drag-drop on drop zone
 const dz = document.getElementById('drop-zone');
 dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
 dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
 dz.addEventListener('drop', e => {
   e.preventDefault(); dz.classList.remove('drag');
-  const file = e.dataTransfer.files[0];
-  if (file && file.type.startsWith('image/')) setRecogBlob(file);
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) setRecogBlob(f);
 });
 
 // ── Enroll ─────────────────────────────────────────────────────────────
 
 async function enroll() {
   const blobs = enrollBlobs.filter(Boolean);
-  if (blobs.length < MIN_SNAPS) { setStatus('enroll-status', `Need ${MIN_SNAPS} photos (have ${blobs.length})`, 'err'); return; }
+  if (blobs.length < MIN_SNAPS) { setStatus('enroll-status', `Need ${MIN_SNAPS} photos`, 'err'); return; }
   if (!token) { setStatus('enroll-status', 'Not logged in', 'err'); return; }
   const name = document.getElementById('enroll-name').value.trim();
   if (!name) { setStatus('enroll-status', 'Enter a name', 'err'); return; }
 
   setStatus('enroll-status', `Enrolling with ${blobs.length} photos…`);
   document.getElementById('enroll-btn').disabled = true;
-
   const form = new FormData();
   blobs.forEach((b, i) => form.append('photos', b, `photo${i}.jpg`));
   form.append('name', name);
-
   try {
     const t0 = Date.now();
     const res = await apiFetch('/vision/enroll', { method: 'POST', body: form });
-    setStatus('enroll-status', `Enrolled "${res.name}" from ${blobs.length} photos in ${Date.now()-t0}ms ✓`, 'ok');
+    setStatus('enroll-status', `Enrolled "${res.name}" in ${Date.now()-t0}ms ✓`, 'ok');
     clearEnrollSnaps();
     loadProfiles();
   } catch(e) {
@@ -413,35 +466,31 @@ async function enroll() {
   }
 }
 
-// ── Recognize ──────────────────────────────────────────────────────────
+// ── Single-shot recognize ─────────────────────────────────────────────
 
 async function recognize() {
   const box = document.getElementById('result-box');
   if (!recognizeBlob) { box.textContent = 'No image — snap or upload first'; box.className = ''; return; }
   if (!token) { box.textContent = 'Not logged in'; box.className = ''; return; }
-
   box.textContent = 'Running…'; box.className = '';
   const form = new FormData();
   form.append('photo', recognizeBlob, 'photo.jpg');
-
   try {
     const t0 = Date.now();
     const res = await apiFetch('/vision/recognize', { method: 'POST', body: form });
     const ms = Date.now() - t0;
+    const faceCount = res.faces?.length ?? 0;
     if (!res.detected) {
       box.className = 'no-face';
-      box.textContent = '❌  No face detected in image';
+      box.textContent = `❌  No face detected\nTime: ${ms}ms`;
     } else if (res.unknown) {
       box.className = 'no-match';
-      box.textContent = `⚠️  Unknown person\nConfidence: ${(res.confidence * 100).toFixed(1)}%\nTime: ${ms}ms`;
+      box.textContent = `⚠️  Unknown person\nConfidence: ${(res.confidence * 100).toFixed(1)}%\nFaces detected: ${faceCount}\nTime: ${ms}ms`;
     } else {
       box.className = 'match';
-      box.textContent = `✅  ${res.name}\nConfidence: ${(res.confidence * 100).toFixed(1)}%\nTime: ${ms}ms`;
+      box.textContent = `✅  ${res.name}\nConfidence: ${(res.confidence * 100).toFixed(1)}%\nFaces detected: ${faceCount}\nTime: ${ms}ms`;
     }
-  } catch(e) {
-    box.className = 'no-face';
-    box.textContent = 'Error: ' + e.message;
-  }
+  } catch(e) { box.className = 'no-face'; box.textContent = 'Error: ' + e.message; }
 }
 
 // ── Profiles ───────────────────────────────────────────────────────────
@@ -452,10 +501,7 @@ async function loadProfiles() {
   list.innerHTML = '<p style="color:#555;font-size:0.8rem">Loading…</p>';
   try {
     const profiles = await apiFetch('/vision/profiles');
-    if (!profiles.length) {
-      list.innerHTML = '<p style="color:#555;font-size:0.8rem">No enrolled profiles yet.</p>';
-      return;
-    }
+    if (!profiles.length) { list.innerHTML = '<p style="color:#555;font-size:0.8rem">No enrolled profiles yet.</p>'; return; }
     list.innerHTML = profiles.map(p => `
       <div class="profile-row" id="pr-${p.id}">
         ${p.thumbnailUrl
@@ -468,9 +514,7 @@ async function loadProfiles() {
         <button class="btn-danger" onclick="deleteProfile('${p.id}','${esc(p.name)}')">Delete</button>
       </div>
     `).join('');
-  } catch(e) {
-    list.innerHTML = `<p style="color:#f87171;font-size:0.8rem">Error: ${esc(e.message)}</p>`;
-  }
+  } catch(e) { list.innerHTML = `<p style="color:#f87171;font-size:0.8rem">Error: ${esc(e.message)}</p>`; }
 }
 
 async function deleteProfile(id, name) {
@@ -479,9 +523,7 @@ async function deleteProfile(id, name) {
     await apiFetch('/vision/profiles/' + id, { method: 'DELETE' });
     document.getElementById('pr-' + id)?.remove();
     const list = document.getElementById('profiles-list');
-    if (!list.querySelector('.profile-row')) {
-      list.innerHTML = '<p style="color:#555;font-size:0.8rem">No enrolled profiles yet.</p>';
-    }
+    if (!list.querySelector('.profile-row')) list.innerHTML = '<p style="color:#555;font-size:0.8rem">No enrolled profiles yet.</p>';
   } catch(e) { alert('Delete failed: ' + e.message); }
 }
 </script>
