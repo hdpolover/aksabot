@@ -2,11 +2,11 @@
 #include <Arduino.h>
 #include <stdlib.h>
 
-static int    _threshold = 15;
-static bool   _enabled   = true;
-static bool   _detected  = false;
-static int    _lastScore = 0;
-static size_t _prevSize  = 0;
+static volatile int    _threshold = 15;
+static volatile bool   _enabled   = true;
+static volatile bool   _detected  = false;
+static volatile int    _lastScore = 0;
+static          size_t _prevSize  = 0;  // Core 0 only
 
 namespace motion {
 
@@ -14,11 +14,12 @@ void init(int threshold) {
     _threshold = threshold;
     _enabled   = true;
     _detected  = false;
+    _lastScore = 0;
     _prevSize  = 0;
 }
 
 void setThreshold(int t) { _threshold = t; }
-void setEnabled(bool e)  { _enabled = e; if (!e) _detected = false; }
+void setEnabled(bool e)  { _enabled = e; if (!e) { _detected = false; _lastScore = 0; } }
 bool isEnabled()         { return _enabled; }
 bool detected()          { return _detected; }
 int  lastScore()         { return _lastScore; }

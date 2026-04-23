@@ -10,6 +10,7 @@ static unsigned long _lastTickTime = 0;
 namespace metrics {
 
 void onFrame(size_t frameBytes) {
+    (void)frameBytes;
     unsigned long now = millis();
     if (_lastFrameTime > 0) {
         _frameMs = (int)(now - _lastFrameTime);
