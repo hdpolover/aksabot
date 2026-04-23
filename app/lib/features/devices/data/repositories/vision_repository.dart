@@ -35,15 +35,16 @@ class VisionRepository {
         .toList();
   }
 
-  Future<FaceProfileModel> enrollFromFile({required File photo, required String name}) async {
-    final formData = FormData.fromMap({
-      'photos': await MultipartFile.fromFile(photo.path, filename: 'photo.jpg'),
-      'name': name,
-    });
-    final response = await dio.post<Map<String, dynamic>>(
-      '/vision/enroll',
-      data: formData,
+  Future<FaceProfileModel> enrollFromFile({required File photo, required String name}) =>
+      enrollFromFiles(photos: [photo], name: name);
+
+  Future<FaceProfileModel> enrollFromFiles({required List<File> photos, required String name}) async {
+    final parts = await Future.wait(
+      photos.asMap().entries.map((e) =>
+          MultipartFile.fromFile(e.value.path, filename: 'photo${e.key}.jpg')),
     );
+    final formData = FormData.fromMap({'photos': parts, 'name': name});
+    final response = await dio.post<Map<String, dynamic>>('/vision/enroll', data: formData);
     return FaceProfileModel.fromJson(response.data!);
   }
 

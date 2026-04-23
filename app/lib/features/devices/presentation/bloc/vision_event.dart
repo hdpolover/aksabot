@@ -19,6 +19,14 @@ class EnrollFromFile extends VisionEvent {
   List<Object?> get props => [photo.path, name];
 }
 
+class EnrollFromFiles extends VisionEvent {
+  final List<File> photos;
+  final String name;
+  const EnrollFromFiles({required this.photos, required this.name});
+  @override
+  List<Object?> get props => [photos.map((f) => f.path).toList(), name];
+}
+
 class TriggerDeskCapture extends VisionEvent {
   final String cameraDeviceId;
   final String name;

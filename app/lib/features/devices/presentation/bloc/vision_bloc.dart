@@ -9,6 +9,7 @@ class VisionBloc extends Bloc<VisionEvent, VisionState> {
   VisionBloc({required this.repository}) : super(const VisionInitial()) {
     on<LoadProfiles>(_onLoadProfiles);
     on<EnrollFromFile>(_onEnrollFromFile);
+    on<EnrollFromFiles>(_onEnrollFromFiles);
     on<TriggerDeskCapture>(_onTriggerDeskCapture);
     on<DeleteProfile>(_onDeleteProfile);
     on<ToggleVisionMode>(_onToggleVisionMode);
@@ -28,6 +29,18 @@ class VisionBloc extends Bloc<VisionEvent, VisionState> {
     emit(const VisionEnrolling());
     try {
       await repository.enrollFromFile(photo: event.photo, name: event.name);
+      emit(VisionEnrollSuccess(name: event.name));
+      final profiles = await repository.getProfiles();
+      emit(VisionLoaded(profiles: profiles));
+    } catch (e) {
+      emit(VisionError(message: e.toString()));
+    }
+  }
+
+  Future<void> _onEnrollFromFiles(EnrollFromFiles event, Emitter<VisionState> emit) async {
+    emit(const VisionEnrolling());
+    try {
+      await repository.enrollFromFiles(photos: event.photos, name: event.name);
       emit(VisionEnrollSuccess(name: event.name));
       final profiles = await repository.getProfiles();
       emit(VisionLoaded(profiles: profiles));
