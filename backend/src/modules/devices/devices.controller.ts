@@ -257,6 +257,9 @@ export class DevicesController {
           : pcm.subarray(44);
     }
 
+    // Trigger vision:start so camera captures face during this conversation
+    this.gateway.sendVisionEventPublic(id, 'vision:start');
+
     if (replyTarget === 'app') {
       return this.gateway.handleAppVoiceInputForApp(id, pcm, conversationId);
     }

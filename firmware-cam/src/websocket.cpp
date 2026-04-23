@@ -96,6 +96,11 @@ void send(const String& event, const String& data) {
     _client.send(msg);
 }
 
+void sendBinary(const uint8_t* buf, size_t len) {
+    if (!_connected) return;
+    _client.sendBinary((const char*)buf, len);
+}
+
 bool connected() {
     return _connected;
 }

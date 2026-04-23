@@ -1047,7 +1047,16 @@ export class AudioGateway
     isBinary: boolean,
   ) {
     if (isBinary) {
-      this.onAudioChunk(deviceId, raw as Buffer);
+      const session = this.sessions.get(deviceId);
+      // Camera devices send raw JPEG binary frames (never in 'listening' state).
+      // Aksabot main devices send Opus binary frames only while state==='listening'.
+      if (session?.state !== 'listening') {
+        this.visionHandler.handleFrame(deviceId, raw as Buffer).catch(err =>
+          this.logger.warn(`vision binary frame error: ${(err as Error).message}`),
+        );
+      } else {
+        this.onAudioChunk(deviceId, raw as Buffer);
+      }
       return;
     }
 
@@ -1137,12 +1146,14 @@ export class AudioGateway
           );
           break;
         case 'vision:frame':
+          // Legacy: base64 string in JSON (kept for backwards compat)
           if (typeof msg.data === 'string') {
             const jpeg = Buffer.from(msg.data, 'base64');
             this.visionHandler.handleFrame(deviceId, jpeg).catch(err =>
               this.logger.warn(`vision:frame error: ${(err as Error).message}`),
             );
           }
+          // New: raw binary frames handled in the binary branch above
           break;
         case 'vision:enroll_frames':
           if (Array.isArray(msg.data)) {
@@ -2422,6 +2433,10 @@ export class AudioGateway
    * pairedDeviceId on the camera points to the aksabot main device —
    * so we reverse-lookup: find device where settingsJson.pairedDeviceId == aksabotDeviceId.
    */
+  sendVisionEventPublic(aksabotDeviceId: string, event: 'vision:start' | 'vision:stop'): void {
+    this.sendVisionEvent(aksabotDeviceId, event);
+  }
+
   private sendVisionEvent(aksabotDeviceId: string, event: 'vision:start' | 'vision:stop'): void {
     const connected = [...(this['deviceToSocket'] as Map<string, unknown>).keys()];
     this.logger.debug(`sendVisionEvent(${event}): ${connected.length} devices connected: [${connected.join(', ')}]`);

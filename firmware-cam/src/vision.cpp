@@ -56,9 +56,8 @@ static void visionTask(void*) {
         if (!buf) continue;
 
         if (_captureMode) {
-            // Enrollment capture: send base64 frames, backend accumulates
-            String b64 = base64Encode(buf, len);
-            ws::send("vision:enroll_frame", "\"" + b64 + "\"");
+            // Enrollment: send raw binary JPEG (no base64 — avoids 40KB String allocation)
+            ws::sendBinary(buf, len);
             _captureCount++;
             if (_captureCount >= CAPTURE_FRAMES) {
                 _captureMode = false;
@@ -69,9 +68,8 @@ static void visionTask(void*) {
             free(buf);
             vTaskDelay(pdMS_TO_TICKS(CAPTURE_INTERVAL_MS));
         } else {
-            // Normal recognition frame
-            String b64 = base64Encode(buf, len);
-            ws::send("vision:frame", "\"" + b64 + "\"");
+            // Recognition frame: send raw binary JPEG directly
+            ws::sendBinary(buf, len);
             free(buf);
         }
     }

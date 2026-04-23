@@ -44,8 +44,8 @@ bool init() {
     config.xclk_freq_hz = 20000000;
     config.pixel_format = PIXFORMAT_JPEG;
     config.frame_size   = FRAMESIZE_VGA;
-    config.jpeg_quality = 20;  // 12=high quality/slow, 20=good balance, 30+=fast/low quality
-    config.fb_count     = 3;
+    config.jpeg_quality = 15;  // slightly better quality for face recognition
+    config.fb_count     = 2;   // was 3 — reduce to free PSRAM for SSL WS buffers
     config.fb_location  = CAMERA_FB_IN_PSRAM;
     config.grab_mode    = CAMERA_GRAB_LATEST;
 
