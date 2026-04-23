@@ -50,7 +50,7 @@ static esp_err_t streamHandler(httpd_req_t* req) {
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
 
-    char hdr[64];
+    char hdr[80];
     while (true) {
         camera_fb_t* fb = nullptr;
         if (xQueueReceive(frameQueue, &fb, pdMS_TO_TICKS(300)) != pdTRUE || !fb) continue;
@@ -71,7 +71,7 @@ static esp_err_t streamHandler(httpd_req_t* req) {
 static esp_err_t statusHandler(httpd_req_t* req) {
     char json[256];
     snprintf(json, sizeof(json),
-        "{\"fps\":%d,\"frame_ms\":%d,\"heap_kb\":%lu,\"psram_kb\":%lu"
+        "{\"fps\":%d,\"frame_ms\":%d,\"heap_kb\":%u,\"psram_kb\":%u"
         ",\"motion\":%s,\"motion_enabled\":%s,\"motion_score\":%d}",
         metrics::fps(), metrics::frameMs(),
         ESP.getFreeHeap()  / 1024,
@@ -97,6 +97,7 @@ static esp_err_t configHandler(httpd_req_t* req) {
             motion::setThreshold(atoi(val));
     }
     httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
     httpd_resp_send(req, "{\"ok\":true}", 11);
     return ESP_OK;
 }
