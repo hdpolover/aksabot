@@ -39,16 +39,17 @@ describe('VisionService', () => {
   });
 
   describe('enroll', () => {
-    it('should detect face, compute embedding, and save profile', async () => {
+    it('should detect faces, average embeddings, and save profile', async () => {
       const fakeEmbedding = new Array(512).fill(0.1);
       mockInference.detect.mockResolvedValue({ box: [10, 10, 100, 100], score: 0.9 });
       mockInference.embed.mockResolvedValue(fakeEmbedding);
       mockRepo.create.mockReturnValue({ name: 'Hendra', userId: 'u1', embedding: fakeEmbedding });
       mockRepo.save.mockResolvedValue({ id: 'fp-uuid', name: 'Hendra' });
 
-      const result = await service.enroll('u1', 'Hendra', [Buffer.from('jpeg')]);
-      expect(mockInference.detect).toHaveBeenCalledTimes(1);
-      expect(mockInference.embed).toHaveBeenCalledTimes(1);
+      const frames = Array(5).fill(Buffer.from('jpeg'));
+      const result = await service.enroll('u1', 'Hendra', frames);
+      expect(mockInference.detect).toHaveBeenCalledTimes(5);
+      expect(mockInference.embed).toHaveBeenCalledTimes(5);
       expect(mockRepo.save).toHaveBeenCalledTimes(1);
       expect(result.name).toBe('Hendra');
     });

@@ -30,26 +30,32 @@ export class VisionService {
    * Saves the resulting embedding as a face profile.
    */
   async enroll(userId: string, name: string, jpegBuffers: Buffer[]): Promise<FaceProfile> {
-    let bestEmbedding: number[] | null = null;
-    let bestScore = -1;
+    const embeddings: number[][] = [];
 
     for (const buf of jpegBuffers) {
       const detection = await this.inference.detect(buf);
       if (!detection) continue;
-      if (detection.score > bestScore) {
-        const embedding = await this.inference.embed(buf, detection.box);
-        if (embedding) {
-          bestEmbedding = embedding;
-          bestScore = detection.score;
-        }
-      }
+      const embedding = await this.inference.embed(buf, detection.box);
+      if (embedding) embeddings.push(embedding);
     }
 
-    if (!bestEmbedding) {
+    if (embeddings.length === 0) {
       throw new Error('No face detected in any of the provided frames');
     }
 
-    const profile = this.profileRepo.create({ userId, name, embedding: bestEmbedding });
+    // Average all embeddings then re-L2-normalise → more robust than single-best
+    const dim = embeddings[0].length;
+    const mean = new Array<number>(dim).fill(0);
+    for (const emb of embeddings) {
+      for (let i = 0; i < dim; i++) mean[i] += emb[i];
+    }
+    for (let i = 0; i < dim; i++) mean[i] /= embeddings.length;
+    const norm = Math.sqrt(mean.reduce((s, v) => s + v * v, 0));
+    const averaged = norm > 0 ? mean.map(v => v / norm) : mean;
+
+    this.logger.log(`Enrolled ${name}: averaged ${embeddings.length}/${jpegBuffers.length} frames`);
+
+    const profile = this.profileRepo.create({ userId, name, embedding: averaged });
     const saved = await this.profileRepo.save(profile);
     this.logger.log(`Enrolled face for user ${userId}: ${name} (id=${saved.id})`);
     return saved;
