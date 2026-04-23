@@ -50,16 +50,21 @@ static void onMessage(WebsocketsMessage msg) {
 
 static bool connectToBackend() {
     Serial.printf("[WS] Connecting to %s:%d\n", _host, _port);
-    _client.setInsecure(); // no SSL cert verification (local network)
+    _client.setInsecure(); // skip cert verification (self-signed or Cloudflare)
     _client.onEvent(onEvent);
     _client.onMessage(::onMessage);
 
     // Attach device token as Authorization header
-    _client.addHeader("Authorization", String("Bearer ") + _token);
+    _client.addHeader("Authorization", String("DeviceToken ") + _token);
 
-    bool ok = _client.connect(_host, _port, "/ws");
+    // wss:// for port 443 (prod), ws:// for local — library auto-detects SSL from scheme
+    String url = (_port == 443)
+        ? String("wss://") + _host + "/ws"
+        : String("ws://") + _host + ":" + _port + "/ws";
+    Serial.printf("[WS] Connecting via URL: %s\n", url.c_str());
+    bool ok = _client.connect(url.c_str());
     if (!ok) {
-        Serial.println("[WS] Connection failed");
+        Serial.printf("[WS] Connection failed (heap=%d)\n", ESP.getFreeHeap());
     }
     return ok;
 }

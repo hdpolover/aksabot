@@ -9,6 +9,7 @@
 #include "metrics.h"
 #include "stream_server.h"
 #include "credentials.h"
+#include "cam_nvs.h"
 #include "websocket.h"
 #include "vision.h"
 
@@ -122,7 +123,9 @@ void setup() {
         while (true) delay(1000);
     }
 
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    cam_nvs::init(); // reads NVS, falls back to credentials.h
+
+    WiFi.begin(cam_nvs::wifiSsid(), cam_nvs::wifiPass());
     Serial.print("[BOOT] WiFi connecting");
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
@@ -130,20 +133,21 @@ void setup() {
     }
     Serial.printf("\n[BOOT] IP=%s\n", WiFi.localIP().toString().c_str());
 
-    ws::init(BACKEND_HOST, BACKEND_PORT, DEVICE_TOKEN, onWsMessage);
+    ws::init(cam_nvs::backendHost(), cam_nvs::backendPort(), cam_nvs::deviceToken(), onWsMessage);
     Serial.println("[BOOT] WebSocket connecting to backend");
 
     vision::init(frameQueue);
 
     xTaskCreatePinnedToCore(captureLoop, "capture", 8192, nullptr, 5, nullptr, 1);
-    xTaskCreatePinnedToCore(mjpegTask,   "mjpeg",   8192, nullptr, 4, nullptr, 1);
-    xTaskCreatePinnedToCore(serverLoop,  "server",  8192, nullptr, 3, nullptr, 1);
+    // mjpegTask disabled — saves ~8KB stack + TCP buffers, keeps largest free block
+    // large enough for SSL WebSocket receive buffers (~40-50KB needed)
+    xTaskCreatePinnedToCore(serverLoop,  "server",  4096, nullptr, 3, nullptr, 1);
     xTaskCreatePinnedToCore(wsLoop,      "ws",      8192, nullptr, 2, nullptr, 1);
     // vision task is started inside vision::init()
 
-    Serial.printf("[BOOT] Web UI:    http://%s/\n",       WiFi.localIP().toString().c_str());
-    Serial.printf("[BOOT] Stream:    http://%s:81\n",     WiFi.localIP().toString().c_str());
-    Serial.printf("[BOOT] Status:    http://%s/status\n", WiFi.localIP().toString().c_str());
+    Serial.printf("[BOOT] IP=%s status=%s/status\n",
+        WiFi.localIP().toString().c_str(),
+        WiFi.localIP().toString().c_str());
 }
 
 void loop() {
