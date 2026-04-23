@@ -63,7 +63,13 @@ export class VisionInferenceService implements OnModuleInit {
   async detect(jpegBuffer: Buffer): Promise<DetectedFace | null> {
     if (!this.detSession) return null;
 
-    const { data, info } = await sharp(jpegBuffer)
+    // Get original size BEFORE resize — after resize, info.width/height are always DET_SIZE,
+    // which makes scaleX=scaleY=1.0 and leaves coordinates stuck in 640x640 space.
+    const origMeta = await sharp(jpegBuffer).metadata();
+    const origW = origMeta.width ?? this.DET_SIZE;
+    const origH = origMeta.height ?? this.DET_SIZE;
+
+    const { data } = await sharp(jpegBuffer)
       .resize(this.DET_SIZE, this.DET_SIZE, { fit: 'fill' })
       .raw()
       .toBuffer({ resolveWithObject: true });
@@ -72,8 +78,8 @@ export class VisionInferenceService implements OnModuleInit {
     const inputTensor = new ort.Tensor('float32', nchw, [1, 3, this.DET_SIZE, this.DET_SIZE]);
     const outputs = await this.detSession.run({ 'input.1': inputTensor });
 
-    const scaleX = info.width / this.DET_SIZE;
-    const scaleY = info.height / this.DET_SIZE;
+    const scaleX = origW / this.DET_SIZE;
+    const scaleY = origH / this.DET_SIZE;
     return this.parseBestDetection(outputs, scaleX, scaleY);
   }
 
@@ -87,6 +93,7 @@ export class VisionInferenceService implements OnModuleInit {
     let faceData: Buffer;
 
     if (detection.keypoints.length === 5) {
+      this.logger.debug(`Aligning face with kps: ${JSON.stringify(detection.keypoints.map(p => p.map(v => Math.round(v))))}`);
       faceData = await this.alignFace(jpegBuffer, detection.keypoints);
     } else {
       // Fallback: simple crop (no keypoints available)
