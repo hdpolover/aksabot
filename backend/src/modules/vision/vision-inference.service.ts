@@ -283,6 +283,32 @@ export class VisionInferenceService implements OnModuleInit {
       }
     }
 
-    return faces.sort((a, b) => b.score - a.score);
+    return this.nms(faces, 0.4);
+  }
+
+  /**
+   * Non-Maximum Suppression: remove overlapping boxes for the same face.
+   * Greedy algorithm: keep highest-score box, discard any box with IoU > threshold.
+   * iouThresh=0.4 is standard for face detection.
+   */
+  private nms(faces: DetectedFace[], iouThresh: number): DetectedFace[] {
+    const sorted = [...faces].sort((a, b) => b.score - a.score);
+    const keep: DetectedFace[] = [];
+
+    for (const face of sorted) {
+      const [x1, y1, x2, y2] = face.box;
+      const area = (x2 - x1) * (y2 - y1);
+      const suppressed = keep.some(kept => {
+        const [kx1, ky1, kx2, ky2] = kept.box;
+        const ix = Math.max(0, Math.min(x2, kx2) - Math.max(x1, kx1));
+        const iy = Math.max(0, Math.min(y2, ky2) - Math.max(y1, ky1));
+        const inter = ix * iy;
+        const kArea = (kx2 - kx1) * (ky2 - ky1);
+        return inter / (area + kArea - inter) > iouThresh;
+      });
+      if (!suppressed) keep.push(face);
+    }
+
+    return keep;
   }
 }
