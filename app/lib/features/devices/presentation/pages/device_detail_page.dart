@@ -215,6 +215,11 @@ class DeviceDashboardBody extends StatelessWidget {
               route: '/devices/$id/pomodoro',
             ),
             _SettingsRowData(
+              icon: Icons.face_retouching_natural_rounded,
+              label: 'Face Recognition',
+              route: '/devices/$id/face-recognition',
+            ),
+            _SettingsRowData(
               icon: Icons.center_focus_strong_rounded,
               label: 'Focus Mode',
               route: '/devices/$id/focus',

@@ -10,6 +10,7 @@ import {
   ResponsePool,
   MoodEntry,
   FirmwareRelease,
+  FaceProfile,
 } from './entities';
 // Migrations imported for migrationsRun (disabled — using synchronize for now)
 // import { Init1775743820807 } from './migrations/1775743820807-Init';
@@ -34,6 +35,7 @@ import {
           ResponsePool,
           MoodEntry,
           FirmwareRelease,
+          FaceProfile,
         ],
         synchronize: true,
       }),

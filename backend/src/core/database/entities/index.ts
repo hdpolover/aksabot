@@ -6,3 +6,4 @@ export { Memory } from './memory.entity';
 export { ResponsePool } from './response-pool.entity';
 export { MoodEntry } from './mood-entry.entity';
 export { FirmwareRelease } from './firmware-release.entity';
+export { FaceProfile } from './face-profile.entity';

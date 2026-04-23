@@ -20,6 +20,7 @@ import { MemoriesModule } from './modules/memories/memories.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
 import { EmailModule } from './core/email/email.module';
 import { FirmwareModule } from './modules/firmware/firmware.module';
+import { VisionModule } from './modules/vision/vision.module';
 
 @Module({
   controllers: [HealthController],
@@ -37,6 +38,7 @@ import { FirmwareModule } from './modules/firmware/firmware.module';
     MemoriesModule,
     SchedulerModule,
     FirmwareModule,
+    VisionModule,
   ],
 })
 export class AppModule {}

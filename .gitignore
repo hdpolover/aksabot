@@ -53,3 +53,6 @@ firmware-cam/include/credentials.h
 firmware-cam/.pio/
 2.8inch_IPS_ESP32-S3_ILI9341V_ES3C28P_ES3N28P_V1.0/
 .fvm/
+
+# ONNX models (too large for git — download separately)
+backend/models/buffalo_l/*.onnx

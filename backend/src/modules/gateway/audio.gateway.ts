@@ -18,6 +18,7 @@ import { MoodJournalService } from '../scheduler/mood-journal.service';
 import { VoiceCommandService } from './voice-command.service';
 import { SessionManager } from './session.manager';
 import { ConversationPersistence } from './conversation.persistence';
+import { VisionGatewayHandler } from '../vision/vision-gateway.handler';
 import type { SttResult, IAudioCodec } from '../ai/interfaces';
 import { AUDIO_CODEC } from '../ai/interfaces/tokens';
 import { IntercomSessionService } from './intercom-session.service';
@@ -61,6 +62,7 @@ export class AudioGateway
     private readonly intercomSessions: IntercomSessionService,
     @Inject(AUDIO_CODEC) private readonly codec: IAudioCodec,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly visionHandler: VisionGatewayHandler,
   ) {}
 
   onModuleInit() {
@@ -78,6 +80,11 @@ export class AudioGateway
     // Wire pomodoro → proactive so celebrations/taunts go through TTS
     this.pomodoro.setSendPomodoroReaction((deviceId, won, cycle) =>
       this.proactive.firePomodoroReaction(deviceId, won, cycle),
+    );
+
+    // Wire vision handler to sendToDevice
+    this.visionHandler.setSendFn((deviceId, event, data) =>
+      this.sendToDevice(deviceId, event, data),
     );
 
     // Server-side heartbeat: ping all devices every 10s, close dead ones after 20s
@@ -1127,6 +1134,22 @@ export class AudioGateway
             this.logger.error(`onLogData error: ${err.message}`),
           );
           break;
+        case 'vision:frame':
+          if (typeof msg.data === 'string') {
+            const jpeg = Buffer.from(msg.data, 'base64');
+            this.visionHandler.handleFrame(deviceId, jpeg).catch(err =>
+              this.logger.warn(`vision:frame error: ${(err as Error).message}`),
+            );
+          }
+          break;
+        case 'vision:enroll_frames':
+          if (Array.isArray(msg.data)) {
+            const frames = (msg.data as string[]).map(b64 => Buffer.from(b64, 'base64'));
+            this.visionHandler.handleEnrollFrames(deviceId, frames).catch(err =>
+              this.logger.warn(`vision:enroll_frames error: ${(err as Error).message}`),
+            );
+          }
+          break;
         // Server-to-device events that the simulator may echo back — safe to ignore
         case 'display:image':
         case 'response:start':
@@ -1467,6 +1490,7 @@ export class AudioGateway
       stability: settings.voice_stability as number | undefined,
       language: (settings.language as 'en' | 'id' | undefined) ?? 'en',
     };
+    const identityCtx = this.buildIdentityContext(deviceId);
     const context = {
       timezone: settings.timezone as string | undefined,
       weatherEnabled: settings.integrations_weather as boolean | undefined,
@@ -1474,6 +1498,7 @@ export class AudioGateway
       longitude: settings.longitude as number | undefined,
       language: (settings.language as 'en' | 'id' | undefined) ?? 'en',
       guestMode,
+      identityContext: identityCtx || undefined,
     };
 
     // Map mood entries for prompt
@@ -2067,6 +2092,7 @@ export class AudioGateway
       language: (settings.language as 'en' | 'id' | undefined) ?? 'en',
     };
     const guestMode = settings.guest_mode === true;
+    const identityCtx2 = this.buildIdentityContext(deviceId);
     const context = {
       timezone: settings.timezone as string | undefined,
       weatherEnabled: settings.integrations_weather as boolean | undefined,
@@ -2074,6 +2100,7 @@ export class AudioGateway
       longitude: settings.longitude as number | undefined,
       language: (settings.language as 'en' | 'id' | undefined) ?? 'en',
       guestMode,
+      identityContext: identityCtx2 || undefined,
     };
 
     // 3. Fetch memories, history, mood in parallel
@@ -2373,5 +2400,22 @@ export class AudioGateway
     // 2. Query parameter (browser WebSocket — cannot set custom headers)
     const url = new URL(req.url ?? '', `http://${req.headers.host}`);
     return url.searchParams.get('token');
+  }
+
+  /** Build a face recognition identity string for LLM context injection. */
+  private buildIdentityContext(deviceId: string): string {
+    const session = this.sessions.get(deviceId);
+    const identity = session?.currentIdentity;
+    if (!identity) return '';
+    if (identity.unknown) return 'An unknown person is currently present at the desk.';
+    return `${identity.name} is currently present at the desk.`;
+  }
+
+  sendVisionCapture(cameraDeviceId: string): void {
+    this.sendToDevice(cameraDeviceId, 'vision:capture', {});
+  }
+
+  setPendingEnrollment(cameraDeviceId: string, userId: string, name: string): void {
+    this.visionHandler.setPendingEnrollment(cameraDeviceId, userId, name);
   }
 }

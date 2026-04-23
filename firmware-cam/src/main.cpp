@@ -9,8 +9,22 @@
 #include "metrics.h"
 #include "stream_server.h"
 #include "credentials.h"
+#include "websocket.h"
+#include "vision.h"
 
 QueueHandle_t frameQueue = nullptr;
+
+void onWsMessage(const String& event, const String& data) {
+    vision::onEvent(event, data);
+}
+
+// Core 1: poll WebSocket, handle reconnect
+void wsLoop(void*) {
+    while (true) {
+        ws::loop();
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
 
 // Core 0: capture frames, check motion, push to queue
 void captureLoop(void*) {
@@ -116,10 +130,16 @@ void setup() {
     }
     Serial.printf("\n[BOOT] IP=%s\n", WiFi.localIP().toString().c_str());
 
-    // All tasks on Core 1 — Core 0 left free for WiFi driver
+    ws::init(BACKEND_HOST, BACKEND_PORT, DEVICE_TOKEN, onWsMessage);
+    Serial.println("[BOOT] WebSocket connecting to backend");
+
+    vision::init(frameQueue);
+
     xTaskCreatePinnedToCore(captureLoop, "capture", 8192, nullptr, 5, nullptr, 1);
     xTaskCreatePinnedToCore(mjpegTask,   "mjpeg",   8192, nullptr, 4, nullptr, 1);
     xTaskCreatePinnedToCore(serverLoop,  "server",  8192, nullptr, 3, nullptr, 1);
+    xTaskCreatePinnedToCore(wsLoop,      "ws",      8192, nullptr, 2, nullptr, 1);
+    // vision task is started inside vision::init()
 
     Serial.printf("[BOOT] Web UI:    http://%s/\n",       WiFi.localIP().toString().c_str());
     Serial.printf("[BOOT] Stream:    http://%s:81\n",     WiFi.localIP().toString().c_str());

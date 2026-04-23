@@ -142,4 +142,9 @@ export class DevicesService {
       where: { deviceToken: token, tokenRevoked: false },
     });
   }
+
+  /** Internal use — finds device by ID without ownership check. */
+  async findByIdInternal(id: string): Promise<Device | null> {
+    return this.devicesRepo.findOne({ where: { id } });
+  }
 }

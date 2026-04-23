@@ -40,6 +40,8 @@ export interface DeviceSession {
   displayMode?: string;
   /** Set by silent reconnect:back — suppresses the connection greeting. */
   skipGreeting?: boolean;
+  /** Identity of the person currently in frame, updated by face recognition. */
+  currentIdentity?: { name: string | null; unknown: boolean } | null;
 }
 
 @Injectable()
@@ -164,5 +166,10 @@ export class SessionManager {
       clearTimeout(session.idleTimer);
       session.idleTimer = null;
     }
+  }
+
+  setCurrentIdentity(deviceId: string, identity: { name: string | null; unknown: boolean } | null): void {
+    const session = this.sessions.get(deviceId);
+    if (session) session.currentIdentity = identity;
   }
 }

@@ -11,6 +11,7 @@ import { IntercomSessionService } from './intercom-session.service';
 import { SessionManager } from './session.manager';
 import { ConversationPersistence } from './conversation.persistence';
 import { VoiceCommandService } from './voice-command.service';
+import { VisionModule } from '../vision/vision.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { VoiceCommandService } from './voice-command.service';
     AiModule,
     MemoriesModule,
     forwardRef(() => SchedulerModule),
+    forwardRef(() => VisionModule),
   ],
   providers: [
     AudioGateway,

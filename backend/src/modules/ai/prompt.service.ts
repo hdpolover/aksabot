@@ -13,6 +13,7 @@ export interface ContextInfo {
   longitude?: number;
   language?: 'en' | 'id'; // response language; defaults to 'en'
   guestMode?: boolean; // when true, LLM is told the speaker is NOT Hendra and memories are withheld
+  identityContext?: string; // face recognition: e.g. "Hendra is currently present at the desk."
 }
 
 export interface MoodHistoryEntry {
@@ -285,7 +286,11 @@ Always include the tag — never skip it. The tag is stripped before TTS, the us
       ? `\n\nGUEST MODE IS ON. Your owner is still Hendra — you were built by him and you're his companion — but whoever is speaking to you right now is NOT Hendra. They're a guest. Treat any names, facts, or preferences they mention as this-conversation-only context. Do NOT conflate them with Hendra. Do NOT assume their name is Hendra's name, or that things they say apply to Hendra. You are NOT retrieving memories about Hendra right now and you are NOT saving anything from this conversation — memory is paused. You're still yourself: sarcastic, funny, gen-z, a little unhinged. Keep the personality, just keep it general. If they ask what you remember about them or Hendra, tell them you're in guest mode and memory is off. It's not a secret.`
       : '';
 
-    return `${SYSTEM_PROMPT}${USER_PROFILE}${guestBlock}${energyBlock}${memoryBlock}${moodBlock}${timeBlock}${weatherBlock}${sfxInstruction}${emotionInstruction}${languageInstruction}`;
+    const identityBlock = context?.identityContext
+      ? `\n\n${context.identityContext}`
+      : '';
+
+    return `${SYSTEM_PROMPT}${USER_PROFILE}${guestBlock}${identityBlock}${energyBlock}${memoryBlock}${moodBlock}${timeBlock}${weatherBlock}${sfxInstruction}${emotionInstruction}${languageInstruction}`;
   }
 
   /**

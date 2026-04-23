@@ -30,6 +30,8 @@ import '../../features/firmware/data/datasources/firmware_remote_datasource.dart
 import '../../features/firmware/data/repositories/firmware_repository_impl.dart';
 import '../../features/firmware/domain/repositories/firmware_repository.dart';
 import '../../features/firmware/presentation/bloc/firmware_bloc.dart';
+import '../../features/devices/data/repositories/vision_repository.dart';
+import '../../features/devices/presentation/bloc/vision_bloc.dart';
 
 final sl = GetIt.instance;
 
@@ -96,4 +98,10 @@ Future<void> initDependencies() async {
     () => FirmwareRepositoryImpl(sl()),
   );
   sl.registerFactory(() => FirmwareBloc(sl()));
+
+  // Vision
+  sl.registerLazySingleton<VisionRepository>(
+    () => VisionRepository(dio: sl<ApiClient>().dio),
+  );
+  sl.registerFactory(() => VisionBloc(repository: sl<VisionRepository>()));
 }
