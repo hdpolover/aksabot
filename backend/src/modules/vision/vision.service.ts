@@ -84,7 +84,9 @@ export class VisionService {
     }
 
     const distance = parseFloat(rows[0].distance);
-    const confidence = Math.max(0, 1 - distance / MATCH_THRESHOLD);
+    // Quadratic: 1 - (d/threshold)² — same bounds as linear but maps typical
+    // good-match distances (0.1-0.2) to high confidence (80-98%) instead of 50-75%.
+    const confidence = Math.max(0, 1 - Math.pow(distance / MATCH_THRESHOLD, 2));
 
     if (distance >= MATCH_THRESHOLD) {
       return { name: null, confidence, unknown: true };
