@@ -1,5 +1,5 @@
 # ── Stage 1: Build ─────────────────────────────────────
-FROM node:22-alpine AS builder
+FROM node:22-slim AS builder
 
 WORKDIR /app
 
@@ -16,18 +16,22 @@ RUN npm run build
 RUN npm prune --production
 
 # ── Stage 2: Production ───────────────────────────────
-FROM node:22-alpine
+# node:22-slim (Debian) — required for onnxruntime-node which links against glibc.
+# node:22-alpine uses musl and cannot load libonnxruntime.so.1.
+FROM node:22-slim
 
 WORKDIR /app
 
 # Create non-root user
-RUN addgroup -S aksabot && adduser -S aksabot -G aksabot
+RUN groupadd -r aksabot && useradd -r -g aksabot aksabot
 
 # Copy built app + production deps from builder
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 COPY entrypoint.sh ./
+# ONNX models for face recognition (buffalo_l — not committed, must be present at build time)
+COPY models/ ./models/
 
 # Own files by app user
 RUN chown -R aksabot:aksabot /app
