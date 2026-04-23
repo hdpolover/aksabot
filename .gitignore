@@ -46,7 +46,7 @@ firmwares/
 .ws-simulator-state.json
 
 # FVM Version Cache
-.fvm/firmware/include/credentials.h
+firmware/include/credentials.h
 
 # ESP32-CAM firmware
 firmware-cam/include/credentials.h
