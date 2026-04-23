@@ -48,15 +48,24 @@ void mjpegTask(void*) {
                 "\r\n");
             while (client.connected()) {
                 camera_fb_t* fb = nullptr;
-                if (xQueueReceive(frameQueue, &fb, pdMS_TO_TICKS(300)) == pdTRUE && fb) {
-                    char hdr[80];
-                    int hlen = snprintf(hdr, sizeof(hdr),
-                        "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %zu\r\n\r\n", fb->len);
-                    client.write((const uint8_t*)hdr, hlen);
-                    client.write(fb->buf, fb->len);
-                    client.print("\r\n");
-                    camera::returnFrame(fb);
-                }
+                if (xQueueReceive(frameQueue, &fb, pdMS_TO_TICKS(300)) != pdTRUE || !fb) continue;
+
+                // copy to PSRAM and release camera buffer immediately — don't hold
+                // the camera buffer during the slow TCP write (causes capture stall)
+                uint8_t* buf = (uint8_t*)ps_malloc(fb->len);
+                size_t   len = fb->len;
+                if (buf) memcpy(buf, fb->buf, len);
+                camera::returnFrame(fb);
+
+                if (!buf) continue;  // PSRAM alloc failed, skip frame
+
+                char hdr[80];
+                int hlen = snprintf(hdr, sizeof(hdr),
+                    "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %zu\r\n\r\n", len);
+                client.write((const uint8_t*)hdr, hlen);
+                client.write(buf, len);
+                client.print("\r\n");
+                free(buf);
             }
             client.stop();
             Serial.println("[STREAM] client disconnected");
@@ -100,9 +109,10 @@ void setup() {
     }
     Serial.printf("\n[BOOT] IP=%s\n", WiFi.localIP().toString().c_str());
 
-    xTaskCreatePinnedToCore(captureLoop, "capture", 8192, nullptr, 5, nullptr, 0);
-    xTaskCreatePinnedToCore(serverLoop,  "server",  8192, nullptr, 3, nullptr, 1);
+    // All tasks on Core 1 — Core 0 left free for WiFi driver
+    xTaskCreatePinnedToCore(captureLoop, "capture", 8192, nullptr, 5, nullptr, 1);
     xTaskCreatePinnedToCore(mjpegTask,   "mjpeg",   8192, nullptr, 4, nullptr, 1);
+    xTaskCreatePinnedToCore(serverLoop,  "server",  8192, nullptr, 3, nullptr, 1);
 
     Serial.printf("[BOOT] Web UI:    http://%s/\n",       WiFi.localIP().toString().c_str());
     Serial.printf("[BOOT] Stream:    http://%s:81\n",     WiFi.localIP().toString().c_str());

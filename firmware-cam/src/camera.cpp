@@ -45,7 +45,7 @@ bool init() {
     config.pixel_format = PIXFORMAT_JPEG;
     config.frame_size   = FRAMESIZE_VGA;
     config.jpeg_quality = 20;  // 12=high quality/slow, 20=good balance, 30+=fast/low quality
-    config.fb_count     = 2;
+    config.fb_count     = 3;
     config.fb_location  = CAMERA_FB_IN_PSRAM;
     config.grab_mode    = CAMERA_GRAB_LATEST;
 
