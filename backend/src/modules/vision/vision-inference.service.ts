@@ -67,12 +67,20 @@ export class VisionInferenceService implements OnModuleInit {
   async embed(jpegBuffer: Buffer, box: [number, number, number, number]): Promise<number[] | null> {
     if (!this.recSession) return null;
 
-    const [x1, y1, x2, y2] = box.map(Math.round);
-    const width = Math.max(1, x2 - x1);
-    const height = Math.max(1, y2 - y1);
+    // Clamp box to image bounds — sharp throws if extract region extends outside image
+    const meta = await sharp(jpegBuffer).metadata();
+    const imgW = meta.width ?? this.DET_SIZE;
+    const imgH = meta.height ?? this.DET_SIZE;
+
+    const left   = Math.max(0, Math.round(box[0]));
+    const top    = Math.max(0, Math.round(box[1]));
+    const right  = Math.min(imgW, Math.round(box[2]));
+    const bottom = Math.min(imgH, Math.round(box[3]));
+    const width  = Math.max(1, right - left);
+    const height = Math.max(1, bottom - top);
 
     const { data } = await sharp(jpegBuffer)
-      .extract({ left: x1, top: y1, width, height })
+      .extract({ left, top, width, height })
       .resize(112, 112)
       .raw()
       .toBuffer({ resolveWithObject: true });

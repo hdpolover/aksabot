@@ -40,7 +40,7 @@ export class VisionController {
   ) {
     if (!files || files.length === 0) throw new BadRequestException('No photos uploaded');
     const buffers = files.map(f => f.buffer);
-    return this.visionService.enroll(req.user.id, dto.name, buffers);
+    return this.visionService.enroll(req.user.userId, dto.name, buffers);
   }
 
   /** Trigger ESP32-CAM to capture 8 enrollment frames, then enroll automatically. */
@@ -50,7 +50,7 @@ export class VisionController {
     @Query('deviceId', ParseUUIDPipe) cameraDeviceId: string,
     @Body() dto: EnrollFaceDto,
   ) {
-    this.gateway.setPendingEnrollment(cameraDeviceId, req.user.id, dto.name);
+    this.gateway.setPendingEnrollment(cameraDeviceId, req.user.userId, dto.name);
     this.gateway.sendVisionCapture(cameraDeviceId);
     return { ok: true, message: 'Capture triggered — awaiting frames from camera' };
   }
@@ -65,18 +65,18 @@ export class VisionController {
     if (!file) throw new BadRequestException('No photo uploaded');
     const embedding = await this.visionService.detectAndEmbed(file.buffer);
     if (!embedding) return { detected: false, name: null, confidence: 0, unknown: true };
-    const result = await this.visionService.findBestMatch(req.user.id, embedding);
+    const result = await this.visionService.findBestMatch(req.user.userId, embedding);
     return { detected: true, ...result };
   }
 
   @Get('profiles')
   getProfiles(@Request() req: any) {
-    return this.visionService.getProfiles(req.user.id);
+    return this.visionService.getProfiles(req.user.userId);
   }
 
   @Delete('profiles/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   deleteProfile(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
-    return this.visionService.deleteProfile(req.user.id, id);
+    return this.visionService.deleteProfile(req.user.userId, id);
   }
 }
