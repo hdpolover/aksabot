@@ -51,6 +51,10 @@ void setup() {
 
     motion::init(15);
     frameQueue = xQueueCreate(1, sizeof(camera_fb_t*));
+    if (!frameQueue) {
+        Serial.println("[ERROR] Queue create failed — halting");
+        while (true) delay(1000);
+    }
 
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     Serial.print("[BOOT] WiFi connecting");
