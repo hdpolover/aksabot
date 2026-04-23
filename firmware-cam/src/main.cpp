@@ -8,7 +8,7 @@
 #include "stream_server.h"
 #include "credentials.h"
 
-QueueHandle_t frameQueue;
+QueueHandle_t frameQueue = nullptr;
 
 // Core 0: capture frames, check motion, push to queue
 void captureLoop(void*) {
@@ -69,5 +69,9 @@ void setup() {
 }
 
 void loop() {
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[WIFI] Reconnecting...");
+        WiFi.reconnect();
+    }
+    vTaskDelay(pdMS_TO_TICKS(5000));
 }
