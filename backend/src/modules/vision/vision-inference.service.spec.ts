@@ -34,12 +34,18 @@ describe('VisionInferenceService', () => {
     expect(service).toBeDefined();
   });
 
-  it('toNchw should produce correct shape', () => {
-    const buf = Buffer.alloc(4 * 3, 100); // 2x2 RGB image
+  it('toNchw should produce correct shape with BGR channel order', () => {
+    // RGB pixel: R=100, G=150, B=200
+    const buf = Buffer.alloc(4 * 3);
+    for (let i = 0; i < 4; i++) { buf[i*3]=100; buf[i*3+1]=150; buf[i*3+2]=200; }
     const result = service.toNchw(buf, 2, 2);
     expect(result).toHaveLength(3 * 4); // 3 channels * 4 pixels
-    // Normalized: (100 - 127.5) / 128 = -0.21484375
-    expect(result[0]).toBeCloseTo(-0.215, 2);
+    // Channel 0 = B: (200 - 127.5) / 128 = 0.566...
+    expect(result[0]).toBeCloseTo((200 - 127.5) / 128, 4);
+    // Channel 1 = G: (150 - 127.5) / 128 = 0.175...
+    expect(result[4]).toBeCloseTo((150 - 127.5) / 128, 4);
+    // Channel 2 = R: (100 - 127.5) / 128 = -0.214...
+    expect(result[8]).toBeCloseTo((100 - 127.5) / 128, 4);
   });
 
   it('l2Normalize should produce unit vector', () => {

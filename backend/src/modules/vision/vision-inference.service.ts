@@ -22,7 +22,12 @@ export class VisionInferenceService implements OnModuleInit {
   private readonly STRIDES = [8, 16, 32];
   private readonly NUM_ANCHORS = 2;
   private readonly DET_SIZE = 640;
-  private readonly SCORE_THRESH = 0.5;
+  private readonly SCORE_THRESH = 0.3;
+
+  // buffalo_l det_10g.onnx output key mapping (numeric node names):
+  // stride 8→[448=score, 451=bbox], stride 16→[471, 474], stride 32→[494, 497]
+  private readonly SCORE_KEYS = ['448', '471', '494'];
+  private readonly BBOX_KEYS  = ['451', '474', '497'];
 
   async onModuleInit() {
     this.logger.log('Loading buffalo_l ONNX models...');
@@ -82,14 +87,18 @@ export class VisionInferenceService implements OnModuleInit {
     return this.l2Normalize(embedding);
   }
 
-  /** Convert interleaved RGB Buffer to NCHW Float32Array normalized with mean=127.5 std=128. */
+  /**
+   * Convert interleaved RGB Buffer to BGR NCHW Float32Array.
+   * InsightFace models (SCRFD + ArcFace) expect BGR channel order, same mean/std.
+   */
   toNchw(buf: Buffer, width: number, height: number): Float32Array {
     const pixels = width * height;
     const nchw = new Float32Array(3 * pixels);
     for (let i = 0; i < pixels; i++) {
-      nchw[i] = (buf[i * 3] - 127.5) / 128;
-      nchw[pixels + i] = (buf[i * 3 + 1] - 127.5) / 128;
-      nchw[2 * pixels + i] = (buf[i * 3 + 2] - 127.5) / 128;
+      const r = buf[i * 3], g = buf[i * 3 + 1], b = buf[i * 3 + 2];
+      nchw[i]             = (b - 127.5) / 128; // channel 0 = B
+      nchw[pixels + i]    = (g - 127.5) / 128; // channel 1 = G
+      nchw[2 * pixels + i]= (r - 127.5) / 128; // channel 2 = R
     }
     return nchw;
   }
@@ -111,13 +120,14 @@ export class VisionInferenceService implements OnModuleInit {
   ): DetectedFace | null {
     let best: DetectedFace | null = null;
 
-    for (const stride of this.STRIDES) {
+    for (let si = 0; si < this.STRIDES.length; si++) {
+      const stride = this.STRIDES[si];
       const fH = Math.ceil(this.DET_SIZE / stride);
       const fW = Math.ceil(this.DET_SIZE / stride);
       const totalAnchors = fH * fW * this.NUM_ANCHORS;
 
-      const scores = outputs[`score_${stride}`]?.data as Float32Array | undefined;
-      const boxes = outputs[`bbox_${stride}`]?.data as Float32Array | undefined;
+      const scores = outputs[this.SCORE_KEYS[si]]?.data as Float32Array | undefined;
+      const boxes = outputs[this.BBOX_KEYS[si]]?.data as Float32Array | undefined;
       if (!scores || !boxes) continue;
 
       for (let i = 0; i < totalAnchors; i++) {
