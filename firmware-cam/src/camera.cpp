@@ -37,8 +37,8 @@ bool init() {
     config.pin_pclk     = PCLK_GPIO_NUM;
     config.pin_vsync    = VSYNC_GPIO_NUM;
     config.pin_href     = HREF_GPIO_NUM;
-    config.pin_sscb_sda = SIOD_GPIO_NUM;
-    config.pin_sscb_scl = SIOC_GPIO_NUM;
+    config.pin_sccb_sda = SIOD_GPIO_NUM;
+    config.pin_sccb_scl = SIOC_GPIO_NUM;
     config.pin_pwdn     = PWDN_GPIO_NUM;
     config.pin_reset    = RESET_GPIO_NUM;
     config.xclk_freq_hz = 20000000;
@@ -60,7 +60,11 @@ bool init() {
 bool setResolution(int framesize) {
     sensor_t* s = esp_camera_sensor_get();
     if (!s) return false;
-    s->set_framesize(s, (framesize_t)framesize);
+    int ret = s->set_framesize(s, (framesize_t)framesize);
+    if (ret != 0) {
+        Serial.printf("[CAMERA] resolution change failed: %d\n", framesize);
+        return false;
+    }
     Serial.printf("[CAMERA] resolution -> %d\n", framesize);
     return true;
 }
