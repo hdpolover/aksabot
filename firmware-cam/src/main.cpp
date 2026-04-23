@@ -40,9 +40,16 @@ void mjpegTask(void*) {
         WiFiClient client = svr.accept();
         if (client) {
             Serial.println("[STREAM] client connected");
+            // drain the HTTP request headers before sending response
+            while (client.connected()) {
+                if (client.available()) {
+                    String line = client.readStringUntil('\n');
+                    if (line == "\r") break;  // blank line = end of headers
+                }
+            }
             client.print(
                 "HTTP/1.1 200 OK\r\n"
-                "Content-Type: multipart/x-mixed-replace; boundary=--frame\r\n"
+                "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n"
                 "Access-Control-Allow-Origin: *\r\n"
                 "Cache-Control: no-cache\r\n"
                 "\r\n");
