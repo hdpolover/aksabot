@@ -7,6 +7,7 @@ import {
   Query,
   Body,
   Request,
+  UploadedFile,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
@@ -15,7 +16,7 @@ import {
   ParseUUIDPipe,
   BadRequestException,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { VisionService } from './vision.service';
 import { AudioGateway } from '../gateway/audio.gateway';
@@ -52,6 +53,20 @@ export class VisionController {
     this.gateway.setPendingEnrollment(cameraDeviceId, req.user.id, dto.name);
     this.gateway.sendVisionCapture(cameraDeviceId);
     return { ok: true, message: 'Capture triggered — awaiting frames from camera' };
+  }
+
+  /** Upload a photo and get back who it matches (or unknown). */
+  @Post('recognize')
+  @UseInterceptors(FileInterceptor('photo'))
+  async recognize(
+    @Request() req: any,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('No photo uploaded');
+    const embedding = await this.visionService.detectAndEmbed(file.buffer);
+    if (!embedding) return { detected: false, name: null, confidence: 0, unknown: true };
+    const result = await this.visionService.findBestMatch(req.user.id, embedding);
+    return { detected: true, ...result };
   }
 
   @Get('profiles')

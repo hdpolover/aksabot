@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Face Recognition Test</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; min-height: 100vh; padding: 24px; }
+  h1 { font-size: 1.3rem; font-weight: 600; margin-bottom: 20px; color: #fff; }
+  h2 { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #888; margin-bottom: 10px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 960px; }
+  .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 16px; }
+  .card.full { grid-column: 1 / -1; }
+  label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 4px; }
+  input[type=text], input[type=password], input[type=email] {
+    width: 100%; padding: 8px 10px; background: #111; border: 1px solid #333;
+    border-radius: 6px; color: #e0e0e0; font-size: 0.85rem; outline: none;
+  }
+  input:focus { border-color: #555; }
+  .row { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
+  .row label { margin: 0; }
+  button {
+    padding: 8px 14px; border: none; border-radius: 6px; cursor: pointer;
+    font-size: 0.82rem; font-weight: 500; white-space: nowrap;
+  }
+  .btn-primary { background: #2563eb; color: #fff; }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-danger  { background: #dc2626; color: #fff; }
+  .btn-danger:hover  { background: #b91c1c; }
+  .btn-sec { background: #262626; color: #ccc; border: 1px solid #333; }
+  .btn-sec:hover { background: #333; }
+  .btn-green { background: #16a34a; color: #fff; }
+  .btn-green:hover { background: #15803d; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .status { margin-top: 8px; font-size: 0.78rem; color: #888; }
+  .status.ok  { color: #4ade80; }
+  .status.err { color: #f87171; }
+
+  /* camera */
+  .cam-wrap { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 8px; overflow: hidden; }
+  .cam-wrap video, .cam-wrap canvas, .cam-wrap img.snapshot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .cam-wrap img.snapshot { display: none; }
+  .cam-controls { display: flex; gap: 8px; margin-top: 8px; }
+  .cam-controls button { flex: 1; }
+
+  /* result */
+  #result-box {
+    margin-top: 12px; padding: 12px; background: #111; border-radius: 8px;
+    font-size: 0.82rem; font-family: monospace; min-height: 56px;
+    border: 1px solid #2a2a2a; white-space: pre-wrap;
+  }
+  .match   { color: #4ade80; }
+  .no-match{ color: #facc15; }
+  .no-face { color: #f87171; }
+
+  /* profiles */
+  #profiles-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  .profile-row {
+    display: flex; align-items: center; gap: 10px;
+    background: #111; border: 1px solid #2a2a2a; border-radius: 8px; padding: 8px 12px;
+  }
+  .avatar {
+    width: 34px; height: 34px; border-radius: 50%; background: #2563eb;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.9rem; flex-shrink: 0;
+  }
+  .profile-name { flex: 1; font-size: 0.88rem; font-weight: 500; }
+  .profile-date { font-size: 0.72rem; color: #666; }
+
+  /* file upload zone */
+  .drop-zone {
+    border: 2px dashed #333; border-radius: 8px; padding: 20px;
+    text-align: center; color: #666; font-size: 0.82rem; cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .drop-zone:hover, .drop-zone.drag { border-color: #2563eb; color: #aaa; }
+  .drop-zone input { display: none; }
+  .preview-img { width: 100%; border-radius: 6px; margin-top: 8px; display: none; }
+
+  .spacer { margin-top: 10px; }
+  .token-chip {
+    display: inline-block; background: #1e3a5f; color: #93c5fd;
+    border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-family: monospace;
+    max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    vertical-align: middle;
+  }
+</style>
+</head>
+<body>
+
+<h1>Face Recognition — Test Console</h1>
+
+<div class="grid">
+
+  <!-- AUTH -->
+  <div class="card">
+    <h2>1. Auth</h2>
+    <div class="spacer">
+      <label>Backend URL</label>
+      <input id="baseUrl" type="text" value="http://localhost:4280">
+    </div>
+    <div class="spacer">
+      <label>Email</label>
+      <input id="email" type="email" placeholder="you@example.com">
+    </div>
+    <div class="spacer">
+      <label>Password</label>
+      <input id="password" type="password" placeholder="••••••••">
+    </div>
+    <div class="row">
+      <button class="btn-primary" onclick="login()">Login</button>
+      <button class="btn-sec" onclick="pasteToken()">Paste token</button>
+    </div>
+    <div id="auth-status" class="status"></div>
+    <div class="spacer" id="token-display" style="display:none">
+      Token: <span class="token-chip" id="token-chip"></span>
+    </div>
+  </div>
+
+  <!-- WEBCAM / SNAPSHOT -->
+  <div class="card">
+    <h2>2. Camera</h2>
+    <div class="cam-wrap">
+      <video id="video" autoplay playsinline muted></video>
+      <img class="snapshot" id="snapshot-img" alt="snapshot">
+    </div>
+    <div class="cam-controls">
+      <button class="btn-sec" onclick="startCam()">Start cam</button>
+      <button class="btn-sec" onclick="takePic()" id="snap-btn" disabled>Snap</button>
+      <button class="btn-sec" onclick="clearSnap()" id="clear-btn" style="display:none">Clear</button>
+    </div>
+    <div class="spacer">
+      <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+        Or drop / click to upload an image
+        <input type="file" id="file-input" accept="image/*" onchange="onFileSelect(event)">
+      </div>
+      <img class="preview-img" id="file-preview">
+    </div>
+  </div>
+
+  <!-- ENROLL -->
+  <div class="card">
+    <h2>3. Enroll Face</h2>
+    <p style="font-size:0.8rem;color:#666;margin-bottom:10px">
+      Snap a photo or upload one, then enter a name and enroll.
+    </p>
+    <label>Name</label>
+    <input id="enroll-name" type="text" placeholder="e.g. Hendra">
+    <div class="row" style="margin-top:10px">
+      <button class="btn-green" onclick="enroll()">Enroll</button>
+    </div>
+    <div id="enroll-status" class="status"></div>
+  </div>
+
+  <!-- RECOGNIZE -->
+  <div class="card">
+    <h2>4. Recognize</h2>
+    <p style="font-size:0.8rem;color:#666;margin-bottom:10px">
+      Use current snap/upload to identify who it is against enrolled profiles.
+    </p>
+    <button class="btn-primary" onclick="recognize()" style="width:100%">Identify Face</button>
+    <div id="result-box">— result will appear here —</div>
+  </div>
+
+  <!-- PROFILES -->
+  <div class="card full">
+    <h2>5. Enrolled Profiles</h2>
+    <div class="row">
+      <button class="btn-sec" onclick="loadProfiles()">Refresh</button>
+    </div>
+    <div id="profiles-list"><p style="color:#555;font-size:0.8rem;margin-top:8px">Not loaded yet.</p></div>
+  </div>
+
+</div>
+
+<script>
+let token = '';
+let snapBlob = null;      // from webcam snapshot
+let fileBlob = null;      // from file upload
+let stream = null;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function base() { return document.getElementById('baseUrl').value.replace(/\/$/, ''); }
+
+function setStatus(id, msg, type) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'status ' + (type || '');
+}
+
+function activeBlob() { return snapBlob || fileBlob; }
+
+async function apiFetch(path, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(base() + path, { ...opts, headers });
+  const text = await res.text();
+  let json;
+  try { json = JSON.parse(text); } catch { json = text; }
+  if (!res.ok) throw new Error((json?.message || json?.data?.message || text || res.status));
+  return json?.data !== undefined ? json.data : json;
+}
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+async function login() {
+  const email = document.getElementById('email').value;
+  const pass  = document.getElementById('password').value;
+  setStatus('auth-status', 'Logging in…');
+  try {
+    const res = await apiFetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pass }),
+    });
+    token = res.accessToken;
+    showToken();
+    setStatus('auth-status', 'Logged in ✓', 'ok');
+    loadProfiles();
+  } catch(e) { setStatus('auth-status', 'Error: ' + e.message, 'err'); }
+}
+
+function pasteToken() {
+  const t = prompt('Paste JWT access token:');
+  if (!t) return;
+  token = t.trim();
+  showToken();
+  setStatus('auth-status', 'Token set ✓', 'ok');
+  loadProfiles();
+}
+
+function showToken() {
+  document.getElementById('token-display').style.display = '';
+  document.getElementById('token-chip').textContent = token.slice(0, 40) + '…';
+}
+
+// ── Camera ────────────────────────────────────────────────────────────────────
+
+async function startCam() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+    document.getElementById('video').srcObject = stream;
+    document.getElementById('snap-btn').disabled = false;
+  } catch(e) { alert('Camera error: ' + e.message); }
+}
+
+function takePic() {
+  const video = document.getElementById('video');
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  canvas.toBlob(blob => {
+    snapBlob = blob;
+    fileBlob = null;
+    document.getElementById('file-preview').style.display = 'none';
+    const img = document.getElementById('snapshot-img');
+    img.src = URL.createObjectURL(blob);
+    img.style.display = 'block';
+    document.getElementById('clear-btn').style.display = '';
+  }, 'image/jpeg', 0.92);
+}
+
+function clearSnap() {
+  snapBlob = null;
+  const img = document.getElementById('snapshot-img');
+  img.src = ''; img.style.display = 'none';
+  document.getElementById('clear-btn').style.display = 'none';
+}
+
+function onFileSelect(evt) {
+  const file = evt.target.files[0];
+  if (!file) return;
+  fileBlob = file;
+  snapBlob = null;
+  document.getElementById('snapshot-img').style.display = 'none';
+  const preview = document.getElementById('file-preview');
+  preview.src = URL.createObjectURL(file);
+  preview.style.display = 'block';
+}
+
+// Drag-drop
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (!file || !file.type.startsWith('image/')) return;
+  fileBlob = file; snapBlob = null;
+  document.getElementById('snapshot-img').style.display = 'none';
+  const preview = document.getElementById('file-preview');
+  preview.src = URL.createObjectURL(file);
+  preview.style.display = 'block';
+});
+
+// ── Enroll ────────────────────────────────────────────────────────────────────
+
+async function enroll() {
+  const blob = activeBlob();
+  if (!blob) { setStatus('enroll-status', 'No image — snap or upload first', 'err'); return; }
+  if (!token) { setStatus('enroll-status', 'Not logged in', 'err'); return; }
+  const name = document.getElementById('enroll-name').value.trim();
+  if (!name) { setStatus('enroll-status', 'Enter a name', 'err'); return; }
+
+  setStatus('enroll-status', 'Enrolling…');
+  const form = new FormData();
+  form.append('photos', blob, 'photo.jpg');
+  form.append('name', name);
+  try {
+    const res = await apiFetch('/vision/enroll', { method: 'POST', body: form });
+    setStatus('enroll-status', `Enrolled "${res.name}" (id: ${res.id.slice(0,8)}…) ✓`, 'ok');
+    loadProfiles();
+  } catch(e) { setStatus('enroll-status', 'Error: ' + e.message, 'err'); }
+}
+
+// ── Recognize ─────────────────────────────────────────────────────────────────
+
+async function recognize() {
+  const blob = activeBlob();
+  const box = document.getElementById('result-box');
+  if (!blob) { box.textContent = 'No image — snap or upload first'; box.className = ''; return; }
+  if (!token) { box.textContent = 'Not logged in'; box.className = ''; return; }
+
+  box.textContent = 'Running…'; box.className = '';
+  const form = new FormData();
+  form.append('photo', blob, 'photo.jpg');
+  try {
+    const t0 = Date.now();
+    const res = await apiFetch('/vision/recognize', { method: 'POST', body: form });
+    const elapsed = Date.now() - t0;
+
+    if (!res.detected) {
+      box.className = 'no-face';
+      box.textContent = '❌ No face detected in image';
+      return;
+    }
+    if (res.unknown) {
+      box.className = 'no-match';
+      box.textContent = `⚠️  Unknown person\nConfidence: ${(res.confidence * 100).toFixed(1)}%\nTime: ${elapsed}ms`;
+    } else {
+      box.className = 'match';
+      box.textContent = `✅ Match: ${res.name}\nConfidence: ${(res.confidence * 100).toFixed(1)}%\nTime: ${elapsed}ms`;
+    }
+  } catch(e) {
+    box.className = 'no-face';
+    box.textContent = 'Error: ' + e.message;
+  }
+}
+
+// ── Profiles ──────────────────────────────────────────────────────────────────
+
+async function loadProfiles() {
+  if (!token) return;
+  const list = document.getElementById('profiles-list');
+  list.innerHTML = '<p style="color:#555;font-size:0.8rem">Loading…</p>';
+  try {
+    const profiles = await apiFetch('/vision/profiles');
+    if (!profiles.length) {
+      list.innerHTML = '<p style="color:#555;font-size:0.8rem">No enrolled profiles yet.</p>';
+      return;
+    }
+    list.innerHTML = profiles.map(p => `
+      <div class="profile-row" id="pr-${p.id}">
+        <div class="avatar">${p.name[0].toUpperCase()}</div>
+        <div style="flex:1">
+          <div class="profile-name">${esc(p.name)}</div>
+          <div class="profile-date">Enrolled ${new Date(p.createdAt).toLocaleString()}</div>
+        </div>
+        <button class="btn-danger" onclick="deleteProfile('${p.id}','${esc(p.name)}')">Delete</button>
+      </div>
+    `).join('');
+  } catch(e) { list.innerHTML = `<p style="color:#f87171;font-size:0.8rem">Error: ${esc(e.message)}</p>`; }
+}
+
+async function deleteProfile(id, name) {
+  if (!confirm(`Delete "${name}"?`)) return;
+  try {
+    await apiFetch('/vision/profiles/' + id, { method: 'DELETE' });
+    document.getElementById('pr-' + id)?.remove();
+    const list = document.getElementById('profiles-list');
+    if (!list.querySelector('.profile-row')) {
+      list.innerHTML = '<p style="color:#555;font-size:0.8rem">No enrolled profiles yet.</p>';
+    }
+  } catch(e) { alert('Delete failed: ' + e.message); }
+}
+
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+</body>
+</html>
