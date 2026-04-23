@@ -54,14 +54,13 @@ static bool connectToBackend() {
     _client.onEvent(onEvent);
     _client.onMessage(::onMessage);
 
-    // Attach device token as Authorization header
-    _client.addHeader("Authorization", String("DeviceToken ") + _token);
-
-    // wss:// for port 443 (prod), ws:// for local — library auto-detects SSL from scheme
+    // Pass token as query param — Cloudflare strips Authorization headers on WS upgrade
+    // Backend also accepts ?token= (extractDeviceToken checks query params as fallback)
+    String wsPath = String("/ws?token=") + _token;
     String url = (_port == 443)
-        ? String("wss://") + _host + "/ws"
-        : String("ws://") + _host + ":" + _port + "/ws";
-    Serial.printf("[WS] Connecting via URL: %s\n", url.c_str());
+        ? String("wss://") + _host + wsPath
+        : String("ws://") + _host + ":" + _port + wsPath;
+    Serial.printf("[WS] Connecting via URL: wss://%s/ws?token=%.8s...\n", _host, _token);
     bool ok = _client.connect(url.c_str());
     if (!ok) {
         Serial.printf("[WS] Connection failed (heap=%d)\n", ESP.getFreeHeap());
