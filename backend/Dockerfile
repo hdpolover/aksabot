@@ -53,7 +53,9 @@ FROM node:22-slim
 
 WORKDIR /app
 
-RUN groupadd -r aksabot && useradd -r -g aksabot aksabot
+RUN groupadd -r aksabot && useradd -r -g aksabot aksabot \
+    && apt-get update && apt-get install -y --no-install-recommends wget \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
@@ -68,8 +70,8 @@ USER aksabot
 
 EXPOSE 4280
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:4280/',r=>r.statusCode===200?process.exit(0):process.exit(1)).on('error',()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD wget -qO- http://localhost:4280/ || exit 1
 
 ENTRYPOINT ["./entrypoint.sh"]
 CMD ["node", "dist/main.js"]
