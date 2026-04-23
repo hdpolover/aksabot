@@ -4,10 +4,6 @@
 #include "motion.h"
 #include "esp_http_server.h"
 #include <Arduino.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/queue.h>
-
-extern QueueHandle_t frameQueue;
 
 static httpd_handle_t _server = nullptr;
 
@@ -19,7 +15,7 @@ static const char INDEX_HTML[] =
 "select,button,input{background:#222;color:#0f0;border:1px solid #0f0;padding:4px 8px;margin:4px}"
 ".on{color:#f00}.off{color:#0f0}</style></head><body>"
 "<h2>ESP32-CAM Test Harness</h2>"
-"<img src='/stream'>"
+"<img id='cam'>"
 "<div id='s'>Loading...</div>"
 "<div>Res:<select id='r'>"
 "<option value='0'>QQVGA 160x120</option>"
@@ -31,7 +27,8 @@ static const char INDEX_HTML[] =
 "<div>Motion:<button onclick=\"fetch('/status').then(r=>r.json()).then(d=>fetch('/config?motion='+(d.motion_enabled?0:1)))\">Toggle</button>"
 "Threshold:<input type='number' id='t' value='15' min='0' max='100' style='width:50px'>"
 "<button onclick=\"fetch('/config?threshold='+document.getElementById('t').value)\">Set</button></div>"
-"<script>setInterval(()=>{"
+"<script>document.getElementById('cam').src='http://'+location.hostname+':81';"
+"setInterval(()=>{"
 "fetch('/status').then(r=>r.json()).then(d=>{"
 "document.getElementById('s').innerHTML="
 "'FPS:'+d.fps+' | '+d.frame_ms+'ms | Heap:'+d.heap_kb+'KB | PSRAM:'+d.psram_kb+'KB | Motion:<span class=\"'+(d.motion?'on\">DETECTED':'off\">clear')+'</span>'"
@@ -42,29 +39,6 @@ static const char INDEX_HTML[] =
 static esp_err_t indexHandler(httpd_req_t* req) {
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, INDEX_HTML, (ssize_t)strlen(INDEX_HTML));
-    return ESP_OK;
-}
-
-static esp_err_t streamHandler(httpd_req_t* req) {
-    httpd_resp_set_type(req, "multipart/x-mixed-replace; boundary=--frame");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
-
-    char hdr[80];
-    while (true) {
-        camera_fb_t* fb = nullptr;
-        if (xQueueReceive(frameQueue, &fb, pdMS_TO_TICKS(300)) != pdTRUE || !fb) continue;
-
-        size_t hlen = snprintf(hdr, sizeof(hdr),
-            "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %zu\r\n\r\n", fb->len);
-
-        esp_err_t res = httpd_resp_send_chunk(req, hdr, (ssize_t)hlen);
-        if (res == ESP_OK) res = httpd_resp_send_chunk(req, (const char*)fb->buf, (ssize_t)fb->len);
-        if (res == ESP_OK) res = httpd_resp_send_chunk(req, "\r\n", 2);
-        camera::returnFrame(fb);
-
-        if (res != ESP_OK) break;  // client disconnected
-    }
     return ESP_OK;
 }
 
@@ -119,7 +93,6 @@ bool start() {
 
     const httpd_uri_t uris[] = {
         { "/",       HTTP_GET, indexHandler,  nullptr },
-        { "/stream", HTTP_GET, streamHandler, nullptr },
         { "/status", HTTP_GET, statusHandler, nullptr },
         { "/config", HTTP_GET, configHandler, nullptr },
     };

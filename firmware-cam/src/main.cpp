@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClient.h>
+#include <WiFiServer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include "camera.h"
@@ -26,6 +28,40 @@ void captureLoop(void*) {
             xQueueSend(frameQueue, &fb, 0);
         }
         vTaskDelay(1);
+    }
+}
+
+// Core 1: raw MJPEG TCP server on port 81 — one client at a time
+void mjpegTask(void*) {
+    WiFiServer svr(81);
+    svr.begin();
+    Serial.println("[BOOT] MJPEG server on port 81");
+    while (true) {
+        WiFiClient client = svr.accept();
+        if (client) {
+            Serial.println("[STREAM] client connected");
+            client.print(
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: multipart/x-mixed-replace; boundary=--frame\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Cache-Control: no-cache\r\n"
+                "\r\n");
+            while (client.connected()) {
+                camera_fb_t* fb = nullptr;
+                if (xQueueReceive(frameQueue, &fb, pdMS_TO_TICKS(300)) == pdTRUE && fb) {
+                    char hdr[80];
+                    int hlen = snprintf(hdr, sizeof(hdr),
+                        "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %zu\r\n\r\n", fb->len);
+                    client.write((const uint8_t*)hdr, hlen);
+                    client.write(fb->buf, fb->len);
+                    client.print("\r\n");
+                    camera::returnFrame(fb);
+                }
+            }
+            client.stop();
+            Serial.println("[STREAM] client disconnected");
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -66,9 +102,10 @@ void setup() {
 
     xTaskCreatePinnedToCore(captureLoop, "capture", 8192, nullptr, 5, nullptr, 0);
     xTaskCreatePinnedToCore(serverLoop,  "server",  8192, nullptr, 3, nullptr, 1);
+    xTaskCreatePinnedToCore(mjpegTask,   "mjpeg",   8192, nullptr, 4, nullptr, 1);
 
-    Serial.printf("[BOOT] Web UI:    http://%s/\n",      WiFi.localIP().toString().c_str());
-    Serial.printf("[BOOT] Stream:    http://%s/stream\n", WiFi.localIP().toString().c_str());
+    Serial.printf("[BOOT] Web UI:    http://%s/\n",       WiFi.localIP().toString().c_str());
+    Serial.printf("[BOOT] Stream:    http://%s:81\n",     WiFi.localIP().toString().c_str());
     Serial.printf("[BOOT] Status:    http://%s/status\n", WiFi.localIP().toString().c_str());
 }
 
