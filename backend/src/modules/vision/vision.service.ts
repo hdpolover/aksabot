@@ -60,14 +60,17 @@ export class VisionService {
    * Returns unknown=true if no profiles exist or distance exceeds MATCH_THRESHOLD.
    */
   async findBestMatch(userId: string, embedding: number[]): Promise<IdentityResult> {
+    // Embed vector literal directly in SQL — values come from our ONNX model, not user input.
+    // pgvector accepts '[...]' notation; parameterizing it as $1::float8[] fails because
+    // PostgreSQL text→float8[] casting expects '{...}' not '[...]'.
     const vectorLiteral = `[${embedding.join(',')}]`;
     const rows = await this.dataSource.query<{ id: string; name: string; distance: string }[]>(
-      `SELECT id, name, (embedding::vector <=> $1::float8[]::vector) AS distance
+      `SELECT id, name, (embedding::vector <=> '${vectorLiteral}'::vector) AS distance
        FROM face_profiles
-       WHERE user_id = $2
+       WHERE user_id = $1
        ORDER BY distance
        LIMIT 1`,
-      [vectorLiteral, userId],
+      [userId],
     );
 
     if (rows.length === 0) {
