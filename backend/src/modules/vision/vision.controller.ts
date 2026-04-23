@@ -55,7 +55,7 @@ export class VisionController {
     return { ok: true, message: 'Capture triggered — awaiting frames from camera' };
   }
 
-  /** Upload a photo and get back who it matches (or unknown). */
+  /** Upload a photo — detects ALL faces and returns the best match. */
   @Post('recognize')
   @UseInterceptors(FileInterceptor('photo'))
   async recognize(
@@ -63,10 +63,7 @@ export class VisionController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('No photo uploaded');
-    const embedding = await this.visionService.detectAndEmbed(file.buffer);
-    if (!embedding) return { detected: false, name: null, confidence: 0, unknown: true };
-    const result = await this.visionService.findBestMatch(req.user.userId, embedding);
-    return { detected: true, ...result };
+    return this.visionService.recognizeAll(req.user.userId, file.buffer);
   }
 
   @Get('profiles')

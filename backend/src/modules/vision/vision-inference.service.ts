@@ -4,10 +4,9 @@ import sharp from 'sharp';
 import { join } from 'path';
 
 export interface DetectedFace {
-  box: [number, number, number, number]; // x1, y1, x2, y2 (original image coords)
+  box: [number, number, number, number]; // x1, y1, x2, y2 in original image coords
   score: number;
-  /** 5 facial landmarks: [left_eye, right_eye, nose, left_mouth, right_mouth] */
-  keypoints: [number, number][];
+  keypoints: [number, number][]; // 5 landmarks: left_eye, right_eye, nose, left_mouth, right_mouth
 }
 
 @Injectable()
@@ -23,18 +22,19 @@ export class VisionInferenceService implements OnModuleInit {
   private readonly STRIDES = [8, 16, 32];
   private readonly NUM_ANCHORS = 2;
   private readonly DET_SIZE = 640;
-  private readonly SCORE_THRESH = 0.3;
+  private readonly SCORE_THRESH = 0.45;
+  /** Minimum face width in original image pixels — skip tiny/distant faces. */
+  private readonly MIN_FACE_PX = 48;
 
-  // buffalo_l det_10g.onnx numeric output node names (verified by shape):
-  // stride 8:  448=score, 451=bbox, 454=kps
-  // stride 16: 471=score, 474=bbox, 477=kps
-  // stride 32: 494=score, 497=bbox, 500=kps
+  // buffalo_l det_10g.onnx numeric output node names (verified by shape analysis):
+  // stride 8:  448=score [N,1], 451=bbox [N,4], 454=kps [N,10]
+  // stride 16: 471=score,       474=bbox,        477=kps
+  // stride 32: 494=score,       497=bbox,        500=kps
   private readonly SCORE_KEYS = ['448', '471', '494'];
   private readonly BBOX_KEYS  = ['451', '474', '497'];
   private readonly KPS_KEYS   = ['454', '477', '500'];
 
-  // ArcFace standard 112×112 template — where the 5 landmarks should land after alignment.
-  // Order: left_eye, right_eye, nose_tip, left_mouth, right_mouth
+  // ArcFace 112×112 standard template — where the 5 landmarks land after alignment.
   private readonly ARCFACE_TEMPLATE: [number, number][] = [
     [38.2946, 51.6963],
     [73.5318, 51.5014],
@@ -59,12 +59,10 @@ export class VisionInferenceService implements OnModuleInit {
     }
   }
 
-  /** Detect the highest-scoring face + 5-point landmarks. Returns null if no face found. */
-  async detect(jpegBuffer: Buffer): Promise<DetectedFace | null> {
-    if (!this.detSession) return null;
+  /** Detect ALL faces above threshold, sorted by score descending. */
+  async detectAll(jpegBuffer: Buffer): Promise<DetectedFace[]> {
+    if (!this.detSession) return [];
 
-    // Get original size BEFORE resize — after resize, info.width/height are always DET_SIZE,
-    // which makes scaleX=scaleY=1.0 and leaves coordinates stuck in 640x640 space.
     const origMeta = await sharp(jpegBuffer).metadata();
     const origW = origMeta.width ?? this.DET_SIZE;
     const origH = origMeta.height ?? this.DET_SIZE;
@@ -80,72 +78,98 @@ export class VisionInferenceService implements OnModuleInit {
 
     const scaleX = origW / this.DET_SIZE;
     const scaleY = origH / this.DET_SIZE;
-    return this.parseBestDetection(outputs, scaleX, scaleY);
+    return this.parseAllDetections(outputs, scaleX, scaleY);
+  }
+
+  /** Convenience: detect single highest-scoring face (used by enroll). */
+  async detect(jpegBuffer: Buffer): Promise<DetectedFace | null> {
+    const all = await this.detectAll(jpegBuffer);
+    return all[0] ?? null;
   }
 
   /**
-   * Align face to ArcFace 112×112 template using the 5-point keypoints, then embed.
-   * Alignment eliminates pose/scale variation — dramatically improves recognition accuracy.
+   * Align face to ArcFace 112×112 template using 5-point similarity transform,
+   * then run ArcFace R50 to produce a 512-dim L2-normalised embedding.
    */
   async embed(jpegBuffer: Buffer, detection: DetectedFace): Promise<number[] | null> {
     if (!this.recSession) return null;
 
-    let faceData: Buffer;
-
-    if (detection.keypoints.length === 5) {
-      this.logger.debug(`Aligning face with kps: ${JSON.stringify(detection.keypoints.map(p => p.map(v => Math.round(v))))}`);
-      faceData = await this.alignFace(jpegBuffer, detection.keypoints);
-    } else {
-      // Fallback: simple crop (no keypoints available)
-      faceData = await this.cropFace(jpegBuffer, detection.box);
-    }
+    const faceData = detection.keypoints.length === 5
+      ? await this.alignFace(jpegBuffer, detection.keypoints)
+      : await this.cropFace(jpegBuffer, detection.box);
 
     const nchw = this.toNchw(faceData, 112, 112);
     const inputTensor = new ort.Tensor('float32', nchw, [1, 3, 112, 112]);
     const outputs = await this.recSession.run({ 'input.1': inputTensor });
-    const outputKey = Object.keys(outputs)[0];
-    return this.l2Normalize(outputs[outputKey].data as Float32Array);
+    return this.l2Normalize(outputs[Object.keys(outputs)[0]].data as Float32Array);
   }
 
   /**
-   * Align face to the ArcFace 112×112 standard template using a similarity transform
-   * computed from the 5 detected landmarks. This is what ArcFace was trained to receive.
-   *
-   * For each output pixel (ox, oy), the inverse transform maps back to source image coords.
-   * Nearest-neighbour sampling is fast and sufficient for ArcFace.
+   * Produce a 48×48 JPEG thumbnail from the aligned face (for profile display).
+   * Returns null if alignment fails.
+   */
+  async thumbnail(jpegBuffer: Buffer, detection: DetectedFace): Promise<Buffer | null> {
+    try {
+      const aligned = detection.keypoints.length === 5
+        ? await this.alignFace(jpegBuffer, detection.keypoints)
+        : await this.cropFace(jpegBuffer, detection.box);
+
+      return sharp(aligned, { raw: { width: 112, height: 112, channels: 3 } })
+        .resize(48, 48)
+        .jpeg({ quality: 60 })
+        .toBuffer();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Warp face to ArcFace 112×112 standard template using bilinear interpolation.
+   * Computes similarity transform (Umeyama): detected landmarks → template positions.
    */
   private async alignFace(jpegBuffer: Buffer, keypoints: [number, number][]): Promise<Buffer> {
-    // Compute forward transform: landmark_coords → template_coords
     const { a, b, tx, ty } = this.similarityTransform(keypoints, this.ARCFACE_TEMPLATE);
 
-    // Invert: template_coords → landmark_coords (for reverse-mapping each output pixel)
-    // Forward: [dx,dy] = [[a,-b],[b,a]] * [sx,sy] + [tx,ty]
-    // Inverse: [sx,sy] = [[a,b],[-b,a]] / det * ([dx,dy] - [tx,ty])
+    // Inverse transform: template coords → source image coords
     const det = a * a + b * b;
     const ai = a / det, bi = b / det;
     const txi = -ai * tx - bi * ty;
     const tyi =  bi * tx - ai * ty;
 
-    const { data: src, info } = await sharp(jpegBuffer)
-      .raw()
-      .toBuffer({ resolveWithObject: true });
+    const { data: src, info } = await sharp(jpegBuffer).raw().toBuffer({ resolveWithObject: true });
     const W = info.width, H = info.height, C = info.channels;
 
     const out = Buffer.alloc(112 * 112 * 3, 0);
     for (let oy = 0; oy < 112; oy++) {
       for (let ox = 0; ox < 112; ox++) {
-        const ix = Math.round(ai * ox + bi * oy + txi);
-        const iy = Math.round(-bi * ox + ai * oy + tyi);
-        if (ix < 0 || ix >= W || iy < 0 || iy >= H) continue;
-        const si = (iy * W + ix) * C;
+        const fx = ai * ox + bi * oy + txi;
+        const fy = -bi * ox + ai * oy + tyi;
+        const [r, g, b_] = this.sampleBilinear(src, W, H, C, fx, fy);
         const di = (oy * 112 + ox) * 3;
-        out[di] = src[si]; out[di + 1] = src[si + 1]; out[di + 2] = src[si + 2];
+        out[di] = r; out[di + 1] = g; out[di + 2] = b_;
       }
     }
     return out;
   }
 
-  /** Fallback: simple crop + resize when keypoints are unavailable. */
+  /** Bilinear sample at fractional coords (fx, fy). Returns [R, G, B]. */
+  private sampleBilinear(
+    src: Buffer, W: number, H: number, C: number, fx: number, fy: number,
+  ): [number, number, number] {
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    if (x0 < 0 || y0 < 0 || x0 >= W || y0 >= H) return [0, 0, 0];
+    const x1 = Math.min(x0 + 1, W - 1), y1 = Math.min(y0 + 1, H - 1);
+    const dx = fx - x0, dy = fy - y0;
+    const s = (y: number, x: number, c: number) => src[(y * W + x) * C + c];
+    return [0, 1, 2].map(c =>
+      s(y0, x0, c) * (1 - dx) * (1 - dy) +
+      s(y0, x1, c) * dx * (1 - dy) +
+      s(y1, x0, c) * (1 - dx) * dy +
+      s(y1, x1, c) * dx * dy,
+    ) as [number, number, number];
+  }
+
+  /** Fallback: simple crop + resize when keypoints unavailable. */
   private async cropFace(jpegBuffer: Buffer, box: [number, number, number, number]): Promise<Buffer> {
     const meta = await sharp(jpegBuffer).metadata();
     const W = meta.width ?? this.DET_SIZE, H = meta.height ?? this.DET_SIZE;
@@ -162,9 +186,8 @@ export class VisionInferenceService implements OnModuleInit {
   }
 
   /**
-   * Compute similarity transform (uniform scale + rotation + translation) from src → dst.
+   * Similarity transform via least-squares (Umeyama).
    * Returns [a, b, tx, ty] for: [dx,dy] = [[a,-b],[b,a]] * [sx,sy] + [tx,ty]
-   * Uses least-squares over all N point pairs (Umeyama-style, rotation+scale only).
    */
   private similarityTransform(
     src: [number, number][],
@@ -189,7 +212,7 @@ export class VisionInferenceService implements OnModuleInit {
 
   /**
    * Convert interleaved RGB Buffer to BGR NCHW Float32Array.
-   * InsightFace models (SCRFD + ArcFace) expect BGR channel order.
+   * InsightFace models expect BGR channel order, mean=127.5, std=128.
    */
   toNchw(buf: Buffer, width: number, height: number): Float32Array {
     const pixels = width * height;
@@ -210,16 +233,15 @@ export class VisionInferenceService implements OnModuleInit {
   }
 
   /**
-   * Parse SCRFD outputs, returning the highest-scoring face with 5-point keypoints.
-   * Bbox: distances [left, top, right, bottom] from anchor center, scaled by stride.
-   * Kps:  offsets [Δx, Δy] × 5 from anchor center, scaled by stride.
+   * Parse SCRFD outputs → all DetectedFace entries above threshold,
+   * filtered by minimum face size, sorted by score descending.
    */
-  private parseBestDetection(
+  private parseAllDetections(
     outputs: Record<string, ort.Tensor>,
     scaleX: number,
     scaleY: number,
-  ): DetectedFace | null {
-    let best: DetectedFace | null = null;
+  ): DetectedFace[] {
+    const faces: DetectedFace[] = [];
 
     for (let si = 0; si < this.STRIDES.length; si++) {
       const stride = this.STRIDES[si];
@@ -233,8 +255,7 @@ export class VisionInferenceService implements OnModuleInit {
       if (!scores || !boxes) continue;
 
       for (let i = 0; i < total; i++) {
-        const score = scores[i];
-        if (score < this.SCORE_THRESH) continue;
+        if (scores[i] < this.SCORE_THRESH) continue;
 
         const anchorIdx = Math.floor(i / this.NUM_ANCHORS);
         const cx = ((anchorIdx % fW) + 0.5) * stride;
@@ -244,6 +265,9 @@ export class VisionInferenceService implements OnModuleInit {
         const y1 = (cy - boxes[i * 4 + 1] * stride) * scaleY;
         const x2 = (cx + boxes[i * 4 + 2] * stride) * scaleX;
         const y2 = (cy + boxes[i * 4 + 3] * stride) * scaleY;
+
+        // Skip faces too small to get a reliable embedding
+        if ((x2 - x1) < this.MIN_FACE_PX) continue;
 
         const keypoints: [number, number][] = [];
         if (kps) {
@@ -255,12 +279,10 @@ export class VisionInferenceService implements OnModuleInit {
           }
         }
 
-        if (!best || score > best.score) {
-          best = { box: [x1, y1, x2, y2], score, keypoints };
-        }
+        faces.push({ box: [x1, y1, x2, y2], score: scores[i], keypoints });
       }
     }
 
-    return best;
+    return faces.sort((a, b) => b.score - a.score);
   }
 }

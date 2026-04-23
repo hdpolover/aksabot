@@ -458,7 +458,9 @@ async function loadProfiles() {
     }
     list.innerHTML = profiles.map(p => `
       <div class="profile-row" id="pr-${p.id}">
-        <div class="avatar">${esc(p.name[0].toUpperCase())}</div>
+        ${p.thumbnailUrl
+          ? `<img src="${p.thumbnailUrl}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0">`
+          : `<div class="avatar">${esc(p.name[0].toUpperCase())}</div>`}
         <div style="flex:1">
           <div class="profile-name">${esc(p.name)}</div>
           <div class="profile-meta">Enrolled ${new Date(p.createdAt).toLocaleString()}</div>

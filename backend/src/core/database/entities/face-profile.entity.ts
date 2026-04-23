@@ -31,7 +31,8 @@ export class FaceProfile {
   @Column('float8', { array: true })
   embedding: number[];
 
-  @Column({ name: 'thumbnail_url', type: 'varchar', nullable: true, length: 500 })
+  // Base64 data URL of 48x48 aligned face crop — stored inline for simplicity
+  @Column({ name: 'thumbnail_url', type: 'text', nullable: true })
   thumbnailUrl: string | null;
 
   @CreateDateColumn({ name: 'created_at' })

@@ -9,11 +9,26 @@ export interface PendingEnrollment {
   frames: Buffer[];
 }
 
+interface FrameVote {
+  name: string | null;
+  unknown: boolean;
+  confidence: number;
+}
+
+/** Sliding window size for temporal smoothing. */
+const VOTE_WINDOW = 5;
+/** Minimum votes in window for identity to be emitted. */
+const VOTE_THRESHOLD = 3;
+
 @Injectable()
 export class VisionGatewayHandler {
   private readonly logger = new Logger(VisionGatewayHandler.name);
   private sendFn: ((deviceId: string, event: string, data: any) => void) | null = null;
   private pendingEnrollments = new Map<string, PendingEnrollment>();
+
+  // Per-camera sliding window of last VOTE_WINDOW recognition results.
+  // Only emit face:identity when VOTE_THRESHOLD consecutive frames agree.
+  private voteWindows = new Map<string, FrameVote[]>();
 
   constructor(
     private readonly visionService: VisionService,
@@ -25,7 +40,7 @@ export class VisionGatewayHandler {
     this.sendFn = fn;
   }
 
-  /** Called by AudioGateway when a vision:frame binary message arrives. */
+  /** Called by AudioGateway when a vision:frame binary message arrives from ESP32-CAM. */
   async handleFrame(cameraDeviceId: string, jpegBuffer: Buffer): Promise<void> {
     const device = await this.devicesService.findByIdInternal(cameraDeviceId);
     if (!device) return;
@@ -34,33 +49,67 @@ export class VisionGatewayHandler {
     const pairedDeviceId = (device.settingsJson as any)?.pairedDeviceId as string | undefined;
 
     const embedding = await this.visionService.detectAndEmbed(jpegBuffer);
-    if (!embedding) {
-      if (pairedDeviceId) {
-        this.sessions.setCurrentIdentity(pairedDeviceId, null);
-      }
-      return;
-    }
 
-    const identity = await this.visionService.findBestMatch(userId, embedding);
+    const vote: FrameVote = embedding
+      ? await this.visionService.findBestMatch(userId, embedding).then(r => ({
+          name: r.name, unknown: r.unknown, confidence: r.confidence,
+        }))
+      : { name: null, unknown: true, confidence: 0 };
+
+    // Temporal smoothing: slide window, check majority
+    const window = this.voteWindows.get(cameraDeviceId) ?? [];
+    window.push(vote);
+    if (window.length > VOTE_WINDOW) window.shift();
+    this.voteWindows.set(cameraDeviceId, window);
+
+    const agreed = this.majoritySmoother(window);
+    if (!agreed) return; // window hasn't converged yet
+
     this.logger.debug(
-      `Face match: ${identity.unknown ? 'unknown' : identity.name} (conf=${identity.confidence.toFixed(2)})`,
+      `Face identity (${window.length}-frame vote): ${agreed.unknown ? 'unknown' : agreed.name}`,
     );
 
     if (pairedDeviceId) {
       this.sessions.setCurrentIdentity(pairedDeviceId, {
-        name: identity.name,
-        unknown: identity.unknown,
+        name: agreed.name,
+        unknown: agreed.unknown,
       });
-
       this.sendFn?.(pairedDeviceId, 'face:identity', {
-        name: identity.name,
-        confidence: identity.confidence,
-        unknown: identity.unknown,
+        name: agreed.name,
+        confidence: agreed.confidence,
+        unknown: agreed.unknown,
       });
     }
   }
 
-  /** Called by AudioGateway when vision:enroll_frames arrives (8 frames from live capture). */
+  /**
+   * Returns the agreed identity if VOTE_THRESHOLD or more frames in the window
+   * agree on the same name (including unknown). Returns null if no consensus yet.
+   * Confidence is the average across agreeing frames.
+   */
+  private majoritySmoother(window: FrameVote[]): FrameVote | null {
+    if (window.length < VOTE_WINDOW) return null;
+
+    const counts = new Map<string | null, { count: number; totalConf: number }>();
+    for (const vote of window) {
+      const key = vote.unknown ? null : vote.name;
+      const entry = counts.get(key) ?? { count: 0, totalConf: 0 };
+      counts.set(key, { count: entry.count + 1, totalConf: entry.totalConf + vote.confidence });
+    }
+
+    for (const [name, { count, totalConf }] of counts) {
+      if (count >= VOTE_THRESHOLD) {
+        return {
+          name,
+          unknown: name === null,
+          confidence: totalConf / count,
+        };
+      }
+    }
+    return null;
+  }
+
+  /** Called by AudioGateway when vision:enroll_frames arrives from ESP32-CAM capture. */
   async handleEnrollFrames(cameraDeviceId: string, jpegFrames: Buffer[]): Promise<void> {
     const pending = this.pendingEnrollments.get(cameraDeviceId);
     if (!pending) {

@@ -10,9 +10,8 @@ export interface IdentityResult {
   unknown: boolean;
 }
 
-// Threshold tuned for aligned ArcFace embeddings (5-point face alignment applied).
-// Aligned same-person: typically 0.05-0.20. Different person: typically 0.45-0.90.
-// 0.28 gives comfortable margin between the two distributions.
+// Threshold for aligned ArcFace embeddings.
+// Same-person (aligned): ~0.05-0.20. Different person: ~0.45-0.90.
 const MATCH_THRESHOLD = 0.28;
 
 @Injectable()
@@ -27,50 +26,77 @@ export class VisionService {
   ) {}
 
   /**
-   * Enroll a person by running inference on one or more JPEG frames.
-   * If multiple frames given, uses the one with the highest detection score.
-   * Saves the resulting embedding as a face profile.
+   * Enroll a person: detect + embed each frame, average all embeddings,
+   * re-normalise, and save. Also stores a 48×48 thumbnail from the first valid frame.
    */
   async enroll(userId: string, name: string, jpegBuffers: Buffer[]): Promise<FaceProfile> {
     const embeddings: number[][] = [];
+    let thumbnailBuf: Buffer | null = null;
 
     for (const buf of jpegBuffers) {
       const detection = await this.inference.detect(buf);
       if (!detection) continue;
       const embedding = await this.inference.embed(buf, detection);
-      if (embedding) embeddings.push(embedding);
+      if (!embedding) continue;
+      embeddings.push(embedding);
+      if (!thumbnailBuf) {
+        thumbnailBuf = await this.inference.thumbnail(buf, detection);
+      }
     }
 
     if (embeddings.length === 0) {
       throw new Error('No face detected in any of the provided frames');
     }
 
-    // Average all embeddings then re-L2-normalise → more robust than single-best
+    // Average all embeddings then re-L2-normalise
     const dim = embeddings[0].length;
     const mean = new Array<number>(dim).fill(0);
-    for (const emb of embeddings) {
-      for (let i = 0; i < dim; i++) mean[i] += emb[i];
-    }
+    for (const emb of embeddings) for (let i = 0; i < dim; i++) mean[i] += emb[i];
     for (let i = 0; i < dim; i++) mean[i] /= embeddings.length;
     const norm = Math.sqrt(mean.reduce((s, v) => s + v * v, 0));
     const averaged = norm > 0 ? mean.map(v => v / norm) : mean;
 
-    this.logger.log(`Enrolled ${name}: averaged ${embeddings.length}/${jpegBuffers.length} frames`);
+    const thumbnailUrl = thumbnailBuf
+      ? 'data:image/jpeg;base64,' + thumbnailBuf.toString('base64')
+      : null;
 
-    const profile = this.profileRepo.create({ userId, name, embedding: averaged });
+    this.logger.log(`Enrolled ${name}: averaged ${embeddings.length}/${jpegBuffers.length} frames`);
+    const profile = this.profileRepo.create({ userId, name, embedding: averaged, thumbnailUrl });
     const saved = await this.profileRepo.save(profile);
     this.logger.log(`Enrolled face for user ${userId}: ${name} (id=${saved.id})`);
     return saved;
   }
 
   /**
-   * Find the best matching profile for a given embedding using pgvector cosine similarity.
-   * Returns unknown=true if no profiles exist or distance exceeds MATCH_THRESHOLD.
+   * Detect ALL faces in the image, embed each, and return the best match
+   * across all faces × all enrolled profiles. Handles multi-person photos.
+   */
+  async recognizeAll(userId: string, jpegBuffer: Buffer): Promise<IdentityResult & { detected: boolean }> {
+    const faces = await this.inference.detectAll(jpegBuffer);
+    if (faces.length === 0) return { detected: false, name: null, confidence: 0, unknown: true };
+
+    let bestMatch: (IdentityResult & { detected: true }) | null = null;
+
+    for (const face of faces) {
+      const embedding = await this.inference.embed(jpegBuffer, face);
+      if (!embedding) continue;
+      const result = await this.findBestMatch(userId, embedding);
+      if (!result.unknown) {
+        if (!bestMatch || result.confidence > bestMatch.confidence) {
+          bestMatch = { detected: true, ...result };
+        }
+      }
+    }
+
+    if (bestMatch) return bestMatch;
+    // No face matched — return unknown with best confidence seen
+    return { detected: true, name: null, confidence: 0, unknown: true };
+  }
+
+  /**
+   * Find the best matching profile for a single embedding via pgvector cosine similarity.
    */
   async findBestMatch(userId: string, embedding: number[]): Promise<IdentityResult> {
-    // Embed vector literal directly in SQL — values come from our ONNX model, not user input.
-    // pgvector accepts '[...]' notation; parameterizing it as $1::float8[] fails because
-    // PostgreSQL text→float8[] casting expects '{...}' not '[...]'.
     const vectorLiteral = `[${embedding.join(',')}]`;
     const rows = await this.dataSource.query<{ id: string; name: string; distance: string }[]>(
       `SELECT id, name, (embedding::vector <=> '${vectorLiteral}'::vector) AS distance
@@ -81,19 +107,15 @@ export class VisionService {
       [userId],
     );
 
-    if (rows.length === 0) {
-      return { name: null, confidence: 0, unknown: true };
-    }
+    if (rows.length === 0) return { name: null, confidence: 0, unknown: true };
 
     const distance = parseFloat(rows[0].distance);
-    this.logger.debug(`Distance to "${rows[0].name}": ${distance.toFixed(4)} (threshold=${MATCH_THRESHOLD})`);
+    this.logger.debug(`Match "${rows[0].name}": d=${distance.toFixed(4)} threshold=${MATCH_THRESHOLD}`);
     const confidence = Math.max(0, 1 - Math.pow(distance / MATCH_THRESHOLD, 2));
 
-    if (distance >= MATCH_THRESHOLD) {
-      return { name: null, confidence, unknown: true };
-    }
-
-    return { name: rows[0].name, confidence, unknown: false };
+    return distance >= MATCH_THRESHOLD
+      ? { name: null, confidence, unknown: true }
+      : { name: rows[0].name, confidence, unknown: false };
   }
 
   async getProfiles(userId: string): Promise<FaceProfile[]> {
@@ -106,7 +128,7 @@ export class VisionService {
     await this.profileRepo.delete(profileId);
   }
 
-  /** Detect face and compute embedding from a single JPEG buffer. Returns null if no face found. */
+  /** Used by VisionGatewayHandler for the live ESP32-CAM stream. */
   async detectAndEmbed(jpegBuffer: Buffer): Promise<number[] | null> {
     const detection = await this.inference.detect(jpegBuffer);
     if (!detection) return null;

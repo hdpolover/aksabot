@@ -8,6 +8,8 @@ import { FaceProfile } from '../../core/database/entities/face-profile.entity';
 const mockInference = {
   detect: jest.fn(),
   embed: jest.fn(),
+  thumbnail: jest.fn().mockResolvedValue(null),
+  detectAll: jest.fn(),
 };
 
 const mockRepo = {
