@@ -47,5 +47,9 @@ firmwares/
 
 # FVM Version Cache
 .fvm/firmware/include/credentials.h
+
+# ESP32-CAM firmware
+firmware-cam/include/credentials.h
+firmware-cam/.pio/
 2.8inch_IPS_ESP32-S3_ILI9341V_ES3C28P_ES3N28P_V1.0/
 .fvm/
