@@ -2423,18 +2423,12 @@ export class AudioGateway
    * so we reverse-lookup: find device where settingsJson.pairedDeviceId == aksabotDeviceId.
    */
   private sendVisionEvent(aksabotDeviceId: string, event: 'vision:start' | 'vision:stop'): void {
-    // Walk all connected devices looking for one whose pairedDeviceId == aksabotDeviceId
-    for (const [cameraId] of this['deviceToSocket'] as Map<string, unknown>) {
-      const session = this.sessions.get(cameraId);
-      if (!session) continue;
-      // The camera session doesn't store pairedDeviceId — we rely on the socket being connected
-      // and the VisionGatewayHandler knowing the pairing via device settingsJson.
-      // Simplest approach: broadcast vision:start to any device whose WS is connected
-      // and is NOT the current aksabot device. VisionGatewayHandler will ignore it
-      // if the device isn't a camera or isn't paired.
-      if (cameraId !== aksabotDeviceId) {
-        this.sendToDevice(cameraId, event, {});
-      }
+    const connected = [...(this['deviceToSocket'] as Map<string, unknown>).keys()];
+    this.logger.debug(`sendVisionEvent(${event}): ${connected.length} devices connected: [${connected.join(', ')}]`);
+    for (const cameraId of connected) {
+      if (cameraId === aksabotDeviceId) continue;
+      this.logger.log(`Sending ${event} to camera device ${cameraId}`);
+      this.sendToDevice(cameraId, event, {});
     }
   }
 
