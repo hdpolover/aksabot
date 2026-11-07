@@ -120,28 +120,35 @@ void boot_screen::showHardwareCheck(const char* component, uint8_t status) {
     }
 }
 
-void boot_screen::showProvisioningPrompt() {
+void boot_screen::showProvisioningPrompt(const char* apName, const char* apIp) {
     clearScreen();
 
-    // BLE icon (compact Bluetooth shape)
-    int iconY = 55;
-    int s = 10;
-    tft.drawLine(CX, iconY, CX + s, iconY + s*2, CYAN);
-    tft.drawLine(CX + s, iconY + s*2, CX - s, iconY + s*4, CYAN);
-    tft.drawLine(CX - s, iconY + s*4, CX + s, iconY + s*6, CYAN);
-    tft.drawLine(CX + s, iconY + s*6, CX, iconY + s*8, CYAN);
-    tft.drawLine(CX, iconY, CX, iconY + s*8, CYAN);
-    tft.drawLine(CX, iconY, CX - s, iconY + s*2, CYAN);
-    tft.drawLine(CX - s, iconY + s*2, CX, iconY + s*4, CYAN);
-    tft.drawLine(CX, iconY + s*4, CX - s, iconY + s*6, CYAN);
-    tft.drawLine(CX - s, iconY + s*6, CX, iconY + s*8, CYAN);
+    // WiFi AP icon
+    int iconY = 30;
+    tft.drawCircle(CX, iconY + 30, 25, CYAN);
+    tft.drawCircle(CX, iconY + 30, 17, CYAN);
+    tft.drawCircle(CX, iconY + 30, 9, CYAN);
+    tft.fillCircle(CX, iconY + 30, 3, CYAN);
 
-    drawCentered("Setup Required", 155, WHITE);
-    drawSmall("Open the Aksabot app", 185, DIM);
-    drawSmall("to connect this device", 205, DIM);
+    drawCentered("Setup Required", 80, WHITE);
 
-    tft.fillCircle(CX, 245, 3, CYAN);
-    drawSmall("Waiting for connection...", 260, DIM);
+    // Instructions
+    drawSmall("1. Connect your phone to WiFi:", 110, DIM);
+
+    // AP name (highlighted)
+    drawCentered(apName, 132, CYAN);
+
+    drawSmall("2. Open the Aksabot app", 160, DIM);
+    drawSmall("   and tap 'Add Device'", 178, DIM);
+
+    // IP info
+    tft.drawFastHLine(30, 205, LCD_WIDTH - 60, DIM);
+    drawSmall("Device IP:", 215, DIM);
+    drawCentered(apIp, 235, CYAN);
+
+    // Waiting indicator
+    tft.fillCircle(CX, 270, 3, CYAN);
+    drawSmall("Waiting for setup...", 285, DIM);
 }
 
 void boot_screen::showProvisioningStatus(const char* status) {

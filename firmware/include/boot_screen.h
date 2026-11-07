@@ -17,8 +17,8 @@ void showSplash(const char* version);
 /// status: 0=checking, 1=ok, 2=failed, 3=skipped
 void showHardwareCheck(const char* component, uint8_t status);
 
-/// Show BLE provisioning prompt: "Open Aksabot app to set up".
-void showProvisioningPrompt();
+/// Show provisioning prompt with AP name and password.
+void showProvisioningPrompt(const char* apName, const char* apIp);
 
 /// Update provisioning status (e.g., "Phone connected", "Receiving WiFi...").
 void showProvisioningStatus(const char* status);

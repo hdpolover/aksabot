@@ -22,6 +22,7 @@
 #include "power_manager.h"
 #include "ble_manager.h"
 #include "boot_screen.h"
+#include "wifi_provision.h"
 
 #define FIRMWARE_VERSION "1.0.0"
 
@@ -500,25 +501,39 @@ void setup() {
 
     delay(2000);  // Let user see the hardware check results
 
-    // ── 5. BLE provisioning gate ───────────────────────────
-    // Skip if NVS has credentials OR compile-time credentials exist.
-    // wifi_manager::init() falls back to credentials.h when NVS is empty.
+    // ── 5. Provisioning gate ──────────────────────────────
+    // If no WiFi credentials in NVS and no compile-time creds,
+    // start a WiFi AP hotspot so the phone can send credentials.
     bool hasNvsCreds = nvs_store::hasWifiCredentials();
     bool hasCompileCreds = (strlen(WIFI_SSID) > 0);
 
     if (!hasNvsCreds && !hasCompileCreds) {
-        Serial.println("[Main] No WiFi credentials — entering BLE provisioning mode");
-        boot_screen::showProvisioningPrompt();
-        ble_manager::waitForProvisioning(0);  // blocks until creds arrive via BLE
+        Serial.println("[Main] No WiFi credentials — starting AP provisioning");
+
+        // Generate AP name from MAC suffix
+        char apName[32];
+        String mac = WiFi.macAddress();
+        String suffix = mac.substring(mac.length() - 5);
+        suffix.replace(":", "");
+        snprintf(apName, sizeof(apName), "Aksabot-%s", suffix.c_str());
+
+        wifi_provision::start(apName);
+        boot_screen::showProvisioningPrompt(apName, wifi_provision::getApIp());
+
+        // Block until phone sends credentials via HTTP
+        wifi_provision::waitForProvisioning(0);
         boot_screen::showProvisioningStatus("Credentials received!");
-        delay(500);
+        delay(800);
+
+        // Stop AP — we'll switch to STA mode next
+        wifi_provision::stop();
     } else if (hasNvsCreds) {
         Serial.println("[Main] Using NVS WiFi credentials");
     } else {
         Serial.println("[Main] Using compile-time WiFi credentials");
     }
 
-    // ── 6. WiFi connect ────────────────────────────────────
+    // ── 6. WiFi connect (STA mode) ────────────────────────
     char ssidBuf[64] = {};
     if (nvs_store::getWifiSsid(ssidBuf, sizeof(ssidBuf)) && strlen(ssidBuf) > 0) {
         boot_screen::showConnecting(ssidBuf);
